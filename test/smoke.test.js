@@ -68,6 +68,8 @@ const MODULES = [
   "../src/lp/close-trade.js",
   "../src/lp/range.js",
   "../src/lp/pool-lookup.js",
+  "../src/lp/open-split.js",
+  "../src/lp/open-trade.js",
 ];
 
 test("every module loads without import errors", async () => {
