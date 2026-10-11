@@ -20,6 +20,7 @@ const {
   findTradeByPosition,
   setTradeExit,
   updateTradeProgress,
+  updateTradeMeta,
   setTradeDepositUsd,
   settleTradeIfDone,
   tryLockTrade,
@@ -101,6 +102,34 @@ test("setTradeExit merges per key and trail resets arming", () => {
   assert.equal(cur.trailArmed, false);
   assert.equal(cur.peakPnlPct, null);
   assert.deepEqual(cur.exit.sl, EXIT.sl);
+});
+
+test("createTrade returns the open trade that already owns a position", () => {
+  reset();
+  const a = newTrade(["P1"]);
+  const again = newTrade(["P1"], { origin: "auto" });
+  assert.equal(again.id, a.id);
+  assert.equal(listOpenTrades().length, 1);
+  assert.equal(getTrade(a.id).origin, "manual");
+});
+
+test("updateTradeMeta sets origin, exit, depositSol and resets arming on exit", () => {
+  reset();
+  const t = newTrade(["P1"], { origin: "external" });
+  updateTradeProgress(t.id, { peakPnlPct: 9, trailArmed: true });
+  updateTradeMeta(t.id, { depositSol: 0.7 });
+  let cur = getTrade(t.id);
+  assert.equal(cur.depositSol, 0.7);
+  assert.equal(cur.origin, "external");
+  assert.equal(cur.peakPnlPct, 9);
+  const exit = { ...structuredClone(EXIT), tp: { on: true, pct: 30 } };
+  updateTradeMeta(t.id, { origin: "auto", exit });
+  cur = getTrade(t.id);
+  assert.equal(cur.origin, "auto");
+  assert.deepEqual(cur.exit, exit);
+  assert.equal(cur.trailArmed, false);
+  assert.equal(cur.peakPnlPct, null);
+  assert.equal(updateTradeMeta(999, { origin: "auto" }), null);
 });
 
 test("settle waits for every leg", () => {

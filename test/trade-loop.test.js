@@ -22,6 +22,7 @@ const {
   tryLockTrade,
   unlockTrade,
 } = await import("../src/state/trades.js");
+const { setToggle } = await import("../src/state/settings.js");
 const { syncTrades, runTradeExits, tradeAwareClose, settleTradesForPositions } =
   await import("../src/exit/trade-loop.js");
 
@@ -70,7 +71,7 @@ function entry(pnlUsd) {
   return { pnlUsd, allTimeDeposits: { total: { usd: 100 } } };
 }
 
-function fakeDeps({ reread }) {
+function fakeDeps({ reread, closeResult = { success: true, failed: [], swapInfo: null } }) {
   const calls = { closeTrade: [], fetch: [] };
   const deps = {
     fetchPoolPnl: async (pool, opts) => {
@@ -79,7 +80,7 @@ function fakeDeps({ reread }) {
     },
     closeTrade: async (trade, opts) => {
       calls.closeTrade.push({ trade, opts });
-      return { success: true, failed: [], swapInfo: null };
+      return closeResult;
     },
   };
   return { deps, calls };
@@ -123,6 +124,7 @@ test("tp closes after confirming re-read", async () => {
   assert.equal(calls.fetch.length, 1);
   assert.equal(calls.fetch[0].pool, "PoolA");
   assert.equal(calls.fetch[0].opts.force, true);
+  assert.equal(calls.fetch[0].opts.strict, true);
   assert.equal(calls.closeTrade.length, 1);
   assert.equal(calls.closeTrade[0].trade.id, t.id);
   assert.equal(calls.closeTrade[0].opts.reason, "tp");
@@ -143,6 +145,19 @@ test("glitch is not acted on", async () => {
   // Peak dari bacaan yang tidak terkonfirmasi tidak disimpan (cegah trail palsu).
   assert.equal(getTrade(t.id).peakPnlPct, null);
   assert.equal(getTrade(t.id).trailArmed, false);
+});
+
+test("progress persists from the confirmed re-read, not the first read", async () => {
+  reset();
+  const t = newTrade(["PosA"]);
+  updateTradeProgress(t.id, { peakPnlPct: 10, trailArmed: false });
+  const { deps, calls } = fakeDeps({ reread: new Map([["PosA", entry(16)]]), closeResult: { success: false } });
+  await runTradeExits([live("PosA", 40)], { deps });
+  assert.equal(calls.closeTrade.length, 1);
+  assert.equal(calls.closeTrade[0].opts.reason, "tp");
+  const after = getTrade(t.id);
+  assert.equal(after.peakPnlPct, 16);
+  assert.equal(after.trailArmed, true);
 });
 
 test("failed or unknown re-read is not acted on", async () => {
@@ -259,6 +274,7 @@ test("locked trade skipped", async () => {
 
 test("tradeAwareClose routes multi-leg to closeTrade and one-leg to handleClose", async () => {
   reset();
+  setToggle("deterministicExit", true);
   const multi = newTrade(["PosA", "PosB"]);
   const single = newTrade(["PosC"]);
   const calls = { closeTrade: [], handleClose: [] };
@@ -294,4 +310,18 @@ test("tradeAwareClose routes multi-leg to closeTrade and one-leg to handleClose"
   } finally {
     unlockTrade(single.id);
   }
+});
+
+test("tradeAwareClose does nothing once deterministic exit is off", async () => {
+  reset();
+  newTrade(["PosC"]);
+  setToggle("deterministicExit", false);
+  let closes = 0;
+  const deps = {
+    closeTrade: async () => closes++,
+    handleClose: async () => closes++,
+  };
+  const res = await tradeAwareClose(live("PosC", 9), "trailing_tp", undefined, { deps });
+  assert.equal(res.success, false);
+  assert.equal(closes, 0);
 });

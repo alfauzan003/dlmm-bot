@@ -27,14 +27,14 @@ function reset() {
   fs.rmSync(process.env.DECISION_LOG_FILE, { force: true });
 }
 
-function newTrade(positions) {
+function newTrade(positions, origin = "manual") {
   for (const p of positions) trackPosition(p, "PoolA", "AAA-SOL", "MintA", null, "spot");
   const t = createTrade({
     pool: "PoolA",
     pair: "AAA-SOL",
     baseMint: "MintA",
     positions,
-    origin: "manual",
+    origin,
     exit: structuredClone(EXIT),
   });
   setTradeDepositUsd(t.id, 100);
@@ -63,6 +63,20 @@ function fakeDeps(overrides = {}) {
   };
   return { deps, calls };
 }
+
+test("auto trades let handleClose deactivate the pool; others do not", async () => {
+  for (const [origin, skip] of [
+    ["auto", false],
+    ["manual", true],
+    ["external", true],
+  ]) {
+    reset();
+    const t = newTrade(["A"], origin);
+    const { deps, calls } = fakeDeps();
+    await closeTrade(t, { reason: "tp", deps });
+    assert.equal(calls.handleClose[0].opts.skipDeactivate, skip, origin);
+  }
+});
 
 test("close settles and alerts once", async () => {
   reset();

@@ -256,7 +256,13 @@ export async function mainLoop() {
     syncTrades(positions, { wasTracked });
     const tradeIdByAddr = new Map();
     for (const t of listOpenTrades()) for (const addr of t.positions) tradeIdByAddr.set(addr, t.id);
-    const handledTradeIds = await runTradeExits(positions);
+    let handledTradeIds;
+    try {
+      handledTradeIds = await runTradeExits(positions);
+    } catch (err) {
+      log.error(`Trade exit error: ${err.message}`);
+      handledTradeIds = new Set();
+    }
     const positionsByAddr = new Map(positions.filter((p) => p.position).map((p) => [p.position, p]));
     const closeForTrade = (p, reason, opts) => tradeAwareClose(p, reason, opts, { positionsByAddr });
     const deterministic = isOn("deterministicExit");
@@ -320,7 +326,11 @@ export async function mainLoop() {
       } else if (trade && trade.positions.length > 1) {
         // Trade multi-leg: tutup seluruh trade; follow-up (fallback/re-entry) hanya untuk trade satu leg.
         handledTradeIds.add(trade.id);
-        await closeTrade(trade, { reason: exit.reason, swap: true, positionsByAddr });
+        try {
+          await closeTrade(trade, { reason: exit.reason, swap: true, positionsByAddr });
+        } catch (err) {
+          log.error(`${pairLabel}: close trade #${trade.id} error: ${err.message}`);
+        }
       } else if (exit.action === "close") {
         // OOR kiri spot: fallback konversi ke posisi token-only (close tanpa swap).
         let handled = false;

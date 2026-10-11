@@ -27,6 +27,11 @@ export function createTrade({
 }) {
   const state = readState();
   const trades = ensureTrades(state);
+  // Satu posisi hanya boleh milik satu trade terbuka: kembalikan trade yang ada.
+  const existing = Object.values(trades).find(
+    (t) => t && t.closed !== true && (positions || []).some((addr) => t.positions.includes(addr))
+  );
+  if (existing) return existing;
   const id = state.nextTradeId;
   state.nextTradeId = id + 1;
   const trade = {
@@ -90,6 +95,22 @@ export function setTradeExit(id, partialExit) {
     if (partialExit[key]) t.exit[key] = { ...t.exit[key], ...partialExit[key] };
   }
   if (partialExit.trail) {
+    t.trailArmed = false;
+    t.peakPnlPct = null;
+  }
+  writeState(state);
+  return t;
+}
+
+// Ubah metadata trade (origin, exit, depositSol). Exit baru me-reset peak & arming.
+export function updateTradeMeta(id, { origin, exit, depositSol } = {}) {
+  const state = readState();
+  const t = state.trades?.[String(id)];
+  if (!t) return null;
+  if (origin !== undefined) t.origin = origin;
+  if (depositSol !== undefined) t.depositSol = depositSol;
+  if (exit !== undefined) {
+    t.exit = exit;
     t.trailArmed = false;
     t.peakPnlPct = null;
   }

@@ -1,7 +1,7 @@
 import log from "../core/logger.js";
 import { fetchPoolPnl, usdPnlFromEntry } from "../meteora/positions.js";
 import { getTrackedPosition } from "../state/positions.js";
-import { exitPresetForNewTrade } from "../state/settings.js";
+import { exitPresetForNewTrade, isOn } from "../state/settings.js";
 import {
   createTrade,
   findTradeByPosition,
@@ -105,9 +105,8 @@ export async function runTradeExits(positions, { deps = {} } = {}) {
     if (!agg) continue;
 
     const first = evaluateTradeExit(trade, agg.pnlPct);
-    const progress = { peakPnlPct: first.peakPnlPct, trailArmed: first.trailArmed };
     if (!first.reason) {
-      updateTradeProgress(trade.id, progress);
+      updateTradeProgress(trade.id, { peakPnlPct: first.peakPnlPct, trailArmed: first.trailArmed });
       continue;
     }
 
@@ -126,7 +125,8 @@ export async function runTradeExits(positions, { deps = {} } = {}) {
       log.info(`${label}: ${first.reason} tidak terkonfirmasi (PnL ulang ${freshAgg.pnlPct.toFixed(2)}%) — tahan`);
       continue;
     }
-    updateTradeProgress(trade.id, progress);
+    // Progress hanya dari bacaan ulang yang terkonfirmasi.
+    updateTradeProgress(trade.id, { peakPnlPct: second.peakPnlPct, trailArmed: second.trailArmed });
 
     // closeTrade mengunci trade sendiri (busy bila sudah terkunci).
     handled.add(trade.id);
@@ -146,6 +146,8 @@ export async function runTradeExits(positions, { deps = {} } = {}) {
 export async function tradeAwareClose(pos, reason, opts, { positionsByAddr, deps = {} } = {}) {
   const closeWhole = deps.closeTrade ?? closeTrade;
   const closeOne = deps.handleClose ?? handleClose;
+  // Timer trailing bisa menyala setelah toggle deterministik dimatikan.
+  if (!isOn("deterministicExit")) return { success: false, skipped: true };
   const trade = findTradeByPosition(pos?.position);
   if (trade && tradeLock(trade.id)) {
     log.info(`${pos.pair || pos.position.slice(0, 8)}: trade #${trade.id} sedang diproses — skip close (${reason})`);

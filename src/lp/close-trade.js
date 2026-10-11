@@ -24,7 +24,9 @@ export async function closeTrade(trade, { reason, swap = true, positionsByAddr =
       if (getTrackedPosition(addr)?.closed === true) continue;
       const pos = positionsByAddr.get(addr) ?? { position: addr, pool: t.pool, pair: t.pair, baseMint: t.baseMint };
       try {
-        const res = await close(pos, reason, { skipAutoSwap: true, silent: true, skipDeactivate: true });
+        // Trade auto: pool ditandai '#' seperti close lama (handleClose cek sisa posisi di pool).
+        const opts = { skipAutoSwap: true, silent: true, skipDeactivate: t.origin !== "auto" };
+        const res = await close(pos, reason, opts);
         if (res?.success) closedNow++;
         else failed.push(addr);
       } catch (err) {
