@@ -12,6 +12,7 @@ const MODULES = [
   "../src/core/utils.js",
   "../src/state/store.js",
   "../src/state/positions.js",
+  "../src/state/trades.js",
   "../src/state/trailing.js",
   "../src/state/bounce.js",
   "../src/state/dca.js",

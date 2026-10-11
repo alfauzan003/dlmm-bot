@@ -132,7 +132,7 @@ export function updatePnlPeaks(positionAddress, pnlPct) {
   writeState(state);
 }
 
-export function recordClose(positionAddress, reason, pnlPct) {
+export function recordClose(positionAddress, reason, pnlPct, extra = {}) {
   if (!positionAddress) return;
   const state = readState();
   const p = state.positions[positionAddress];
@@ -142,6 +142,8 @@ export function recordClose(positionAddress, reason, pnlPct) {
   p.closedAt = Date.now();
   p.closeReason = reason || "";
   p.closePnlPct = pnlPct ?? null;
+  p.closePnlUsd = extra.pnlUsd ?? null;
+  p.closeTx = extra.closeTx ?? null;
   writeState(state);
 
   const entry = {

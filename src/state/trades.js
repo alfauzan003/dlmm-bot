@@ -1,0 +1,163 @@
+import { readState, writeState } from "./store.js";
+
+// Trade = kumpulan 1..N posisi on-chain dengan TP/SL/Trail sendiri.
+// Disimpan di state.trades (key = id string), counter di state.nextTradeId.
+// Keduanya dibuat lazy supaya state.json lama tetap jalan.
+
+// Alasan close yang berarti "tidak diketahui" -> pakai fallbackReason.
+// `not_detected` = nilai yang ditulis markClosedNotDetected.
+const UNKNOWN_REASONS = new Set(["not_detected", "closed_not_detected"]);
+
+function ensureTrades(state) {
+  if (!state.trades || typeof state.trades !== "object") state.trades = {};
+  if (!Number.isInteger(state.nextTradeId) || state.nextTradeId < 1) state.nextTradeId = 1;
+  return state.trades;
+}
+
+export function createTrade({
+  pool,
+  pair,
+  baseMint,
+  positions,
+  shape = null,
+  range = null,
+  depositSol = null,
+  origin,
+  exit,
+}) {
+  const state = readState();
+  const trades = ensureTrades(state);
+  const id = state.nextTradeId;
+  state.nextTradeId = id + 1;
+  const trade = {
+    id,
+    pool,
+    pair,
+    baseMint,
+    positions: [...(positions || [])],
+    shape,
+    range,
+    depositSol,
+    depositUsd: null,
+    origin,
+    exit,
+    openedAt: Date.now(),
+    peakPnlPct: null,
+    trailArmed: false,
+    closed: false,
+    closedAt: null,
+    closeReason: null,
+    closePnlUsd: null,
+    closePnlPct: null,
+    closeTx: null,
+  };
+  trades[String(id)] = trade;
+  writeState(state);
+  return trade;
+}
+
+export function getTrade(id) {
+  const state = readState();
+  return state.trades?.[String(id)] || null;
+}
+
+export function listOpenTrades() {
+  const state = readState();
+  return Object.values(state.trades || {})
+    .filter((t) => t && t.closed !== true)
+    .sort((a, b) => a.id - b.id);
+}
+
+export function listClosedTrades({ sinceMs = 0, untilMs = Infinity } = {}) {
+  const state = readState();
+  return Object.values(state.trades || {})
+    .filter((t) => t && t.closed === true && t.closedAt >= sinceMs && t.closedAt <= untilMs)
+    .sort((a, b) => a.closedAt - b.closedAt);
+}
+
+// Hanya trade yang masih terbuka.
+export function findTradeByPosition(address) {
+  if (!address) return null;
+  return listOpenTrades().find((t) => t.positions.includes(address)) || null;
+}
+
+// Merge dangkal per key (tp / sl / trail). Mengubah trail me-reset arming.
+export function setTradeExit(id, partialExit) {
+  const state = readState();
+  const t = state.trades?.[String(id)];
+  if (!t || !partialExit) return null;
+  for (const key of ["tp", "sl", "trail"]) {
+    if (partialExit[key]) t.exit[key] = { ...t.exit[key], ...partialExit[key] };
+  }
+  if (partialExit.trail) {
+    t.trailArmed = false;
+    t.peakPnlPct = null;
+  }
+  writeState(state);
+  return t;
+}
+
+export function updateTradeProgress(id, { peakPnlPct, trailArmed }) {
+  const state = readState();
+  const t = state.trades?.[String(id)];
+  if (!t) return null;
+  if (peakPnlPct !== undefined) t.peakPnlPct = peakPnlPct;
+  if (trailArmed !== undefined) t.trailArmed = trailArmed;
+  writeState(state);
+  return t;
+}
+
+export function setTradeDepositUsd(id, usd) {
+  const state = readState();
+  const t = state.trades?.[String(id)];
+  if (!t) return null;
+  t.depositUsd = usd;
+  writeState(state);
+  return t;
+}
+
+// Tutup trade bila semua leg-nya sudah closed. Mengembalikan trade yang baru
+// diselesaikan, atau null (belum selesai / sudah selesai / tidak ada).
+export function settleTradeIfDone(id, { fallbackReason = "closed_outside" } = {}) {
+  const state = readState();
+  const t = state.trades?.[String(id)];
+  if (!t || t.closed === true) return null;
+
+  const legs = t.positions.map((addr) => state.positions[addr]);
+  if (legs.length === 0 || legs.some((p) => !p || p.closed !== true)) return null;
+
+  // Leg terakhir = yang paling akhir ditutup (seri -> urutan terakhir).
+  let last = legs[0];
+  for (const p of legs) if ((p.closedAt ?? 0) >= (last.closedAt ?? 0)) last = p;
+
+  const pnls = legs.map((p) => p.closePnlUsd);
+  const pnlUsd = pnls.some((v) => v == null) ? null : pnls.reduce((s, v) => s + v, 0);
+
+  t.closed = true;
+  t.closedAt = Math.max(...legs.map((p) => p.closedAt ?? 0));
+  t.closeReason = !last.closeReason || UNKNOWN_REASONS.has(last.closeReason) ? fallbackReason : last.closeReason;
+  t.closePnlUsd = pnlUsd;
+  t.closePnlPct = pnlUsd != null && t.depositUsd > 0 ? (pnlUsd / t.depositUsd) * 100 : null;
+  t.closeTx = last.closeTx ?? null;
+  writeState(state);
+  return t;
+}
+
+// --- Lock per trade (in-memory saja, tidak pernah ditulis ke disk) ---
+
+const locks = new Map();
+
+export function tryLockTrade(id, kind) {
+  const key = String(id);
+  if (locks.has(key)) return false;
+  locks.set(key, kind);
+  return true;
+}
+
+export function unlockTrade(id) {
+  locks.delete(String(id));
+}
+
+export function tradeLock(id) {
+  return locks.get(String(id)) ?? null;
+}
