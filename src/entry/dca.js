@@ -1,4 +1,5 @@
 import config from "../config/index.js";
+import { isOn } from "../state/settings.js";
 import { LEGACY_MODE } from "../config/rules.js";
 import log from "../core/logger.js";
 import * as tg from "../notify/telegram.js";
@@ -42,7 +43,7 @@ export function isDcaModeEligible(mode) {
 // terpisah. Posisi diambil dari state (tanpa RPC).
 export async function tickDca() {
   const cfg = config.dca;
-  if (!cfg.enabled) return;
+  if (!isOn("dca")) return;
 
   const open = getOpenTrackedPositions().filter((t) => t && t.position && t.pool && isDcaModeEligible(t.mode));
   if (open.length === 0) return;
@@ -101,7 +102,6 @@ export async function tickDca() {
 // dan dipakai bersama exit loop.
 export function startDcaWatcher() {
   const cfg = config.dca;
-  if (!cfg.enabled) return null;
   const sec = Math.max(1, Number(cfg.pollIntervalSec) || 5);
 
   log.info(
@@ -119,7 +119,7 @@ export function startDcaWatcher() {
 // Arm / trail / queue rebound dari PnL hasil fetch.
 export function processDca(pos, tracked, pairLabel, cfgOverride) {
   const cfg = cfgOverride || config.dca;
-  if (!cfg.enabled || !pos?.position || pos.pnlPct == null) return;
+  if (!isOn("dca") || !pos?.position || pos.pnlPct == null) return;
 
   tracked = getTrackedPosition(pos.position);
   if (!isDcaEligible(tracked)) return;
@@ -127,7 +127,7 @@ export function processDca(pos, tracked, pairLabel, cfgOverride) {
   // Konfirmasi sedang berjalan — diselesaikan tick berikutnya.
   if (tracked.pendingDcaTrough != null) return;
 
-  const decision = evaluateDca(pos, tracked, cfg);
+  const decision = evaluateDca(pos, tracked, { ...cfg, enabled: true });
   switch (decision.action) {
     case "arm":
       setDcaArmedAndTrough(pos.position, decision.trough);
@@ -150,7 +150,7 @@ export function processDca(pos, tracked, pairLabel, cfgOverride) {
 // Eksekusi DCA. Guard + reservasi sinkron, eksekusi async (fire-and-forget).
 export function maybeStartDca(pos, tracked, pairLabel) {
   const cfg = config.dca;
-  if (!cfg.enabled || !pos?.position || !pos?.pool || pos.pnlPct == null) return false;
+  if (!isOn("dca") || !pos?.position || !pos?.pool || pos.pnlPct == null) return false;
   if (!isDcaEligible(tracked)) return false;
   if (!isDcaModeEligible(tracked.mode)) return false;
   if (isEntryInProgressPool(pos.pool)) return false;

@@ -1,4 +1,5 @@
 import config from "../config/index.js";
+import { isOn } from "../state/settings.js";
 import log from "../core/logger.js";
 import * as tg from "../notify/telegram.js";
 import { closePosition } from "../meteora/close.js";
@@ -59,7 +60,7 @@ export async function handleClose(pos, reason, opts = {}) {
         // Safeguard: DCA terakhir exit karena trailing TP → posisi asli ikut
         // ditutup (loop exit akan memprosesnya). Hanya saat kuota sesi sudah
         // habis dan tak ada DCA lain yang masih terbuka.
-        if (config.dca.enabled && config.dca.closeSafeguard && isTrailingTpReason(reason)) {
+        if (isOn("dca") && config.dca.closeSafeguard && isTrailingTpReason(reason)) {
           const quotaReached = getPoolDcaCount(pos.pool) >= config.dca.maxAdds;
           const otherDcaOpen = getOpenTrackedPositions().some(
             (p) => p.pool === pos.pool && p.position !== pos.position && p.isDca === true

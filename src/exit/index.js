@@ -1,4 +1,5 @@
 import config from "../config/index.js";
+import { isOn } from "../state/settings.js";
 import log from "../core/logger.js";
 import { sleep, minutes } from "../core/utils.js";
 import { getOpenPositions } from "../meteora/positions.js";
@@ -146,7 +147,7 @@ function emitSummary(positions) {
     now,
     watched: getWatchSnapshot(),
     positions: buildPositionLines(positions),
-    dcaLines: config.dca.enabled ? buildDcaLines(positions) : ["fitur DCA nonaktif"],
+    dcaLines: isOn("dca") ? buildDcaLines(positions) : ["fitur DCA nonaktif"],
     actionLines: takeRecentActions(intervalMs),
   });
   log.info("\n" + block);
@@ -256,7 +257,7 @@ export async function mainLoop() {
 
       // Safeguard: posisi asli ditandai agar ikut close setelah DCA terakhir
       // exit karena trailing TP (lihat exit/close.js).
-      if (config.dca.enabled && tracked?.dcaCloseSafeguard) {
+      if (isOn("dca") && tracked?.dcaCloseSafeguard) {
         await handleClose(pos, "dca_close_safeguard");
         continue;
       }

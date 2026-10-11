@@ -1,4 +1,5 @@
 import config from "../config/index.js";
+import { isOn } from "../state/settings.js";
 import log from "../core/logger.js";
 import * as tg from "../notify/telegram.js";
 import { countOpenBotPositionsByPool } from "../state/positions.js";
@@ -82,7 +83,7 @@ export function deactivatePool(pool, reason) {
 // Refresh lambat: pool list, expiry, kuota serentak (dari state), dan pool info.
 // Hanya fungsi ini yang menyentuh RPC, sehingga aman dijalankan sesekali.
 export async function refreshCandidates() {
-  if (!config.entry.enabled) return null;
+  if (!isOn("autoEntry")) return null;
   if (_refreshBusy) return null;
   _refreshBusy = true;
   const refreshStartedAt = Date.now();
@@ -187,7 +188,7 @@ export async function refreshCandidates() {
 // Poll harga cepat: hanya baca kandidat + state Supertrend, lalu satu request
 // batch Jupiter. Tidak ada RPC di jalur ini.
 export async function watchAndEnter() {
-  if (!config.entry.enabled) return null;
+  if (!isOn("autoEntry")) return null;
   if (_watchBusy) return null;
   if (candidateCache.length === 0) return null;
   _watchBusy = true;
