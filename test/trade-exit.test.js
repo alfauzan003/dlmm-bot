@@ -143,3 +143,22 @@ test("non-finite previous peak is ignored", () => {
   const r = evaluateTradeExit(allOn({ peakPnlPct: NaN }), 2);
   assert.equal(r.peakPnlPct, 2);
 });
+
+test("flip leg deposit is excluded from the denominator", () => {
+  const trade = allOn({ positions: ["A", "F"], flipLegs: ["F"] });
+  const map = new Map([
+    ["A", { pnlUsd: 10, depositUsd: 100, pnlKnown: true }],
+    ["F", { pnlUsd: 2, depositUsd: 40, pnlKnown: true }],
+  ]);
+  assert.deepEqual(aggregateTradePnl(trade, map), { pnlUsd: 12, depositUsd: 100, pnlPct: 12 });
+});
+
+test("only flip legs open → their deposits are used", () => {
+  const trade = allOn({ positions: ["A", "F"], flipLegs: ["F"] });
+  const map = new Map([["F", { pnlUsd: 2, depositUsd: 40, pnlKnown: true }]]);
+  assert.deepEqual(aggregateTradePnl(trade, map, { isClosed: (a) => a === "A" }), {
+    pnlUsd: 2,
+    depositUsd: 40,
+    pnlPct: 5,
+  });
+});

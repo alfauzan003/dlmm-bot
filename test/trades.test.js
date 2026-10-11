@@ -26,6 +26,7 @@ const {
   tryLockTrade,
   unlockTrade,
   tradeLock,
+  addTradeLeg,
 } = await import("../src/state/trades.js");
 
 const EXIT = {
@@ -230,4 +231,34 @@ test("locks are never written to disk", () => {
   tryLockTrade(t.id, "close");
   assert.ok(!fs.readFileSync(process.env.STATE_FILE, "utf8").includes("lock"));
   unlockTrade(t.id);
+});
+
+test("addTradeLeg adds a flip leg to positions and flipLegs", () => {
+  reset();
+  const t = createTrade({ pool: "P", pair: "A-SOL", baseMint: "M", positions: ["A"], origin: "manual", exit: EXIT });
+  addTradeLeg(t.id, "F", { flip: true });
+  addTradeLeg(t.id, "F", { flip: true });
+  const got = getTrade(t.id);
+  assert.deepEqual(got.positions, ["A", "F"]);
+  assert.deepEqual(got.flipLegs, ["F"]);
+});
+
+test("addTradeLeg without flip leaves flipLegs untouched", () => {
+  reset();
+  const t = createTrade({ pool: "P", pair: "A-SOL", baseMint: "M", positions: ["A"], origin: "manual", exit: EXIT });
+  addTradeLeg(t.id, "B");
+  const got = getTrade(t.id);
+  assert.deepEqual(got.positions, ["A", "B"]);
+  assert.equal(got.flipLegs, undefined);
+});
+
+test("addTradeLeg on a closed or missing trade returns null", () => {
+  reset();
+  trackPosition("A", "P", "A-SOL", "M", null, "spot");
+  const t = createTrade({ pool: "P", pair: "A-SOL", baseMint: "M", positions: ["A"], origin: "manual", exit: EXIT });
+  recordClose("A", "manual", 1, { pnlUsd: 1 });
+  settleTradeIfDone(t.id);
+  assert.equal(addTradeLeg(t.id, "F", { flip: true }), null);
+  assert.deepEqual(getTrade(t.id).positions, ["A"]);
+  assert.equal(addTradeLeg(999, "F"), null);
 });

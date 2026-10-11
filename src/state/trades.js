@@ -118,6 +118,20 @@ export function updateTradeMeta(id, { origin, exit, depositSol } = {}) {
   return t;
 }
 
+// Tambah leg ke trade terbuka. `flip` = leg hasil flip (deposit-nya tidak dihitung ulang di PnL).
+export function addTradeLeg(id, address, { flip = false } = {}) {
+  const state = readState();
+  const t = state.trades?.[String(id)];
+  if (!t || t.closed === true || !address) return null;
+  if (!t.positions.includes(address)) t.positions.push(address);
+  if (flip) {
+    if (!Array.isArray(t.flipLegs)) t.flipLegs = [];
+    if (!t.flipLegs.includes(address)) t.flipLegs.push(address);
+  }
+  writeState(state);
+  return t;
+}
+
 export function updateTradeProgress(id, { peakPnlPct, trailArmed }) {
   const state = readState();
   const t = state.trades?.[String(id)];
