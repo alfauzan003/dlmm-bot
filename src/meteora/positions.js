@@ -240,9 +240,9 @@ async function fetchClosedEntry(poolAddress, positionAddress, wallet) {
   }
 }
 
-// PnL final posisi dari Meteora (endpoint closed) agar alert close sama dengan
+// Entri mentah posisi dari Meteora (endpoint closed) agar alert close sama dengan
 // dashboard. Poll sampai entri muncul/ter-index; `null` bila timeout.
-export async function waitClosedPositionPnl(
+export async function waitClosedPositionEntry(
   poolAddress,
   positionAddress,
   { timeoutMs = 20000, intervalMs = 1500, wallet = null } = {}
@@ -254,18 +254,23 @@ export async function waitClosedPositionPnl(
     try {
       walletStr = getWallet().publicKey.toString();
     } catch (err) {
-      log.warn(`waitClosedPositionPnl: wallet tidak tersedia (${err.message})`);
+      log.warn(`waitClosedPositionEntry: wallet tidak tersedia (${err.message})`);
       return null;
     }
   }
 
   const deadline = Date.now() + Math.max(0, timeoutMs);
   for (;;) {
-    const pnl = pnlFromEntry(await fetchClosedEntry(poolAddress, positionAddress, walletStr));
-    if (pnl != null) return pnl;
+    const entry = await fetchClosedEntry(poolAddress, positionAddress, walletStr);
+    if (pnlFromEntry(entry) != null) return entry;
     if (Date.now() >= deadline) return null;
     await new Promise((r) => setTimeout(r, Math.max(0, intervalMs)));
   }
+}
+
+// PnL final (persen) posisi closed; `null` bila timeout.
+export async function waitClosedPositionPnl(poolAddress, positionAddress, opts) {
+  return pnlFromEntry(await waitClosedPositionEntry(poolAddress, positionAddress, opts));
 }
 
 // Satu request PnL ringan untuk seluruh posisi di pool. `force` = refresh
@@ -323,6 +328,19 @@ async function enrichPnl(positions) {
       const feeX = parseFloat(entry.unrealizedPnl?.unclaimedFeeTokenX?.amountSol || "0");
       const feeY = parseFloat(entry.unrealizedPnl?.unclaimedFeeTokenY?.amountSol || "0");
       p.unclaimedFee = Number.isFinite(feeX + feeY) ? feeX + feeY : 0;
+
+      // PnL dalam USD (dipakai TP/SL/Trail per trade). pnlKnown true hanya bila pnl & deposit valid.
+      const pnlUsd = Number(entry.pnlUsd);
+      const depositUsd = Number(entry.allTimeDeposits?.total?.usd);
+      p.pnlUsd = pnlUsd;
+      p.depositUsd = depositUsd;
+      p.pnlKnown = Number.isFinite(pnlUsd) && Number.isFinite(depositUsd);
+      // Fee belum diklaim dalam USD: hanya diisi bila field USD ada di respons.
+      const feeUsdX = parseFloat(entry.unrealizedPnl?.unclaimedFeeTokenX?.amountUsd);
+      const feeUsdY = parseFloat(entry.unrealizedPnl?.unclaimedFeeTokenY?.amountUsd);
+      if (Number.isFinite(feeUsdX) || Number.isFinite(feeUsdY)) {
+        p.unclaimedFeeUsd = (Number.isFinite(feeUsdX) ? feeUsdX : 0) + (Number.isFinite(feeUsdY) ? feeUsdY : 0);
+      }
 
       // Komposisi deposit awal (UI units) untuk deteksi double/token-only/sol-only.
       // tokenX/tokenY mengikuti orientasi pool, jadi dipetakan ke base/SOL via xIsSol.
