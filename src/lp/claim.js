@@ -2,6 +2,7 @@ import log from "../core/logger.js";
 import { getTokenBalance } from "../solana/balances.js";
 import { swapToSol } from "../solana/swap.js";
 import { claimPositionFees } from "../meteora/claim.js";
+import { addKeepMint, removeKeepMint } from "../state/keep-mints.js";
 import { getTrackedPosition } from "../state/positions.js";
 import { getTrade, tryLockTrade, unlockTrade } from "../state/trades.js";
 
@@ -53,6 +54,8 @@ export async function claimTrade(trade, { swap = false, deps = {} } = {}) {
 
     // Fee yang sudah masuk wallet tetap di-swap walau ada leg yang gagal diklaim.
     const swapInfo = swap && claimed > 0 ? await swapBaseToSol(t.baseMint, deps) : null;
+    // Claim tanpa swap: fee token sengaja disimpan pengguna -> jangan dijual safety sweep.
+    if (claimed > 0) (swap ? removeKeepMint : addKeepMint)(t.baseMint);
     return { success: failed.length === 0 && swapInfo?.success !== false, claimed, failed, swapInfo };
   } finally {
     unlockTrade(trade.id);

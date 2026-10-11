@@ -112,7 +112,13 @@ When the range reaches above the current price, part of the deposit is swapped t
 - **TP / SL / Trail** prompts: `15` or `off`, `25` or `off`, `5 3` or `off`.
 - **Close** asks for `Close + swap to SOL` or `Close only`.
 
-Trade PnL % is total PnL in USD divided by total USD deposited, with unclaimed fees included.
+Trade PnL % is total PnL in USD divided by total USD deposited, with unclaimed fees included. If some positions of
+a trade are already closed, TP / SL / Trail use the PnL of the positions still open.
+
+**Tokens left in the wallet.** With Auto Entry, Deterministic Exit and DCA all OFF the bot never sells tokens on its
+own. While any of them is ON, a safety sweep swaps stray tokens to SOL every cycle, except the excluded mints (USDC by
+default), tokens being bought for an open, and tokens you kept with **Close only** or plain **Claim**. A kept token
+is swept again only after you close or claim that token with swap.
 
 ### Auto Exit
 

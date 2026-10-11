@@ -15,6 +15,7 @@ const { createTrade, getTrade, setTradeDepositUsd, tryLockTrade, tradeLock, unlo
   await import("../src/state/trades.js");
 const { closeTrade } = await import("../src/lp/close-trade.js");
 const { claimTrade } = await import("../src/lp/claim.js");
+const { listKeepMints } = await import("../src/state/keep-mints.js");
 
 const EXIT = {
   tp: { on: true, pct: 15 },
@@ -298,4 +299,25 @@ test("claim lists failed legs and is busy while locked", async () => {
   unlockTrade(t.id);
   // leg B berhasil diklaim -> swap satu kali walau leg A gagal
   assert.equal(calls.swapToSol.length, 1);
+});
+
+test("close only keeps the mint out of the sweep; a later close with swap releases it", async () => {
+  reset();
+  const { deps } = fakeDeps();
+  await closeTrade(newTrade(["A"]), { reason: "manual", swap: false, deps });
+  assert.deepEqual(listKeepMints(), ["MintA"]);
+  await closeTrade(newTrade(["B"]), { reason: "manual", swap: true, deps });
+  assert.deepEqual(listKeepMints(), []);
+});
+
+test("plain claim keeps the mint; claim with swap releases it", async () => {
+  reset();
+  const t = newTrade(["A"]);
+  const { deps } = fakeDeps();
+  await claimTrade(t, { deps });
+  assert.deepEqual(listKeepMints(), ["MintA"]);
+  await claimTrade(t, { deps });
+  assert.deepEqual(listKeepMints(), ["MintA"]);
+  await claimTrade(t, { swap: true, deps });
+  assert.deepEqual(listKeepMints(), []);
 });

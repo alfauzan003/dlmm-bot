@@ -1,6 +1,7 @@
 import log from "../core/logger.js";
 import { handleClose } from "../exit/close.js";
 import { notifyTradeClosed } from "../notify/telegram.js";
+import { addKeepMint, removeKeepMint } from "../state/keep-mints.js";
 import { getTrackedPosition } from "../state/positions.js";
 import { getTrade, settleTradeIfDone, tryLockTrade, unlockTrade } from "../state/trades.js";
 import { swapBaseToSol } from "./claim.js";
@@ -37,6 +38,8 @@ export async function closeTrade(trade, { reason, swap = true, positionsByAddr =
 
     // Token dari leg yang sudah tertutup di-swap sekali, walau ada leg lain yang gagal.
     const swapInfo = swap && closedNow > 0 ? await swapBaseToSol(t.baseMint, deps) : null;
+    // Close only: token sengaja disimpan pengguna -> jangan dijual safety sweep.
+    if (closedNow > 0) (swap ? removeKeepMint : addKeepMint)(t.baseMint);
 
     if (failed.length > 0) {
       log.warn(`closeTrade #${t.id}: ${failed.length} leg gagal — trade tetap terbuka`);

@@ -18,6 +18,7 @@ const MODULES = [
   "../src/state/dca.js",
   "../src/state/history.js",
   "../src/state/settings.js",
+  "../src/state/keep-mints.js",
   "../src/solana/connection.js",
   "../src/solana/wallet.js",
   "../src/solana/transfer.js",
