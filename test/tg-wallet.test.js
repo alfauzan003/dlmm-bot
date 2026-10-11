@@ -348,10 +348,6 @@ test("withdraw rejects a bad address, junk amounts and amounts above the max", a
   await bot.handleUpdate(textUpdate("not an address"));
   assert.equal(session.get("prompt").kind, "wallet-withdraw-address");
   assert.ok(texts(calls).at(-1).includes("valid Solana address"));
-  const secret = bs58.encode(CURRENT.secretKey); // kunci ditempel di tempat yang salah
-  await bot.handleUpdate(textUpdate(secret));
-  assert.ok(!texts(calls).at(-1).includes(secret));
-  assert.equal(session.get("prompt").kind, "wallet-withdraw-address");
   await bot.handleUpdate(textUpdate(DEST));
   for (const bad of ["abc", "0", "-1", "1e3"]) {
     await bot.handleUpdate(textUpdate(bad));
@@ -394,4 +390,184 @@ test("withdraw failure is reported", async () => {
   await bot.handleUpdate(textUpdate("0.5"));
   await bot.handleUpdate(cbUpdate(`ok:${tokenOf(calls, "✅ Confirm")}`));
   assert.ok(texts(calls).at(-1).includes("Withdraw failed: RPC down"));
+});
+
+// ---- Fix round 1 ----
+
+const { registerAddressRoute } = await import("../src/tg/bot.js");
+const { addEntryInProgressPool, removeEntryInProgressPool } = await import("../src/entry/runtime.js");
+const { PublicKey, SystemProgram } = await import("@solana/web3.js");
+
+test("withdraw amount is whole lamports and the confirm shows the exact value that is sent", async () => {
+  balanceSol = 1.23456789;
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("wal:wd"));
+  await bot.handleUpdate(textUpdate(DEST));
+  await bot.handleUpdate(textUpdate("max"));
+  assert.ok(texts(calls).at(-1).includes("Amount: 1.22456789 SOL"));
+  await bot.handleUpdate(cbUpdate(`ok:${tokenOf(calls, "✅ Confirm")}`));
+  assert.equal(sentWithdraws[0].amountSol, 1.22456789);
+  assert.ok(texts(calls).at(-1).includes("Sent 1.22456789 SOL"));
+});
+
+test("a typed amount with more than 9 decimals is floored to a lamport", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("wal:wd"));
+  await bot.handleUpdate(textUpdate(DEST));
+  await bot.handleUpdate(textUpdate("0.1234567899"));
+  assert.ok(texts(calls).at(-1).includes("Amount: 0.123456789 SOL"));
+  await bot.handleUpdate(cbUpdate(`ok:${tokenOf(calls, "✅ Confirm")}`));
+  assert.equal(sentWithdraws[0].amountSol, 0.123456789);
+});
+
+test("an amount below one lamport is rejected as invalid", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("wal:wd"));
+  await bot.handleUpdate(textUpdate(DEST));
+  await bot.handleUpdate(textUpdate("0.0000000001"));
+  assert.ok(texts(calls).at(-1).startsWith("Invalid amount"));
+  assert.equal(session.get("prompt").kind, "wallet-withdraw-amount");
+});
+
+test("a mixed paste with a pubkey and the secret is deleted first and never reaches the open route", async () => {
+  const routed = [];
+  registerAddressRoute(async (ctx, address) => void routed.push(address));
+  try {
+    const fresh = Keypair.generate();
+    const secret = bs58.encode(fresh.secretKey);
+    const { bot, calls } = build();
+    await bot.handleUpdate(cbUpdate("wal:imp"));
+    calls.length = 0;
+    await bot.handleUpdate(textUpdate(`pubkey: ${fresh.publicKey.toBase58()} secret: ${secret}`));
+    assert.equal(calls[0].method, "deleteMessage");
+    assert.deepEqual(routed, []);
+    assert.ok(texts(calls).at(-1).includes("Invalid key"));
+    assert.equal(walletLib.getWallet().publicKey.toBase58(), CURRENT.publicKey.toBase58());
+    // seed 32 byte base58 (43-44 karakter) juga lewat prompt ini
+    await bot.handleUpdate(textUpdate(bs58.encode(fresh.secretKey.slice(0, 32))));
+    assert.deepEqual(routed, []);
+    assert.equal(calls.filter((c) => c.method === "deleteMessage").length, 2);
+  } finally {
+    registerAddressRoute(async () => {});
+  }
+});
+
+test("a key pasted outside the import prompt is deleted, never routed, never logged", async () => {
+  const routed = [];
+  registerAddressRoute(async (ctx, address) => void routed.push(address));
+  try {
+    const fresh = Keypair.generate();
+    const secret = bs58.encode(fresh.secretKey);
+    for (const text of [secret, JSON.stringify(Array.from(fresh.secretKey)), `key = ${secret}`]) {
+      const { bot, calls } = build();
+      await bot.handleUpdate(textUpdate(text));
+      assert.equal(calls[0].method, "deleteMessage");
+      const reply = texts(calls).at(-1);
+      assert.ok(reply.includes("That looked like a private key — I deleted it."));
+      assert.ok(reply.includes("/wallet → Import"));
+      assert.ok(!reply.includes(secret));
+    }
+    assert.deepEqual(routed, []);
+    assert.ok(!logLines.some((l) => l.includes(secret)));
+    assert.equal(walletLib.getWallet().publicKey.toBase58(), CURRENT.publicKey.toBase58());
+  } finally {
+    registerAddressRoute(async () => {});
+  }
+});
+
+test("a key pasted outside the import prompt reports a failed delete", async () => {
+  failDelete = true;
+  const { bot, calls } = build();
+  await bot.handleUpdate(textUpdate(bs58.encode(Keypair.generate().secretKey)));
+  assert.ok(texts(calls).at(-1).includes("Couldn't delete your message — delete it manually now."));
+});
+
+test("a key pasted into the withdraw address prompt is deleted and cancels the prompt", async () => {
+  const secret = bs58.encode(CURRENT.secretKey);
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("wal:wd"));
+  calls.length = 0;
+  await bot.handleUpdate(textUpdate(secret));
+  assert.equal(calls[0].method, "deleteMessage");
+  assert.ok(texts(calls).at(-1).includes("That looked like a private key"));
+  assert.ok(!texts(calls).some((x) => x.includes(secret)));
+  assert.equal(session.get("prompt"), null);
+});
+
+test("import is refused while an open is in progress, at start and after the paste", async () => {
+  const { bot, calls } = build();
+  addEntryInProgressPool("PoolBusy");
+  try {
+    await bot.handleUpdate(cbUpdate("wal:imp"));
+    assert.equal(session.get("prompt"), null);
+    assert.ok(texts(calls).at(-1).includes("An open is in progress"));
+  } finally {
+    removeEntryInProgressPool("PoolBusy");
+  }
+  await bot.handleUpdate(cbUpdate("wal:imp"));
+  assert.equal(session.get("prompt").kind, "wallet-import");
+  addEntryInProgressPool("PoolBusy");
+  try {
+    await bot.handleUpdate(textUpdate(bs58.encode(Keypair.generate().secretKey)));
+    assert.ok(texts(calls).at(-1).includes("An open is in progress"));
+    assert.equal(walletLib.getWallet().publicKey.toBase58(), CURRENT.publicKey.toBase58());
+  } finally {
+    removeEntryInProgressPool("PoolBusy");
+  }
+});
+
+test("withdraw confirm warns about off-curve destinations only", async () => {
+  const pda = PublicKey.findProgramAddressSync([Buffer.from("x")], SystemProgram.programId)[0].toBase58();
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("wal:wd"));
+  await bot.handleUpdate(textUpdate(pda));
+  await bot.handleUpdate(textUpdate("0.5"));
+  assert.ok(texts(calls).at(-1).includes("⚠️ This address is not a normal wallet (off-curve)"));
+  assert.ok(texts(calls).at(-1).includes(pda));
+  await bot.handleUpdate(cbUpdate("wal:wd"));
+  await bot.handleUpdate(textUpdate(DEST));
+  await bot.handleUpdate(textUpdate("0.5"));
+  assert.ok(!texts(calls).at(-1).includes("off-curve"));
+});
+
+test("the exported key message tells the user to delete it if it is still there", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const secret = bs58.encode(CURRENT.secretKey);
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("wal:exp"));
+  await bot.handleUpdate(cbUpdate(`ok:${tokenOf(calls, "I understand")}`));
+  const keyMsg = calls.find((c) => c.method === "sendMessage" && c.payload.text.includes(secret));
+  assert.ok(keyMsg.payload.text.includes("If this message is still here after a minute, delete it yourself."));
+});
+
+test("export never leaks the key to the console, even when sending it fails", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const secret = bs58.encode(CURRENT.secretKey);
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("wal:exp"));
+  const token = tokenOf(calls, "I understand");
+  // Pesan kunci gagal terkirim; error API membawa payload (berisi kunci) seperti grammY.
+  bot.api.config.use((prev, method, payload) => {
+    if (method === "sendMessage" && payload.text.includes(secret)) {
+      const err = new Error(`Call to 'sendMessage' failed! payload=${JSON.stringify(payload)}`);
+      err.payload = payload;
+      throw err;
+    }
+    return prev(method, payload);
+  });
+  await bot.handleUpdate(cbUpdate(`ok:${token}`));
+  assert.ok(texts(calls).some((x) => x.includes("Couldn't send the key message")));
+  assert.ok(!logLines.some((l) => l.includes(secret)));
+  assert.ok(!texts(calls).some((x) => x.includes("Couldn't send the key message") && x.includes(secret)));
+});
+
+test("export never leaks the key to the console on success", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const secret = bs58.encode(CURRENT.secretKey);
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("wal:exp"));
+  await bot.handleUpdate(cbUpdate(`ok:${tokenOf(calls, "I understand")}`));
+  t.mock.timers.tick(60000);
+  await new Promise((r) => setImmediate(r));
+  assert.ok(!logLines.some((l) => l.includes(secret)));
 });

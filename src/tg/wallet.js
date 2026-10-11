@@ -8,6 +8,7 @@ import { getConnection } from "../solana/connection.js";
 import { getWalletBalances } from "../solana/balances.js";
 import { exportSecretKey, getWallet, parseSecretKey, reloadWallet, saveWalletKey } from "../solana/wallet.js";
 import { maxWithdrawSol, withdrawSol, WITHDRAW_RESERVE_SOL } from "../solana/transfer.js";
+import { getEntryInProgressPools } from "../entry/runtime.js";
 import { listOpenTrades } from "../state/trades.js";
 import { registerConfirm, registerPrompt, withGuard } from "./bot.js";
 import { esc, fmtSol, fmtUsd } from "./format.js";
@@ -27,10 +28,16 @@ export const deps = {
   getSolUsd: fetchSolUsd,
   withdrawSol,
   isDryRun: () => config.dryRun,
+  isOpenInProgress: () => getEntryInProgressPools().size > 0,
 };
 
 const firstLine = (err) => String(err?.message ?? err).split("\n")[0];
 const finite = (n) => typeof n === "number" && Number.isFinite(n);
+
+// Jumlah withdraw selalu kelipatan 1 lamport; epsilon kecil menyerap error float (1.2245678899999999).
+const floorToLamport = (sol) => Math.floor(sol * 1e9 + 1e-3) / 1e9;
+// Sampai 9 desimal, nol di belakang dibuang: yang ditampilkan = yang dikirim.
+const fmtSolFull = (sol) => `${sol.toFixed(9).replace(/\.?0+$/, "")} SOL`;
 
 function tokenLine(t) {
   const amount = Number(t.balance.toPrecision(6));
@@ -108,8 +115,9 @@ async function onWithdrawAddress(ctx) {
 async function onWithdrawAmount(ctx, prompt) {
   const text = String(ctx.message.text ?? "").trim();
   const wantsMax = text.toLowerCase() === "max";
-  const typed = wantsMax ? null : parseSolAmount(text);
-  if (!wantsMax && typed == null) {
+  const parsed = wantsMax ? null : parseSolAmount(text);
+  const typed = parsed == null ? null : floorToLamport(parsed);
+  if (!wantsMax && !(typed > 0)) {
     await ctx.reply('Invalid amount, send a number or "max"');
     return;
   }
@@ -121,7 +129,7 @@ async function onWithdrawAmount(ctx, prompt) {
     await ctx.reply(`Couldn't read your balance: ${firstLine(err)}`);
     return;
   }
-  const max = maxWithdrawSol(balance);
+  const max = floorToLamport(maxWithdrawSol(balance));
   const amountSol = wantsMax ? max : typed;
   if (!(amountSol > 0)) {
     session.del("prompt");
@@ -131,26 +139,29 @@ async function onWithdrawAmount(ctx, prompt) {
     return;
   }
   if (amountSol > max + 1e-9) {
-    await ctx.reply(`Too much. You can withdraw up to ${fmtSol(max)}. Send a smaller amount or "max"`);
+    await ctx.reply(`Too much. You can withdraw up to ${fmtSolFull(max)}. Send a smaller amount or "max"`);
     return;
   }
   session.del("prompt");
   const token = session.issueToken({ action: "withdraw", to: prompt.to, amountSol });
   const kb = new InlineKeyboard().text("✅ Confirm", `ok:${token}`).text("✖ Cancel", `wal:x:${token}`);
-  const lines = ["📤 Withdraw", "", "To:", `<code>${esc(prompt.to)}</code>`, `Amount: ${fmtSol(amountSol)}`];
+  const lines = ["📤 Withdraw", "", "To:", `<code>${esc(prompt.to)}</code>`, `Amount: ${fmtSolFull(amountSol)}`];
+  if (!PublicKey.isOnCurve(new PublicKey(prompt.to).toBytes())) {
+    lines.push("", "⚠️ This address is not a normal wallet (off-curve). Funds sent here may be unrecoverable.");
+  }
   if (deps.isDryRun()) lines.push("", "🧪 DRY RUN — nothing will be sent");
   await ctx.reply(lines.join("\n"), { ...HTML, reply_markup: kb });
 }
 
 async function runWithdraw(ctx, { to, amountSol }) {
   const dryRun = deps.isDryRun();
-  await ctx.editMessageText(`⏳ ${dryRun ? "Simulating" : "Sending"} ${fmtSol(amountSol)}…`).catch(() => {});
+  const amount = fmtSolFull(amountSol);
+  await ctx.editMessageText(`⏳ ${dryRun ? "Simulating" : "Sending"} ${amount}…`).catch(() => {});
   const res = await deps.withdrawSol({ to, amountSol });
   let text;
   if (!res.success) text = `❌ Withdraw failed: ${esc(res.error ?? "unknown error")}`;
-  else if (res.dryRun)
-    text = `🧪 Dry run — nothing was sent.\nWould send ${fmtSol(amountSol)} to\n<code>${esc(to)}</code>`;
-  else text = `✅ Sent ${fmtSol(amountSol)} to\n<code>${esc(to)}</code>\nTx: <code>${esc(res.tx)}</code>`;
+  else if (res.dryRun) text = `🧪 Dry run — nothing was sent.\nWould send ${amount} to\n<code>${esc(to)}</code>`;
+  else text = `✅ Sent ${amount} to\n<code>${esc(to)}</code>\nTx: <code>${esc(res.tx)}</code>`;
   try {
     await ctx.editMessageText(text, HTML);
   } catch {
@@ -166,7 +177,8 @@ async function startExport(ctx) {
   await ctx.reply(
     "🔑 Export private key\n\n" +
       "⚠️ Your key will appear in this chat for 60 seconds, then be deleted. " +
-      "Anyone who sees it can take all your funds. Make sure nobody is watching.",
+      "Anyone who sees it can take all your funds. Make sure nobody is watching. " +
+      "If this message is still here after a minute, delete it yourself.",
     { reply_markup: kb }
   );
 }
@@ -174,7 +186,11 @@ async function startExport(ctx) {
 async function runExport(ctx) {
   let sent;
   try {
-    sent = await ctx.reply(`🔑 Private key (tap to copy). Deleting in 60 s:\n<code>${exportSecretKey()}</code>`, HTML);
+    sent = await ctx.reply(
+      "🔑 Private key (tap to copy). Deleting in 60 s. " +
+        `If this message is still here after a minute, delete it yourself.\n<code>${exportSecretKey()}</code>`,
+      HTML
+    );
   } catch {
     // Error asli tidak diteruskan: payload-nya memuat kunci.
     throw new Error("Couldn't send the key message");
@@ -199,10 +215,19 @@ async function runExport(ctx) {
 // ---- Import ----
 
 const CLOSE_FIRST = "Close all trades first — the open positions belong to the current wallet.";
+const OPEN_BUSY = "An open is in progress — try again in a minute.";
+
+// Alasan import ditolak (trade terbuka atau open yang sedang berjalan), atau null.
+function importBlocker() {
+  if (listOpenTrades().length > 0) return CLOSE_FIRST;
+  if (deps.isOpenInProgress()) return OPEN_BUSY;
+  return null;
+}
 
 async function startImport(ctx) {
-  if (listOpenTrades().length > 0) {
-    await ctx.reply(CLOSE_FIRST);
+  const blocker = importBlocker();
+  if (blocker) {
+    await ctx.reply(blocker);
     return;
   }
   session.put("prompt", { kind: "wallet-import" });
@@ -229,8 +254,9 @@ async function onImportKey(ctx) {
   }
   session.del("prompt");
   // Trade bisa terbuka (auto-entry) sejak prompt dibuka: cek lagi.
-  if (listOpenTrades().length > 0) {
-    await ctx.reply(CLOSE_FIRST);
+  const blocker = importBlocker();
+  if (blocker) {
+    await ctx.reply(blocker);
     return;
   }
   const address = keypair.publicKey.toBase58();
@@ -262,8 +288,9 @@ export function register(bot) {
 
   registerPrompt("wallet-withdraw-address", onWithdrawAddress, { acceptsAddress: true });
   registerPrompt("wallet-withdraw-amount", onWithdrawAmount);
-  // Kunci 64 byte (~88 karakter) tidak dianggap alamat oleh router, jadi sampai ke prompt ini.
-  registerPrompt("wallet-import", onImportKey, { acceptsAddress: false });
+  // acceptsAddress: teks dengan run base58 32–44 karakter (mis. "pubkey: … secret: …") tetap harus sampai ke sini
+  // supaya pesannya dihapus; parseSecretKey menolak apa pun yang bukan kunci 64 byte.
+  registerPrompt("wallet-import", onImportKey, { acceptsAddress: true, handlesSecrets: true });
 
   registerConfirm("withdraw", runWithdraw);
   registerConfirm("export", runExport);

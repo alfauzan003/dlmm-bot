@@ -179,3 +179,18 @@ test("withdraw reports send failures", async () => {
   const res = await withdrawSol({ to: Keypair.generate().publicKey.toBase58(), amountSol: 0.1, deps });
   assert.deepEqual(res, { success: false, error: "boom" });
 });
+
+test("saveWalletKey removes the temp file and hides the key when the rename fails", () => {
+  const kp = Keypair.generate();
+  const secret = bs58.encode(kp.secretKey);
+  fs.mkdirSync(KEY_FILE); // rename naar sebuah direktori selalu gagal
+  try {
+    assert.throws(
+      () => saveWalletKey(kp),
+      (err) => err.message === "Couldn't save wallet.key" && !String(err.stack).includes(secret)
+    );
+    assert.ok(!fs.existsSync(`${KEY_FILE}.tmp`));
+  } finally {
+    fs.rmdirSync(KEY_FILE);
+  }
+});

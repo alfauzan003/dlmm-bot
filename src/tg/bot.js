@@ -4,6 +4,7 @@ import config from "../config/index.js";
 import log from "../core/logger.js";
 import * as session from "./session.js";
 import { extractAddress } from "./parse.js";
+import { parseSecretKey } from "../solana/wallet.js";
 
 export const COMMANDS = [
   { command: "start", description: "Main menu + wallet card" },
@@ -61,8 +62,9 @@ const prompts = new Map(); // kind -> { handler, acceptsAddress }
 const confirms = new Map(); // action -> handler
 
 // handler(ctx, prompt). Prompt yang tidak menerima alamat dibatalkan bila pengguna menempelkan alamat.
-export function registerPrompt(kind, handler, { acceptsAddress = false } = {}) {
-  prompts.set(kind, { handler, acceptsAddress });
+// handlesSecrets: prompt menangani private key sendiri (hapus pesan dulu); selain itu router menghapusnya.
+export function registerPrompt(kind, handler, { acceptsAddress = false, handlesSecrets = false } = {}) {
+  prompts.set(kind, { handler, acceptsAddress, handlesSecrets });
 }
 
 // handler(ctx, payload) dipanggil sekali per token sesuai payload.action.
@@ -83,11 +85,35 @@ export function registerAddressRoute(fn) {
 
 const routeAddress = (ctx, address) => addressRoute(ctx, address);
 
+// Teks berisi private key (utuh, atau salah satu token) — jangan sampai tertinggal di chat.
+function containsSecretKey(text) {
+  return parseSecretKey(text) !== null || text.split(/\s+/).some((part) => parseSecretKey(part) !== null);
+}
+
+// Hapus pesan berisi kunci yang ditempel di luar prompt import. Teksnya tidak pernah dilog.
+async function dropPastedKey(ctx) {
+  let deleted = true;
+  try {
+    await ctx.deleteMessage();
+  } catch {
+    deleted = false;
+  }
+  await ctx.reply(
+    "That looked like a private key — I deleted it. Use /wallet → Import if you meant to import." +
+      (deleted ? "" : "\nCouldn't delete your message — delete it manually now.")
+  );
+}
+
 async function routeText(ctx) {
   const text = ctx.message.text;
   if (text.startsWith("/")) return;
-  const address = extractAddress(text);
   const prompt = session.get("prompt");
+  if (!(prompt && prompts.get(prompt.kind)?.handlesSecrets) && containsSecretKey(text)) {
+    session.del("prompt");
+    await dropPastedKey(ctx);
+    return;
+  }
+  const address = extractAddress(text);
   if (prompt) {
     const entry = prompts.get(prompt.kind);
     if (entry && (entry.acceptsAddress || !address)) {

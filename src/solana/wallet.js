@@ -69,8 +69,14 @@ export function reloadWallet() {
 // Tulis kunci (base58) ke wallet.key lewat file sementara lalu rename; chmod 0o600 best-effort.
 export function saveWalletKey(keypair) {
   const tmp = `${WALLET_KEY_FILE}.tmp`;
-  fs.writeFileSync(tmp, bs58.encode(keypair.secretKey), { encoding: "utf8", mode: 0o600 });
-  fs.renameSync(tmp, WALLET_KEY_FILE);
+  try {
+    fs.writeFileSync(tmp, bs58.encode(keypair.secretKey), { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmp, WALLET_KEY_FILE);
+  } catch {
+    // File sementara memuat kunci: hapus. Error asli tidak diteruskan (tidak boleh membawa isi kunci).
+    fs.rmSync(tmp, { force: true });
+    throw new Error("Couldn't save wallet.key");
+  }
   try {
     fs.chmodSync(WALLET_KEY_FILE, 0o600);
   } catch {

@@ -13,4 +13,4 @@ rclone-current-linux-amd64.zip
 backup/
 updatelist.txt
 settings.json
-wallet.key
+wallet.key*
