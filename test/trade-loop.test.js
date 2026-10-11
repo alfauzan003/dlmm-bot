@@ -342,6 +342,24 @@ test("settleTradesForPositions settles trades of missing addresses", () => {
   assert.equal(getTrade(t.id).closeReason, "closed_outside");
 });
 
+test("locked trade is not settled by the exit loop (closeTrade settles it and sends the alert)", () => {
+  reset();
+  const t = newTrade(["PosA"]);
+  assert.equal(tryLockTrade(t.id, "close"), true);
+  try {
+    // Telegram close sedang berjalan: leg sudah tertutup, closeTrade belum sempat settle.
+    recordClose("PosA", "tp", 5, { pnlUsd: 5, closeTx: "TxTP" });
+    settleOpenTrades();
+    syncTrades([], { wasTracked: new Set() });
+    settleTradesForPositions(["PosA"]);
+    assert.equal(getTrade(t.id).closed, false);
+  } finally {
+    unlockTrade(t.id);
+  }
+  settleOpenTrades();
+  assert.equal(getTrade(t.id).closed, true);
+});
+
 test("locked trade skipped", async () => {
   reset();
   const t = newTrade(["PosA"]);

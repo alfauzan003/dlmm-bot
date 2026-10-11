@@ -106,8 +106,9 @@ export function syncTrades(positions, { wasTracked = new Set(), bootedAt = PROCE
 
 // Selesaikan setiap trade terbuka yang semua leg-nya sudah closed di state (mis. leg terakhir
 // ditutup engine lama). Dipanggil juga saat tidak ada posisi live (loop exit berhenti lebih awal).
+// Trade terkunci dilewati: penutupnya (closeTrade) menyelesaikan trade dan mengirim alert sendiri.
 export function settleOpenTrades() {
-  for (const trade of listOpenTrades()) settleTradeIfDone(trade.id);
+  for (const trade of listOpenTrades()) if (!tradeLock(trade.id)) settleTradeIfDone(trade.id);
 }
 
 // Selesaikan trade yang memuat alamat posisi yang baru ditandai hilang.
@@ -117,7 +118,7 @@ export function settleTradesForPositions(addresses) {
     const trade = findTradeByPosition(addr);
     if (trade) ids.add(trade.id);
   }
-  for (const id of ids) settleTradeIfDone(id);
+  for (const id of ids) if (!tradeLock(id)) settleTradeIfDone(id);
 }
 
 // Leg yang sudah tertutup di state tidak ikut PnL trade (sisa leg tetap punya TP/SL/Trail).
