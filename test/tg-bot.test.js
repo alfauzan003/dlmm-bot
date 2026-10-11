@@ -61,6 +61,27 @@ test("foreign chat is ignored", async (t) => {
   );
 });
 
+test("group chat with the configured id is ignored (private chats only)", async (t) => {
+  t.mock.method(console, "log", () => {}); // log.warn mencetak ke console
+  let hits = 0;
+  const { bot, calls } = build([{ register: (b) => b.command("start", () => void hits++) }]);
+  const update = startUpdate(OWNER);
+  update.message.chat = { id: OWNER, type: "group", title: "G" };
+  await bot.handleUpdate(update);
+  assert.equal(hits, 0);
+  assert.equal(calls.length, 0);
+});
+
+test("a group/channel chat id warns at startup that commands need a private chat", (t) => {
+  const logMock = t.mock.method(console, "log", () => {});
+  createBot({ token: "123:dummy", chatId: "-100123" });
+  assert.ok(
+    logMock.mock.calls.some(
+      (c) => String(c.arguments[0]).includes("[WARN]") && String(c.arguments[0]).includes("private")
+    )
+  );
+});
+
 test("owner chat reaches handlers", async () => {
   let hits = 0;
   const { bot } = build([{ register: (b) => b.command("start", () => void hits++) }]);

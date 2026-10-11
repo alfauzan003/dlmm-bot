@@ -41,9 +41,9 @@ async function loadLive() {
   }
 }
 
-// { pnlPct, pnlUsd, inRange } untuk satu trade; field yang tidak diketahui = null.
+// { pnlPct, pnlUsd, inRange, feesUsd } untuk satu trade; field yang tidak diketahui = null.
 export function liveForTrade(trade, positionsByAddr) {
-  const live = { pnlPct: null, pnlUsd: null, inRange: null };
+  const live = { pnlPct: null, pnlUsd: null, inRange: null, feesUsd: null };
   if (!positionsByAddr) return live;
   const agg = aggregateTradePnl(trade, positionsByAddr, { isClosed: isLegClosed });
   if (agg) {
@@ -53,10 +53,14 @@ export function liveForTrade(trade, positionsByAddr) {
   let outside = false;
   let missing = false;
   let openLegs = 0;
+  let fees = 0;
+  let feesKnown = true;
   for (const addr of trade.positions || []) {
     if (isLegClosed(addr)) continue;
     openLegs++;
     const p = positionsByAddr.get(addr);
+    if (finite(p?.unclaimedFeeUsd)) fees += p.unclaimedFeeUsd;
+    else feesKnown = false;
     if (!p || !finite(p.activeBin) || !finite(p.lowerBin) || !finite(p.upperBin)) {
       missing = true;
       continue;
@@ -65,6 +69,7 @@ export function liveForTrade(trade, positionsByAddr) {
   }
   if (outside) live.inRange = false;
   else if (!missing && openLegs > 0) live.inRange = true;
+  if (feesKnown && openLegs > 0) live.feesUsd = fees;
   return live;
 }
 
@@ -101,6 +106,13 @@ export function buildPositionsList(trades, liveByTradeId) {
   return { text: [`📂 Open positions (${trades.length})`, "", ...lines].join("\n"), keyboard };
 }
 
+// "Range -45% / +10% · bins 100–155". Harga SOL tidak ditampilkan: binStep/desimal tidak disimpan di trade.
+function rangeLine(range) {
+  if (!range || !finite(range.below) || !finite(range.above)) return "Range ?";
+  const bins = finite(range.lowerBin) && finite(range.upperBin) ? ` · bins ${range.lowerBin}–${range.upperBin}` : "";
+  return `Range -${range.below}% / +${range.above}%${bins}`;
+}
+
 export function buildTradeDetail(trade, live) {
   const legs = (trade.positions || []).length;
   const text = [
@@ -108,6 +120,9 @@ export function buildTradeDetail(trade, live) {
     "",
     esc(tradeLine(trade, live)),
     `Pool ${shortAddr(trade.pool)} · ${legs} position(s) · opened ${fmtWib(trade.openedAt)}`,
+    rangeLine(trade.range),
+    `Unclaimed fees ${fmtUsd(live?.feesUsd)} · Peak PnL ${fmtPct(trade.peakPnlPct)}`,
+    `Origin ${esc(trade.origin ?? "?")}`,
   ].join("\n");
   const id = trade.id;
   const keyboard = new InlineKeyboard()

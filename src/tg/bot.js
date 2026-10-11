@@ -142,12 +142,20 @@ async function routeConfirm(ctx) {
 export function createBot({ token, chatId, modules = [] }) {
   const bot = new Bot(token);
   const owner = String(chatId);
+  if (Number(owner) < 0) {
+    log.warn(
+      "Telegram: TELEGRAM_CHAT_ID adalah grup/channel — alert tetap dikirim ke sana, tapi perintah hanya " +
+        "dilayani di private chat dengan bot (chat id pribadi Anda)"
+    );
+  }
 
-  // Guard pertama: hanya chat pemilik yang dilayani.
+  // Guard pertama: hanya private chat pemilik yang dilayani (grup dengan id sama diabaikan).
   bot.use(async (ctx, next) => {
     const id = ctx.chat?.id;
-    if (id == null || String(id) !== owner) {
-      log.warn(`Telegram: update dari chat asing diabaikan (chat id ${id ?? "tidak ada"})`);
+    if (id == null || String(id) !== owner || ctx.chat?.type !== "private") {
+      log.warn(
+        `Telegram: update dari chat asing diabaikan (chat id ${id ?? "tidak ada"}, tipe ${ctx.chat?.type ?? "-"})`
+      );
       return;
     }
     await next();

@@ -158,7 +158,7 @@ test("liveForTrade: range is derived from every leg and PnL from the aggregate",
   const missing = liveForTrade(trade, new Map([["A", leg(5, 0, 10)]]));
   assert.equal(missing.inRange, null);
   assert.equal(missing.pnlPct, null);
-  assert.deepEqual(liveForTrade(trade, null), { pnlPct: null, pnlUsd: null, inRange: null });
+  assert.deepEqual(liveForTrade(trade, null), { pnlPct: null, pnlUsd: null, inRange: null, feesUsd: null });
 });
 
 test("liveForTrade ignores legs already closed in state", () => {
@@ -211,6 +211,66 @@ test("buildTradeDetail has the documented buttons", () => {
         ["◀ Back", "home:positions"],
       ],
     ]
+  );
+});
+
+test("buildTradeDetail shows range, unclaimed fees, peak PnL and origin", () => {
+  const trade = {
+    id: 7,
+    pool: "Pool",
+    pair: "A-SOL",
+    shape: "spot",
+    origin: "manual",
+    depositSol: 1,
+    exit: EXIT(),
+    range: { below: 45, above: 10, lowerBin: 100, upperBin: 155 },
+    peakPnlPct: 6.5,
+    openedAt: 0,
+  };
+  const { text } = buildTradeDetail(trade, { pnlPct: 2, pnlUsd: 1, inRange: true, feesUsd: 1.234 });
+  assert.ok(text.includes("Range -45% / +10% · bins 100–155"), text);
+  assert.ok(text.includes("Unclaimed fees $1.23"), text);
+  assert.ok(text.includes("Peak PnL +6.50%"), text);
+  assert.ok(text.includes("Origin manual"), text);
+
+  const adopted = { ...trade, origin: "external", range: null, peakPnlPct: null };
+  const plain = buildTradeDetail(adopted, null).text;
+  assert.ok(plain.includes("Range ?"), plain);
+  assert.ok(plain.includes("Unclaimed fees ?"), plain);
+  assert.ok(plain.includes("Peak PnL ?"), plain);
+  assert.ok(plain.includes("Origin external"), plain);
+});
+
+test("liveForTrade sums unclaimed fees only when every open leg reports them", () => {
+  const leg = (fee) => ({
+    activeBin: 5,
+    lowerBin: 0,
+    upperBin: 10,
+    pnlUsd: 1,
+    depositUsd: 10,
+    pnlKnown: true,
+    unclaimedFeeUsd: fee,
+  });
+  const trade = { positions: ["FA", "FB"] };
+  assert.equal(
+    liveForTrade(
+      trade,
+      new Map([
+        ["FA", leg(1)],
+        ["FB", leg(2.5)],
+      ])
+    ).feesUsd,
+    3.5
+  );
+  assert.equal(
+    liveForTrade(
+      trade,
+      new Map([
+        ["FA", leg(1)],
+        ["FB", leg(undefined)],
+      ])
+    ).feesUsd,
+    null
   );
 });
 
