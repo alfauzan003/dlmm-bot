@@ -119,10 +119,11 @@ export function buildTradeDetail(trade, live) {
   return { text, keyboard };
 }
 
-// Untuk kartu home: jumlah trade terbuka + Σ PnL USD trade yang PnL-nya diketahui (null = tidak ada yang diketahui).
+// Untuk kartu home dan /pnl: jumlah trade terbuka + Σ PnL USD trade yang PnL-nya diketahui
+// (null = tidak ada yang diketahui; partial = ada trade terbuka yang PnL-nya tidak diketahui).
 export async function summarizeOpenTrades() {
   const trades = listOpenTrades();
-  if (trades.length === 0) return { count: 0, pnlUsd: 0 };
+  if (trades.length === 0) return { count: 0, pnlUsd: 0, partial: false };
   const live = await loadLive();
   let sum = 0;
   let known = 0;
@@ -135,7 +136,7 @@ export async function summarizeOpenTrades() {
       }
     }
   }
-  return { count: trades.length, pnlUsd: known > 0 ? sum : null };
+  return { count: trades.length, pnlUsd: known > 0 ? sum : null, partial: known < trades.length };
 }
 
 // "message is not modified" (mis. Refresh tanpa perubahan) bukan error.

@@ -65,12 +65,14 @@ const MODULES = [
   "../src/tg/parse.js",
   "../src/tg/positions.js",
   "../src/tg/open-wizard.js",
+  "../src/tg/pnl.js",
   "../src/lp/claim.js",
   "../src/lp/close-trade.js",
   "../src/lp/range.js",
   "../src/lp/pool-lookup.js",
   "../src/lp/open-split.js",
   "../src/lp/open-trade.js",
+  "../src/lp/pnl-stats.js",
 ];
 
 test("every module loads without import errors", async () => {

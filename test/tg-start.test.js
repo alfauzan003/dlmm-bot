@@ -112,7 +112,7 @@ test("unbuilt home buttons answer Coming soon", async () => {
       id: "q",
       from: { id: 123, is_bot: false, first_name: "U" },
       chat_instance: "c",
-      data: "home:pnl",
+      data: "home:wallet",
       message: { message_id: 1, date: 1, chat: { id: 123, type: "private" }, text: "x" },
     },
   });

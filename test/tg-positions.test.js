@@ -392,7 +392,7 @@ test("summarizeOpenTrades sums only known trade PnL", async () => {
     { position: "PosA", activeBin: 5, lowerBin: 0, upperBin: 10, pnlUsd: 3, depositUsd: 100, pnlKnown: true },
     { position: "PosB", activeBin: 5, lowerBin: 0, upperBin: 10, pnlUsd: 9, depositUsd: 100, pnlKnown: false },
   ];
-  assert.deepEqual(await positionsModule.summarizeOpenTrades(), { count: 2, pnlUsd: 3 });
+  assert.deepEqual(await positionsModule.summarizeOpenTrades(), { count: 2, pnlUsd: 3, partial: true });
   deps.getOpenPositions = async () => null;
-  assert.deepEqual(await positionsModule.summarizeOpenTrades(), { count: 2, pnlUsd: null });
+  assert.deepEqual(await positionsModule.summarizeOpenTrades(), { count: 2, pnlUsd: null, partial: true });
 });

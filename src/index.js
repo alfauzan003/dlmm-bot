@@ -6,6 +6,7 @@ import * as help from "./tg/help.js";
 import * as settings from "./tg/settings.js";
 import * as positions from "./tg/positions.js";
 import * as openWizard from "./tg/open-wizard.js";
+import * as pnl from "./tg/pnl.js";
 import { startEntryScanner } from "./entry/index.js";
 import { startDcaWatcher } from "./entry/dca.js";
 import { mainLoop } from "./exit/index.js";
@@ -24,7 +25,7 @@ if (!config.walletPrivateKey) {
 }
 
 // Bot Telegram + kartu home: tidak di-await agar Telegram yang lambat tidak menunda scanner / exit loop.
-startBot([start, help, settings, positions, openWizard])
+startBot([start, help, settings, positions, openWizard, pnl])
   .then((bot) => bot && start.sendHome(bot.api, { prefix: "🟢 Online" }))
   .catch((err) => log.error(`Telegram startup gagal: ${err?.message ?? err}`));
 
