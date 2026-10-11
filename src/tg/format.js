@@ -32,6 +32,16 @@ export function fmtWib(ms) {
   return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} WIB`;
 }
 
+// Durasi → "45m", "2h", "3d 4h".
+export function fmtAge(ms) {
+  if (!isNum(ms) || ms < 0) return "?";
+  const m = Math.floor(ms / 60000);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
 // exit = { tp:{on,pct}, sl:{on,pct}, trail:{on,startPct,distancePct} } → "TP15 SL-25 T5/3"
 export function exitSummary(exit) {
   const parts = [];

@@ -17,7 +17,7 @@ const session = await import("../src/tg/session.js");
 const { createTrade, getTrade } = await import("../src/state/trades.js");
 const { trackPosition, recordClose } = await import("../src/state/positions.js");
 
-const { tradeLine, buildPositionsList, buildTradeDetail, liveForTrade, deps } = positionsModule;
+const { tradeLine, buildPositionsList, buildTradeDetail, liveForTrade, rangeBar, deps } = positionsModule;
 const OWNER = 123;
 const BOT_INFO = {
   id: 1,
@@ -158,7 +158,62 @@ test("liveForTrade: range is derived from every leg and PnL from the aggregate",
   const missing = liveForTrade(trade, new Map([["A", leg(5, 0, 10)]]));
   assert.equal(missing.inRange, null);
   assert.equal(missing.pnlPct, null);
-  assert.deepEqual(liveForTrade(trade, null), { pnlPct: null, pnlUsd: null, inRange: null, feesUsd: null });
+  assert.deepEqual(liveForTrade(trade, null), {
+    pnlPct: null,
+    pnlUsd: null,
+    inRange: null,
+    feesUsd: null,
+    feesSol: null,
+    valueUsd: null,
+    valueSol: null,
+    bins: null,
+  });
+  assert.equal(inside.valueUsd, 22);
+  assert.deepEqual(inside.bins, { lower: 0, upper: 10, active: 5, binStep: null, xIsSol: false });
+  assert.equal(missing.bins, null);
+});
+
+test("liveForTrade sums SOL value and SOL fees only when every open leg reports them", () => {
+  const leg = (valueSol, unclaimedFee) => ({ activeBin: 5, lowerBin: 0, upperBin: 10, valueSol, unclaimedFee });
+  const trade = { positions: ["VA", "VB"] };
+  const both = liveForTrade(
+    trade,
+    new Map([
+      ["VA", leg(0.25, 0.001)],
+      ["VB", leg(0.5, 0.002)],
+    ])
+  );
+  assert.equal(both.valueSol, 0.75);
+  assert.equal(both.feesSol, 0.003);
+  const partial = liveForTrade(
+    trade,
+    new Map([
+      ["VA", leg(0.25, 0.001)],
+      ["VB", leg(undefined, undefined)],
+    ])
+  );
+  assert.equal(partial.valueSol, null);
+  assert.equal(partial.feesSol, null);
+});
+
+test("rangeBar: price distance of min/max from the current price, or how far outside the range", () => {
+  const b = (active, extra = {}) => ({ lower: 0, upper: 10, active, binStep: 100, ...extra });
+  assert.equal(rangeBar(b(5)), "[██████░░░░░░] min -4.85% · max +5.10%");
+  assert.equal(rangeBar(b(0)), "[░░░░░░░░░░░░] min +0.00% · max +10.46%");
+  assert.equal(rangeBar(b(10)), "[████████████] min -9.47% · max +0.00%");
+  assert.equal(rangeBar(b(-3)), "[░░░░░░░░░░░░] 2.94% below range");
+  assert.equal(rangeBar(b(11)), "[████████████] 1.00% above range");
+  // SOL = token X: token price moves opposite to the bin id.
+  assert.equal(rangeBar(b(2, { xIsSol: true })), "[██████████░░] min -7.65% · max +2.01%");
+  assert.equal(rangeBar(b(11, { xIsSol: true })), "[░░░░░░░░░░░░] 0.99% below range");
+  assert.equal(rangeBar(null), null);
+});
+
+test("rangeBar without binStep falls back to bins", () => {
+  assert.equal(rangeBar({ lower: 0, upper: 10, active: 5 }), "[██████░░░░░░] 50% from min");
+  assert.equal(rangeBar({ lower: -587, upper: -527, active: -527 }), "[████████████] 100% from min");
+  assert.equal(rangeBar({ lower: 0, upper: 10, active: -3 }), "[░░░░░░░░░░░░] 3 bins below range");
+  assert.equal(rangeBar({ lower: 0, upper: 10, active: 11 }), "[████████████] 1 bin above range");
 });
 
 test("liveForTrade ignores legs already closed in state", () => {
@@ -214,11 +269,13 @@ test("buildTradeDetail has the documented buttons", () => {
   );
 });
 
-test("buildTradeDetail shows range, unclaimed fees, peak PnL and origin", () => {
+test("buildTradeDetail shows status, value, PnL, fees, range bar and exits", () => {
+  const MINT = "33jENUQnjoitkMFpvNJcSHyLAHFWJuHwT6E3E8CNpump";
   const trade = {
     id: 7,
     pool: "Pool",
     pair: "A-SOL",
+    baseMint: MINT,
     shape: "spot",
     origin: "manual",
     depositSol: 1,
@@ -227,18 +284,43 @@ test("buildTradeDetail shows range, unclaimed fees, peak PnL and origin", () => 
     peakPnlPct: 6.5,
     openedAt: 0,
   };
-  const { text } = buildTradeDetail(trade, { pnlPct: 2, pnlUsd: 1, inRange: true, feesUsd: 1.234 });
-  assert.ok(text.includes("Range -45% / +10% · bins 100–155"), text);
-  assert.ok(text.includes("Unclaimed fees $1.23"), text);
-  assert.ok(text.includes("Peak PnL +6.50%"), text);
+  const live = {
+    pnlPct: -0.6,
+    pnlUsd: -0.597,
+    inRange: true,
+    feesUsd: 0.5233,
+    feesSol: 0.0025,
+    valueUsd: 98.88,
+    valueSol: 0.4712,
+    bins: { lower: 100, upper: 155, active: 122 },
+  };
+  const { text } = buildTradeDetail(trade, live, 2 * 3600_000);
+  const lines = text.split("\n");
+  assert.equal(lines[0], "📂 Trade #7");
+  assert.equal(
+    lines[2],
+    `🟢 IN · <a href="https://gmgn.ai/sol/token/${MINT}">A-SOL</a> · 2h · $98.88 (0.4712 SOL)`
+  );
+  assert.equal(lines[3], "PnL -$0.60 (-0.60%) · fees $0.52 (0.0025 SOL)");
+  assert.equal(lines[4], "spot · Range -45% / +10% · bins 100–155");
+  assert.equal(lines[5], "[█████░░░░░░░] 40% from min");
+  assert.ok(text.includes("TP15 SL-25 T5/3 · Peak PnL +6.50%"), text);
+  assert.ok(text.includes("deposit 1 SOL"), text);
   assert.ok(text.includes("Origin manual"), text);
 
-  const adopted = { ...trade, origin: "external", range: null, peakPnlPct: null };
+  const adopted = { ...trade, baseMint: "not a mint", origin: "external", range: null, peakPnlPct: null };
   const plain = buildTradeDetail(adopted, null).text;
+  assert.ok(plain.includes("⚪ ? · A-SOL · "), plain);
+  assert.ok(!plain.includes("<a "), plain);
+  assert.ok(plain.includes("PnL ? · fees ?"), plain);
   assert.ok(plain.includes("Range ?"), plain);
-  assert.ok(plain.includes("Unclaimed fees ?"), plain);
+  assert.ok(!plain.includes("from min"), plain);
   assert.ok(plain.includes("Peak PnL ?"), plain);
   assert.ok(plain.includes("Origin external"), plain);
+
+  const out = buildTradeDetail(trade, { ...live, inRange: false, bins: { lower: 100, upper: 155, active: 90 } }).text;
+  assert.ok(out.includes("🔴 OUT · "), out);
+  assert.ok(out.includes("10 bins below range"), out);
 });
 
 test("liveForTrade sums unclaimed fees only when every open leg reports them", () => {
@@ -305,8 +387,12 @@ test("pos:open shows the detail with live data", async () => {
   const { bot, calls } = build();
   await bot.handleUpdate(cbUpdate(`pos:open:${trade.id}`));
   const [text] = edits(calls);
-  assert.ok(text.includes("+3.10% ($3.10)"));
-  assert.ok(text.includes("in range"));
+  assert.ok(text.includes("PnL $3.10 (+3.10%)"), text);
+  assert.ok(text.includes("🟢 IN · BONK-SOL · "), text);
+  assert.ok(text.includes("$103.10"), text);
+  assert.ok(text.includes("[██████░░░░░░] 50% from min"), text);
+  const edit = calls.find((c) => c.method === "editMessageText");
+  assert.deepEqual(edit.payload.link_preview_options, { is_disabled: true });
 });
 
 test("pos:open on a closed or unknown trade says it is not open", async () => {

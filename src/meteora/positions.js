@@ -71,6 +71,7 @@ export async function getOpenPositions() {
       const tokenYMint = info?.tokenY?.mint?.address?.toString?.() ?? "";
       const activeBin = info?.lbPair?.activeId ?? null;
       const collectFeeMode = info?.lbPair?.parameters?.collectFeeMode ?? null;
+      const binStep = Number(info?.lbPair?.binStep) || null;
       const xIsSol = tokenXMint === WSOL_MINT;
       const yIsSol = tokenYMint === WSOL_MINT;
       const baseMint = xIsSol ? tokenYMint : tokenXMint;
@@ -103,6 +104,7 @@ export async function getOpenPositions() {
             lowerBin,
             upperBin,
             activeBin,
+            binStep,
             collectFeeMode,
             pnlPct: 0,
             totalValue: totalX + totalY,
@@ -354,6 +356,10 @@ async function enrichPnl(positions) {
       p.pnlUsd = usd.pnlUsd;
       p.depositUsd = usd.depositUsd;
       p.pnlKnown = usd.pnlKnown;
+      // Nilai posisi saat ini dalam SOL (deposit + PnL), untuk tampilan Telegram.
+      const pnlSol = realNumber(entry.pnlSol);
+      const depositSol = realNumber(entry.allTimeDeposits?.total?.sol);
+      if (Number.isFinite(pnlSol) && Number.isFinite(depositSol)) p.valueSol = depositSol + pnlSol;
       // Fee belum diklaim dalam USD: hanya diisi bila field USD ada di respons.
       const feeUsdX = parseFloat(entry.unrealizedPnl?.unclaimedFeeTokenX?.amountUsd);
       const feeUsdY = parseFloat(entry.unrealizedPnl?.unclaimedFeeTokenY?.amountUsd);

@@ -8,7 +8,7 @@ import { closeTrade } from "../lp/close-trade.js";
 import { getTrackedPosition } from "../state/positions.js";
 import { getTrade, listOpenTrades, setTradeExit } from "../state/trades.js";
 import { registerConfirm, registerPrompt, withGuard } from "./bot.js";
-import { esc, exitSummary, fmtPct, fmtSol, fmtUsd, fmtWib, shortAddr } from "./format.js";
+import { esc, exitSummary, fmtAge, fmtPct, fmtSol, fmtUsd, fmtWib, shortAddr } from "./format.js";
 import { parseExitInput } from "./parse.js";
 import * as session from "./session.js";
 
@@ -41,35 +41,61 @@ async function loadLive() {
   }
 }
 
-// { pnlPct, pnlUsd, inRange, feesUsd } untuk satu trade; field yang tidak diketahui = null.
+// { pnlPct, pnlUsd, inRange, feesUsd, feesSol, valueUsd, valueSol, bins } untuk satu trade;
+// field yang tidak diketahui = null. bins = { lower, upper, active } gabungan semua leg terbuka.
 export function liveForTrade(trade, positionsByAddr) {
-  const live = { pnlPct: null, pnlUsd: null, inRange: null, feesUsd: null };
+  const live = {
+    pnlPct: null,
+    pnlUsd: null,
+    inRange: null,
+    feesUsd: null,
+    feesSol: null,
+    valueUsd: null,
+    valueSol: null,
+    bins: null,
+  };
   if (!positionsByAddr) return live;
   const agg = aggregateTradePnl(trade, positionsByAddr, { isClosed: isLegClosed });
   if (agg) {
     live.pnlPct = agg.pnlPct;
     live.pnlUsd = agg.pnlUsd;
+    live.valueUsd = agg.depositUsd + agg.pnlUsd;
   }
   let outside = false;
   let missing = false;
   let openLegs = 0;
-  let fees = 0;
-  let feesKnown = true;
+  const sum = { feesUsd: 0, feesSol: 0, valueSol: 0 };
+  const known = { feesUsd: true, feesSol: true, valueSol: true };
+  const add = (key, v) => (finite(v) ? (sum[key] += v) : (known[key] = false));
+  let lower = Infinity;
+  let upper = -Infinity;
+  let active = null;
+  let binStep = null;
+  let xIsSol = false;
   for (const addr of trade.positions || []) {
     if (isLegClosed(addr)) continue;
     openLegs++;
     const p = positionsByAddr.get(addr);
-    if (finite(p?.unclaimedFeeUsd)) fees += p.unclaimedFeeUsd;
-    else feesKnown = false;
+    add("feesUsd", p?.unclaimedFeeUsd);
+    add("feesSol", p?.unclaimedFee);
+    add("valueSol", p?.valueSol);
     if (!p || !finite(p.activeBin) || !finite(p.lowerBin) || !finite(p.upperBin)) {
       missing = true;
       continue;
     }
     if (p.activeBin < p.lowerBin || p.activeBin > p.upperBin) outside = true;
+    lower = Math.min(lower, p.lowerBin);
+    upper = Math.max(upper, p.upperBin);
+    active = p.activeBin;
+    binStep = finite(p.binStep) && p.binStep > 0 ? p.binStep : null;
+    xIsSol = p.xIsSol === true;
   }
   if (outside) live.inRange = false;
   else if (!missing && openLegs > 0) live.inRange = true;
-  if (feesKnown && openLegs > 0) live.feesUsd = fees;
+  if (openLegs > 0) {
+    for (const key of Object.keys(sum)) if (known[key]) live[key] = sum[key];
+  }
+  if (!missing && openLegs > 0) live.bins = { lower, upper, active, binStep, xIsSol };
   return live;
 }
 
@@ -113,17 +139,78 @@ function rangeLine(range) {
   return `Range -${range.below}% / +${range.above}%${bins}`;
 }
 
-export function buildTradeDetail(trade, live) {
+const BAR_WIDTH = 12;
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+const bar = (frac) => {
+  const filled = Math.round(Math.min(1, Math.max(0, frac)) * BAR_WIDTH);
+  return `[${"█".repeat(filled)}${"░".repeat(BAR_WIDTH - filled)}]`;
+};
+
+// Posisi harga token sekarang di dalam range, dalam harga (bukan bin):
+// in range → "[█████░░░░░░░] min -12.30% · max +8.10%" (jarak harga batas dari harga sekarang);
+// di luar → "[████████████] 5.00% above range" (jarak harga sekarang dari batas terdekat).
+// Tanpa binStep (harga tidak bisa dihitung) → fallback dalam bin.
+export function rangeBar(bins) {
+  if (!bins || !finite(bins.lower) || !finite(bins.upper) || !finite(bins.active)) return null;
+  const { lower, upper, active, binStep, xIsSol } = bins;
+  // Harga token naik searah bin id, kecuali SOL = token X (harga pool = token per SOL).
+  const dir = xIsSol ? -1 : 1;
+  const [minBin, maxBin] = dir > 0 ? [lower, upper] : [upper, lower];
+  // Jarak (dalam bin, searah harga token) dari batas range ke harga sekarang.
+  const belowBins = dir * (minBin - active);
+  const aboveBins = dir * (active - maxBin);
+  const hasPrice = finite(binStep) && binStep > 0;
+  // Persen harga untuk n bin searah harga token.
+  const pctFor = (n) => (Math.pow(1 + binStep / 10000, n) - 1) * 100;
+  const abs = (pct) => fmtPct(pct).slice(1);
+  if (belowBins > 0) {
+    return `${bar(0)} ${hasPrice ? abs(-pctFor(-belowBins)) : plural(belowBins, "bin")} below range`;
+  }
+  if (aboveBins > 0) {
+    return `${bar(1)} ${hasPrice ? abs(pctFor(aboveBins)) : plural(aboveBins, "bin")} above range`;
+  }
+  const span = upper - lower;
+  const frac = span === 0 ? 1 : -belowBins / span;
+  if (!hasPrice) return `${bar(frac)} ${Math.round(frac * 100)}% from min`;
+  return `${bar(frac)} min ${fmtPct(pctFor(belowBins))} · max ${fmtPct(pctFor(-aboveBins))}`;
+}
+
+const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+// Nama pair sebagai link chart GMGN bila mint token diketahui.
+function pairLink(trade) {
+  const name = esc(trade.pair);
+  return BASE58.test(trade.baseMint ?? "") ? `<a href="https://gmgn.ai/sol/token/${trade.baseMint}">${name}</a>` : name;
+}
+
+function statusTag(inRange) {
+  if (inRange === true) return "🟢 IN";
+  if (inRange === false) return "🔴 OUT";
+  return "⚪ ?";
+}
+
+const withSol = (usd, sol) => (finite(sol) ? `${fmtUsd(usd)} (${fmtSol(sol)})` : fmtUsd(usd));
+
+export function buildTradeDetail(trade, live, now = Date.now()) {
   const legs = (trade.positions || []).length;
+  const age = finite(trade.openedAt) ? fmtAge(now - trade.openedAt) : "?";
+  const pnl = finite(live?.pnlPct) && finite(live?.pnlUsd) ? `${fmtUsd(live.pnlUsd)} (${fmtPct(live.pnlPct)})` : "?";
+  const deposit = finite(trade.depositSol) ? ` · deposit ${fmtSol(trade.depositSol)}` : "";
   const text = [
     `${TRADE_PREFIX}${trade.id}`,
     "",
-    esc(tradeLine(trade, live)),
-    `Pool ${shortAddr(trade.pool)} · ${legs} position(s) · opened ${fmtWib(trade.openedAt)}`,
-    rangeLine(trade.range),
-    `Unclaimed fees ${fmtUsd(live?.feesUsd)} · Peak PnL ${fmtPct(trade.peakPnlPct)}`,
-    `Origin ${esc(trade.origin ?? "?")}`,
-  ].join("\n");
+    `${statusTag(live?.inRange)} · ${pairLink(trade)} · ${age} · ${withSol(live?.valueUsd, live?.valueSol)}`,
+    `PnL ${pnl} · fees ${withSol(live?.feesUsd, live?.feesSol)}`,
+    [trade.shape, rangeLine(trade.range)].filter(Boolean).map(esc).join(" · "),
+    rangeBar(live?.bins),
+    "",
+    `${exitSummary(trade.exit)} · Peak PnL ${fmtPct(trade.peakPnlPct)}`,
+    `Pool ${shortAddr(trade.pool)} · ${legs} position(s)${deposit}`,
+    `Origin ${esc(trade.origin ?? "?")} · opened ${fmtWib(trade.openedAt)}`,
+  ]
+    .filter((line) => line != null)
+    .join("\n");
   const id = trade.id;
   const keyboard = new InlineKeyboard()
     .text("💰 Claim", `pos:claim:${id}`)
@@ -170,10 +257,13 @@ async function editSafe(ctx, text, extra) {
   }
 }
 
+// Preview link dimatikan: link chart di detail trade tidak boleh memunculkan kartu GMGN.
+const NO_PREVIEW = { link_preview_options: { is_disabled: true } };
+
 const show = (ctx, edit, text, keyboard) =>
   edit
-    ? editSafe(ctx, text, { ...HTML, reply_markup: keyboard })
-    : ctx.reply(text, { ...HTML, reply_markup: keyboard });
+    ? editSafe(ctx, text, { ...HTML, ...NO_PREVIEW, reply_markup: keyboard })
+    : ctx.reply(text, { ...HTML, ...NO_PREVIEW, reply_markup: keyboard });
 
 async function showList(ctx, edit) {
   const trades = listOpenTrades();
