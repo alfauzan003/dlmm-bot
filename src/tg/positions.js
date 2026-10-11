@@ -5,6 +5,7 @@ import { getOpenPositions } from "../meteora/positions.js";
 import { aggregateTradePnl } from "../exit/trade-exit.js";
 import { claimTrade } from "../lp/claim.js";
 import { closeTrade } from "../lp/close-trade.js";
+import { canFlip, flipTrade, planFlip } from "../lp/flip-trade.js";
 import { getTrackedPosition } from "../state/positions.js";
 import { getTrade, listOpenTrades, setTradeExit } from "../state/trades.js";
 import { registerConfirm, registerPrompt, withGuard } from "./bot.js";
@@ -18,7 +19,7 @@ const TRADE_PREFIX = "📂 Trade #";
 const BUSY = "Busy — another action is running on this trade";
 
 // Dependensi yang bisa diganti tes.
-export const deps = { getOpenPositions, claimTrade, closeTrade };
+export const deps = { getOpenPositions, claimTrade, closeTrade, planFlip, flipTrade };
 
 const PROMPTS = {
   tp: (id) => `Send the Take Profit % for trade #${id} (e.g. 20), or off.`,
@@ -220,10 +221,9 @@ export function buildTradeDetail(trade, live, now = Date.now()) {
     .text("🛑 SL", `pos:sl:${id}`)
     .text("📈 Trail", `pos:trail:${id}`)
     .row()
-    .text("❌ Close", `pos:close:${id}`)
-    .row()
-    .text("🔄 Refresh", `pos:open:${id}`)
-    .text("◀ Back", "home:positions");
+    .text("❌ Close", `pos:close:${id}`);
+  if (canFlip(trade)) keyboard.text("🔁 Flip", `pos:flip:${id}`);
+  keyboard.row().text("🔄 Refresh", `pos:open:${id}`).text("◀ Back", "home:positions");
   return { text, keyboard };
 }
 
@@ -347,6 +347,19 @@ function describeClose(res, id, swap) {
   return [`✅ Trade #${id} closed.`, swapLine(res.swapInfo, swap)].filter(Boolean).join("\n");
 }
 
+const NOTHING_TO_FLIP = "Nothing to flip — no token-only bins yet.";
+const fmtToken = (x) => Number(x).toLocaleString("en-US", { maximumFractionDigits: 4 });
+
+function describeFlip(res) {
+  if (res.busy) return BUSY;
+  const n = res.binCount;
+  if (res.dryRun) return `🧪 DRY RUN — would flip ${n} bins → new position over ${n} bins.`;
+  if (res.redepositFailed) return "⚠️ Withdrawn but re-deposit failed — token kept in wallet.";
+  if (!res.success && n === 0 && !res.error) return NOTHING_TO_FLIP;
+  if (!res.success) return `⚠️ Could not flip: ${esc(res.error ?? "unknown error")}`;
+  return `✅ Flipped ${n} bins (${fmtToken(res.tokenAmount)} token) → new position over ${n} bins.`;
+}
+
 export function register(bot) {
   bot.command(
     "positions",
@@ -439,6 +452,45 @@ export function register(bot) {
         return deps.closeTrade(trade, { reason: "manual", swap: payload.swap, positionsByAddr: live ?? new Map() });
       },
       describe: (res) => describeClose(res, trade.id, payload.swap),
+    });
+  });
+
+  bot.callbackQuery(
+    /^pos:flip:(\d+)$/,
+    withGuard("Flip", async (ctx) => {
+      const id = Number(ctx.match[1]);
+      const trade = openTradeOrNull(id);
+      if (!trade) return notOpen(ctx, id);
+      let plan;
+      try {
+        plan = await deps.planFlip(trade);
+      } catch (err) {
+        log.error(`Positions: rencana flip trade #${id} gagal: ${err?.stack || err}`);
+        plan = { error: String(err?.message ?? err).split("\n")[0] };
+      }
+      const result = (line) => editSafe(ctx, screen(id, line), { ...HTML, reply_markup: resultKeyboard(id) });
+      if (plan.error) return result(`⚠️ Could not flip: ${esc(plan.error)}`);
+      if (!(plan.binCount > 0)) return result(NOTHING_TO_FLIP);
+      const n = plan.binCount;
+      const keyboard = new InlineKeyboard()
+        .text("Flip", `ok:${session.issueToken({ action: "flip", id })}`)
+        .row()
+        .text("Cancel", `pos:open:${id}`);
+      await editSafe(ctx, screen(id, `Flip ${n} bins → new token position over ${n} bins above price.`), {
+        ...HTML,
+        reply_markup: keyboard,
+      });
+    })
+  );
+
+  registerConfirm("flip", async (ctx, payload) => {
+    const trade = openTradeOrNull(payload.id);
+    if (!trade) return notOpen(ctx, payload.id);
+    await runAction(ctx, trade.id, {
+      progress: "⏳ Flipping…",
+      label: "Flip",
+      work: () => deps.flipTrade(trade),
+      describe: describeFlip,
     });
   });
 }

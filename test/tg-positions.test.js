@@ -297,10 +297,7 @@ test("buildTradeDetail shows status, value, PnL, fees, range bar and exits", () 
   const { text } = buildTradeDetail(trade, live, 2 * 3600_000);
   const lines = text.split("\n");
   assert.equal(lines[0], "📂 Trade #7");
-  assert.equal(
-    lines[2],
-    `🟢 IN · <a href="https://gmgn.ai/sol/token/${MINT}">A-SOL</a> · 2h · $98.88 (0.4712 SOL)`
-  );
+  assert.equal(lines[2], `🟢 IN · <a href="https://gmgn.ai/sol/token/${MINT}">A-SOL</a> · 2h · $98.88 (0.4712 SOL)`);
   assert.equal(lines[3], "PnL -$0.60 (-0.60%) · fees $0.52 (0.0025 SOL)");
   assert.equal(lines[4], "spot · Range -45% / +10% · bins 100–155");
   assert.equal(lines[5], "[█████░░░░░░░] 40% from min");
@@ -576,4 +573,92 @@ test("summarizeOpenTrades sums only known trade PnL", async () => {
   assert.deepEqual(await positionsModule.summarizeOpenTrades(), { count: 2, pnlUsd: 3, partial: true });
   deps.getOpenPositions = async () => null;
   assert.deepEqual(await positionsModule.summarizeOpenTrades(), { count: 2, pnlUsd: null, partial: true });
+});
+
+// --- Flip ---
+
+test("buildTradeDetail shows Flip only for bid_ask and mixed", () => {
+  const base = { id: 7, pool: "Pool", pair: "A-SOL", origin: "manual", depositSol: 1, exit: EXIT() };
+  const closeRow = (shape) =>
+    buildTradeDetail({ ...base, shape }, null).keyboard.inline_keyboard[2].map((b) => [b.text, b.callback_data]);
+  for (const shape of ["bid_ask", "mixed"]) {
+    assert.deepEqual(closeRow(shape), [
+      ["❌ Close", "pos:close:7"],
+      ["🔁 Flip", "pos:flip:7"],
+    ]);
+  }
+  for (const shape of ["spot", "curve", null]) assert.deepEqual(closeRow(shape), [["❌ Close", "pos:close:7"]]);
+});
+
+async function flipToken(bot, calls, id) {
+  const before = calls.length;
+  await bot.handleUpdate(cbUpdate(`pos:flip:${id}`));
+  const payload = calls.slice(before).find((c) => c.method === "editMessageText").payload;
+  return { payload, flip: buttons(payload).find((b) => b.text === "Flip")?.callback_data };
+}
+
+test("flip confirm shows the planned bin count", async () => {
+  const trade = newTrade({ shape: "bid_ask" });
+  deps.planFlip = async () => ({ binCount: 12, legs: [], newRange: { minBinId: 1, maxBinId: 12 } });
+  const { bot, calls } = build();
+  const { payload, flip } = await flipToken(bot, calls, trade.id);
+  assert.ok(payload.text.includes("Flip 12 bins → new token position over 12 bins above price."));
+  assert.match(flip, /^ok:/);
+  assert.ok(buttons(payload).some((b) => b.text === "Cancel" && b.callback_data === `pos:open:${trade.id}`));
+});
+
+test("flip with nothing to flip shows the nothing message and no confirm token", async () => {
+  const trade = newTrade({ shape: "bid_ask" });
+  deps.planFlip = async () => ({ binCount: 0 });
+  const { bot, calls } = build();
+  const { payload, flip } = await flipToken(bot, calls, trade.id);
+  assert.ok(payload.text.includes("Nothing to flip — no token-only bins yet."));
+  assert.equal(flip, undefined);
+});
+
+test("flip plan error is shown", async () => {
+  const trade = newTrade({ shape: "bid_ask" });
+  deps.planFlip = async () => ({ error: "too many positions (10)" });
+  const { bot, calls } = build();
+  const { payload, flip } = await flipToken(bot, calls, trade.id);
+  assert.ok(payload.text.includes("⚠️ Could not flip: too many positions (10)"));
+  assert.equal(flip, undefined);
+});
+
+test("flip token is one-shot and reports success", async () => {
+  const trade = newTrade({ shape: "mixed" });
+  deps.planFlip = async () => ({ binCount: 12 });
+  const flips = [];
+  deps.flipTrade = async (t) => {
+    flips.push(t.id);
+    return { success: true, binCount: 12, tokenAmount: 1234.5, position: "New" };
+  };
+  const { bot, calls } = build();
+  const { flip } = await flipToken(bot, calls, trade.id);
+  await bot.handleUpdate(cbUpdate(flip));
+  await bot.handleUpdate(cbUpdate(flip));
+  assert.deepEqual(flips, [trade.id]);
+  assert.ok(edits(calls).some((t) => t.includes("⏳ Flipping…")));
+  assert.ok(edits(calls).some((t) => t.includes("✅ Flipped 12 bins (1,234.5 token) → new position over 12 bins.")));
+  assert.ok(answers(calls).some((c) => c.payload.text === "This button expired — start again"));
+});
+
+test("flip re-deposit failure shows the kept-in-wallet message", async () => {
+  const trade = newTrade({ shape: "bid_ask" });
+  deps.planFlip = async () => ({ binCount: 3 });
+  deps.flipTrade = async () => ({ success: false, redepositFailed: true, binCount: 3, tokenAmount: 5 });
+  const { bot, calls } = build();
+  const { flip } = await flipToken(bot, calls, trade.id);
+  await bot.handleUpdate(cbUpdate(flip));
+  assert.ok(edits(calls).some((t) => t.includes("⚠️ Withdrawn but re-deposit failed — token kept in wallet.")));
+});
+
+test("flip in dry run says so", async () => {
+  const trade = newTrade({ shape: "bid_ask" });
+  deps.planFlip = async () => ({ binCount: 4 });
+  deps.flipTrade = async () => ({ success: true, dryRun: true, binCount: 4 });
+  const { bot, calls } = build();
+  const { flip } = await flipToken(bot, calls, trade.id);
+  await bot.handleUpdate(cbUpdate(flip));
+  assert.ok(edits(calls).some((t) => t.includes("🧪 DRY RUN — would flip 4 bins → new position over 4 bins.")));
 });
