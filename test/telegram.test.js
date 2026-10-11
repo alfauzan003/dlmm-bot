@@ -153,3 +153,98 @@ test("status trailing aktif: menampilkan Trailing, Peak, dan Exit at", () => {
   assert.match(msg, /Peak: \+11\.40%/);
   assert.match(msg, /Exit at : [+-]?\d+\.\d{2}%/);
 });
+
+// --- Close alert: tx + Metlex hand-off ---
+
+const { notifyTradeClosed, notifyClose, __setSender } = await import("../src/notify/telegram.js");
+const METLEX_URL = "https://www.metlex.io/pnl-cards";
+
+function captureSender() {
+  const sent = [];
+  __setSender((text, extra = {}) => sent.push({ text, extra }));
+  return sent;
+}
+
+test("close: closeTx tampil sebagai <code> dan teks dinamis di-escape", () => {
+  const msg = buildCloseMessage("A<B>-SOL", "tp", 4, { success: false, error: "x<y" }, null, null, {
+    closeTx: "sig123",
+  });
+  assert.match(msg, /<code>sig123<\/code>/);
+  assert.match(msg, /A&lt;B&gt;-SOL/);
+  assert.match(msg, /x&lt;y/);
+  assert.match(msg, /Take Profit/);
+});
+
+test("close: tanpa closeTx pesan tetap teks biasa", () => {
+  const msg = buildCloseMessage("A<B>-SOL", "stop_loss", -2, null);
+  assert.ok(!msg.includes("<code>"));
+  assert.ok(msg.includes("A<B>-SOL"));
+});
+
+test("exitLabel: label alasan trade", () => {
+  assert.equal(exitLabel("tp"), "Take Profit");
+  assert.equal(exitLabel("sl"), "Stop Loss");
+  assert.equal(exitLabel("trail"), "Trailing");
+  assert.equal(exitLabel("manual"), "Manual close");
+  assert.equal(exitLabel("closed_outside"), "Closed outside bot");
+});
+
+test("notifyClose: closeTx -> HTML + tombol Metlex; tanpa closeTx -> teks biasa", () => {
+  const sent = captureSender();
+  notifyClose("AAA-SOL", "tp", 4, null, null, null, { closeTx: "sigX" });
+  notifyClose("AAA-SOL", "tp", 4, null);
+  __setSender(null);
+  assert.equal(sent[0].extra.parse_mode, "HTML");
+  assert.equal(sent[0].extra.reply_markup.inline_keyboard[0][0].url, METLEX_URL);
+  assert.match(sent[0].text, /<code>sigX<\/code>/);
+  assert.equal(sent[1].extra.parse_mode, undefined);
+  assert.equal(sent[1].extra.reply_markup, undefined);
+});
+
+test("notifyTradeClosed: HTML, PnL USD dan %, durasi, tx, tombol Metlex", () => {
+  const sent = captureSender();
+  notifyTradeClosed(
+    {
+      id: 7,
+      pair: "A&B-SOL",
+      closeReason: "tp",
+      closePnlUsd: 12.5,
+      closePnlPct: 12.5,
+      openedAt: Date.UTC(2026, 9, 11, 0, 0, 0),
+      closedAt: Date.UTC(2026, 9, 11, 1, 5, 0),
+      closeTx: "sigT",
+    },
+    { swapInfo: { success: false, error: "no <route>" } }
+  );
+  __setSender(null);
+  assert.equal(sent.length, 1);
+  const { text, extra } = sent[0];
+  assert.equal(extra.parse_mode, "HTML");
+  assert.equal(extra.reply_markup.inline_keyboard[0][0].url, METLEX_URL);
+  assert.match(text, /A&amp;B-SOL/);
+  assert.match(text, /Take Profit/);
+  assert.match(text, /\+\$12\.50/);
+  assert.match(text, /\+12\.50%/);
+  assert.match(text, /1h 5m/);
+  assert.match(text, /<code>sigT<\/code>/);
+  assert.match(text, /no &lt;route&gt;/);
+});
+
+test("notifyTradeClosed: PnL tidak diketahui dan tanpa tx", () => {
+  const sent = captureSender();
+  notifyTradeClosed({
+    id: 1,
+    pair: "X-SOL",
+    closeReason: "closed_outside",
+    closePnlUsd: null,
+    closePnlPct: null,
+    openedAt: 0,
+    closedAt: 30000,
+    closeTx: null,
+  });
+  __setSender(null);
+  assert.ok(!sent[0].text.includes("<code>"));
+  assert.match(sent[0].text, /Closed outside bot/);
+  assert.match(sent[0].text, /PnL.*\?/);
+  assert.equal(sent[0].extra.reply_markup.inline_keyboard[0][0].url, METLEX_URL);
+});

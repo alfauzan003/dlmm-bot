@@ -1,0 +1,287 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "fs";
+import os from "os";
+import path from "path";
+
+// Arahkan file state ke direktori sementara SEBELUM modul di-import.
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "meteorabot-closetrade-"));
+process.env.STATE_FILE = path.join(TMP, "state.json");
+process.env.DECISION_LOG_FILE = path.join(TMP, "decision-log.json");
+process.env.PNL_HISTORY_FILE = path.join(TMP, "pnl-history.json");
+
+const { trackPosition, recordClose, getTrackedPosition } = await import("../src/state/positions.js");
+const { createTrade, getTrade, setTradeDepositUsd, tryLockTrade, tradeLock, unlockTrade } =
+  await import("../src/state/trades.js");
+const { closeTrade } = await import("../src/lp/close-trade.js");
+const { claimTrade } = await import("../src/lp/claim.js");
+
+const EXIT = {
+  tp: { on: true, pct: 15 },
+  sl: { on: true, pct: 25 },
+  trail: { on: true, startPct: 5, distancePct: 3 },
+};
+
+function reset() {
+  fs.rmSync(process.env.STATE_FILE, { force: true });
+  fs.rmSync(process.env.DECISION_LOG_FILE, { force: true });
+}
+
+function newTrade(positions) {
+  for (const p of positions) trackPosition(p, "PoolA", "AAA-SOL", "MintA", null, "spot");
+  const t = createTrade({
+    pool: "PoolA",
+    pair: "AAA-SOL",
+    baseMint: "MintA",
+    positions,
+    origin: "manual",
+    exit: structuredClone(EXIT),
+  });
+  setTradeDepositUsd(t.id, 100);
+  return getTrade(t.id);
+}
+
+function fakeDeps(overrides = {}) {
+  const calls = { handleClose: [], swapToSol: [], notify: [], claim: [] };
+  const deps = {
+    handleClose: async (pos, reason, opts) => {
+      calls.handleClose.push({ pos, reason, opts });
+      recordClose(pos.position, reason, 5, { pnlUsd: 5, closeTx: `tx-${pos.position}` });
+      return { success: true, swapInfo: null, closeTx: `tx-${pos.position}`, pnlUsd: 5, pnlPct: 5 };
+    },
+    getTokenBalance: async () => 100,
+    swapToSol: async (mint, amount) => {
+      calls.swapToSol.push([mint, amount]);
+      return { success: true };
+    },
+    notifyTradeClosed: (trade, extra) => calls.notify.push({ trade, extra }),
+    claimPositionFees: async (addr) => {
+      calls.claim.push(addr);
+      return { success: true, txs: ["claim-tx"] };
+    },
+    ...overrides,
+  };
+  return { deps, calls };
+}
+
+test("close settles and alerts once", async () => {
+  reset();
+  const t = newTrade(["A", "B"]);
+  const { deps, calls } = fakeDeps();
+  const res = await closeTrade(t, { reason: "manual", deps });
+  assert.equal(res.success, true);
+  assert.deepEqual(res.failed, []);
+  assert.equal(calls.handleClose.length, 2);
+  assert.deepEqual(calls.handleClose[0].opts, { skipAutoSwap: true, silent: true, skipDeactivate: true });
+  assert.equal(calls.notify.length, 1);
+  assert.equal(calls.notify[0].trade.id, t.id);
+  const stored = getTrade(t.id);
+  assert.equal(stored.closed, true);
+  assert.equal(stored.closeReason, "manual");
+  assert.equal(stored.closePnlUsd, 10);
+  assert.equal(tradeLock(t.id), null);
+});
+
+test("close uses the live position object when provided", async () => {
+  reset();
+  const t = newTrade(["A"]);
+  const live = { position: "A", pool: "PoolA", pair: "AAA-SOL", pnlUsd: 1.5 };
+  const { deps, calls } = fakeDeps();
+  await closeTrade(t, { reason: "tp", positionsByAddr: new Map([["A", live]]), deps });
+  assert.equal(calls.handleClose[0].pos, live);
+});
+
+test("close falls back to a minimal position object", async () => {
+  reset();
+  const t = newTrade(["A"]);
+  const { deps, calls } = fakeDeps();
+  await closeTrade(t, { reason: "tp", deps });
+  assert.deepEqual(calls.handleClose[0].pos, {
+    position: "A",
+    pool: "PoolA",
+    pair: "AAA-SOL",
+    baseMint: "MintA",
+  });
+});
+
+test("swap happens once for all legs", async () => {
+  reset();
+  const t = newTrade(["A", "B"]);
+  const { deps, calls } = fakeDeps();
+  const res = await closeTrade(t, { reason: "manual", deps });
+  assert.deepEqual(calls.swapToSol, [["MintA", 100]]);
+  assert.equal(res.swapInfo.success, true);
+  assert.equal(calls.notify[0].extra.swapInfo.success, true);
+});
+
+test("close only does not swap", async () => {
+  reset();
+  const t = newTrade(["A"]);
+  const { deps, calls } = fakeDeps();
+  const res = await closeTrade(t, { reason: "manual", swap: false, deps });
+  assert.equal(res.success, true);
+  assert.equal(calls.swapToSol.length, 0);
+  assert.equal(res.swapInfo, null);
+});
+
+test("failed swap is reported but the trade still settles", async () => {
+  reset();
+  const t = newTrade(["A"]);
+  const { deps, calls } = fakeDeps({ swapToSol: async () => ({ success: false, error: "no route\nmore" }) });
+  const res = await closeTrade(t, { reason: "manual", deps });
+  assert.equal(res.success, true);
+  assert.equal(res.swapInfo.success, false);
+  assert.equal(res.swapInfo.error, "no route");
+  assert.equal(calls.notify.length, 1);
+  assert.equal(getTrade(t.id).closed, true);
+});
+
+test("busy when locked", async () => {
+  reset();
+  const t = newTrade(["A"]);
+  const { deps, calls } = fakeDeps();
+  assert.equal(tryLockTrade(t.id, "claim"), true);
+  const res = await closeTrade(t, { reason: "manual", deps });
+  assert.equal(res.success, false);
+  assert.equal(res.busy, true);
+  assert.equal(calls.handleClose.length, 0);
+  // kunci milik pihak lain tidak boleh dilepas oleh closeTrade
+  assert.equal(tradeLock(t.id), "claim");
+  unlockTrade(t.id);
+});
+
+test("leg failure keeps trade open and releases the lock", async () => {
+  reset();
+  const t = newTrade(["A", "B"]);
+  const { deps, calls } = fakeDeps({
+    handleClose: async (pos, reason) => {
+      if (pos.position === "B") return { success: false, error: "boom" };
+      recordClose(pos.position, reason, 5, { pnlUsd: 5 });
+      return { success: true };
+    },
+  });
+  const res = await closeTrade(t, { reason: "manual", deps });
+  assert.equal(res.success, false);
+  assert.deepEqual(res.failed, ["B"]);
+  assert.equal(calls.notify.length, 0);
+  // token dari leg A yang sudah tertutup tetap di-swap satu kali
+  assert.deepEqual(calls.swapToSol, [["MintA", 100]]);
+  assert.equal(getTrade(t.id).closed, false);
+  assert.equal(tradeLock(t.id), null);
+});
+
+test("every leg is attempted even after a failure", async () => {
+  reset();
+  const t = newTrade(["A", "B"]);
+  const seen = [];
+  const { deps, calls } = fakeDeps({
+    handleClose: async (pos) => {
+      seen.push(pos.position);
+      return { success: false, error: "boom" };
+    },
+  });
+  const res = await closeTrade(t, { reason: "manual", deps });
+  assert.deepEqual(seen, ["A", "B"]);
+  assert.deepEqual(res.failed, ["A", "B"]);
+  assert.equal(calls.swapToSol.length, 0);
+});
+
+test("a thrown leg error counts as a failure and still releases the lock", async () => {
+  reset();
+  const t = newTrade(["A"]);
+  const { deps } = fakeDeps({
+    handleClose: async () => {
+      throw new Error("rpc down");
+    },
+  });
+  const res = await closeTrade(t, { reason: "manual", deps });
+  assert.equal(res.success, false);
+  assert.deepEqual(res.failed, ["A"]);
+  assert.equal(tradeLock(t.id), null);
+});
+
+test("legs already closed are skipped on retry", async () => {
+  reset();
+  const t = newTrade(["A", "B"]);
+  recordClose("A", "manual", 5, { pnlUsd: 5, closeTx: "txA" });
+  const { deps, calls } = fakeDeps();
+  const res = await closeTrade(getTrade(t.id), { reason: "manual", deps });
+  assert.equal(res.success, true);
+  assert.deepEqual(
+    calls.handleClose.map((c) => c.pos.position),
+    ["B"]
+  );
+  assert.equal(getTrade(t.id).closed, true);
+});
+
+test("already closed trade is a no-op", async () => {
+  reset();
+  const t = newTrade(["A"]);
+  const { deps, calls } = fakeDeps();
+  await closeTrade(t, { reason: "manual", deps });
+  const again = await closeTrade(getTrade(t.id), { reason: "manual", deps });
+  assert.equal(again.success, true);
+  assert.equal(calls.handleClose.length, 1);
+  assert.equal(calls.notify.length, 1);
+});
+
+test("recordClose does not overwrite an already-closed leg", () => {
+  reset();
+  newTrade(["A"]);
+  recordClose("A", "tp", 5, { pnlUsd: 5, closeTx: "tx1" });
+  const first = getTrackedPosition("A");
+  recordClose("A", "manual", null, {});
+  const after = getTrackedPosition("A");
+  assert.equal(after.closePnlUsd, 5);
+  assert.equal(after.closeTx, "tx1");
+  assert.equal(after.closeReason, "tp");
+  assert.equal(after.closedAt, first.closedAt);
+  const log = JSON.parse(fs.readFileSync(process.env.DECISION_LOG_FILE, "utf8"));
+  assert.equal(log.filter((e) => e.position === "A").length, 1);
+});
+
+test("claim swaps once when asked", async () => {
+  reset();
+  const t = newTrade(["A", "B"]);
+  const { deps, calls } = fakeDeps();
+  const res = await claimTrade(t, { swap: true, deps });
+  assert.equal(res.success, true);
+  assert.equal(res.claimed, 2);
+  assert.deepEqual(res.failed, []);
+  assert.deepEqual(calls.claim, ["A", "B"]);
+  assert.deepEqual(calls.swapToSol, [["MintA", 100]]);
+  assert.equal(res.swapInfo.success, true);
+  assert.equal(tradeLock(t.id), null);
+  assert.equal(getTrade(t.id).closed, false);
+});
+
+test("claim does not swap by default", async () => {
+  reset();
+  const t = newTrade(["A"]);
+  const { deps, calls } = fakeDeps();
+  const res = await claimTrade(t, { deps });
+  assert.equal(res.success, true);
+  assert.equal(calls.swapToSol.length, 0);
+});
+
+test("claim lists failed legs and is busy while locked", async () => {
+  reset();
+  const t = newTrade(["A", "B"]);
+  const { deps, calls } = fakeDeps({
+    claimPositionFees: async (addr) => (addr === "A" ? { success: false, error: "x" } : { success: true, txs: [] }),
+  });
+  const res = await claimTrade(t, { swap: true, deps });
+  assert.equal(res.success, false);
+  assert.deepEqual(res.failed, ["A"]);
+  assert.equal(res.claimed, 1);
+  assert.equal(tradeLock(t.id), null);
+
+  tryLockTrade(t.id, "close");
+  const busy = await claimTrade(t, { deps });
+  assert.equal(busy.success, false);
+  assert.equal(busy.busy, true);
+  assert.equal(tradeLock(t.id), "close");
+  unlockTrade(t.id);
+  // leg B berhasil diklaim -> swap satu kali walau leg A gagal
+  assert.equal(calls.swapToSol.length, 1);
+});

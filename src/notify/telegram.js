@@ -4,12 +4,16 @@ import log from "../core/logger.js";
 import { getOORState, getTrackedPosition } from "../state/positions.js";
 import { resolveTrailingReference } from "../exit/trailing.js";
 import { trailingDropThreshold } from "../state/trailing.js";
+import { esc, fmtPct, fmtUsd } from "../tg/format.js";
 
 const TOKEN = config.telegramBotToken;
 const CHAT_ID = config.telegramChatId;
 const BASE = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;
 
-function send(text, extra = {}) {
+const METLEX_URL = "https://www.metlex.io/pnl-cards";
+const METLEX_KEYBOARD = { inline_keyboard: [[{ text: "🖼 Open Metlex", url: METLEX_URL }]] };
+
+function rawSend(text, extra = {}) {
   if (!BASE || !CHAT_ID) return;
   const payload = { chat_id: CHAT_ID, text: String(text).slice(0, 4096) };
   if (extra.parse_mode) payload.parse_mode = extra.parse_mode;
@@ -37,6 +41,16 @@ function send(text, extra = {}) {
   req.on("error", (err) => log.warn(`Telegram error: ${err.message}`));
   req.write(body);
   req.end();
+}
+
+// Pengirim level-bawah; hanya untuk tes (tangkap payload tanpa jaringan).
+let sender = rawSend;
+export function __setSender(fn) {
+  sender = typeof fn === "function" ? fn : rawSend;
+}
+
+function send(text, extra = {}) {
+  return sender(text, extra);
 }
 
 export function notifyEntry({ pair, pool, feeMode, feeSol }) {
@@ -100,24 +114,69 @@ export function exitLabel(reason) {
   if (r === "low_yield") return "Yield Rendah";
   if (r.startsWith("bounce_recovery")) return "Bounce Recovery";
   if (r === "not_detected") return "Tidak Terdeteksi";
+  if (r === "tp") return "Take Profit";
+  if (r === "sl") return "Stop Loss";
+  if (r === "trail") return "Trailing";
+  if (r === "manual") return "Manual close";
+  if (r === "closed_outside") return "Closed outside bot";
   return r;
 }
 
-export function buildCloseMessage(pair, reason, pnlPct, swapInfo, drawdownPnl = null, peakPnl = null) {
+// Dengan `closeTx` pesan berformat HTML (tx tap-to-copy di <code>), jadi semua
+// teks dinamis di-escape. Tanpa closeTx tetap teks biasa seperti semula.
+export function buildCloseMessage(
+  pair,
+  reason,
+  pnlPct,
+  swapInfo,
+  drawdownPnl = null,
+  peakPnl = null,
+  { closeTx } = {}
+) {
+  const e = closeTx ? esc : (v) => v;
   const row = (label, value) => `${label.padEnd(16)}: ${value}`;
-  const lines = [`🔒 Closed ${pair}`, "", row("Trigger Exit", exitLabel(reason))];
+  const lines = [`🔒 Closed ${e(pair)}`, "", row("Trigger Exit", e(exitLabel(reason)))];
   if (peakPnl != null) lines.push(row("Peak", signedPct(peakPnl)));
   if (drawdownPnl != null) lines.push(row("Drawdown", signedPct(drawdownPnl)));
   lines.push("", row("Realized PnL", signedPct(pnlPct)));
   if (swapInfo && swapInfo.success === false) {
-    const detail = swapInfo.error ? `: ${swapInfo.error}` : " — perlu swap manual";
+    const detail = swapInfo.error ? `: ${e(swapInfo.error)}` : " — perlu swap manual";
     lines.push(`⚠️ Swap GAGAL${detail}`);
   }
+  if (closeTx) lines.push("", `Tx: <code>${esc(closeTx)}</code>`);
   return lines.join("\n");
 }
 
-export function notifyClose(pair, reason, pnlPct, swapInfo, drawdownPnl = null, peakPnl = null) {
-  send(buildCloseMessage(pair, reason, pnlPct, swapInfo, drawdownPnl, peakPnl));
+export function notifyClose(pair, reason, pnlPct, swapInfo, drawdownPnl = null, peakPnl = null, { closeTx } = {}) {
+  const text = buildCloseMessage(pair, reason, pnlPct, swapInfo, drawdownPnl, peakPnl, { closeTx });
+  if (closeTx) send(text, { parse_mode: "HTML", reply_markup: METLEX_KEYBOARD });
+  else send(text);
+}
+
+function fmtDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "?";
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return "under 1m";
+  const h = Math.floor(mins / 60);
+  const d = Math.floor(h / 24);
+  if (d > 0) return `${d}d ${h % 24}h`;
+  return h > 0 ? `${h}h ${mins % 60}m` : `${mins}m`;
+}
+
+// Alert close untuk satu trade utuh (semua leg sudah tutup).
+export function notifyTradeClosed(trade, { swapInfo = null } = {}) {
+  const lines = [
+    `🔒 Trade #${trade.id} closed — ${esc(trade.pair)}`,
+    "",
+    `Reason: ${esc(exitLabel(trade.closeReason))}`,
+    `PnL: ${trade.closePnlUsd > 0 ? "+" : ""}${fmtUsd(trade.closePnlUsd)} (${fmtPct(trade.closePnlPct)})`,
+    `Duration: ${fmtDuration(trade.closedAt - trade.openedAt)}`,
+  ];
+  if (swapInfo && swapInfo.success === false) {
+    lines.push(`⚠️ Swap failed${swapInfo.error ? `: ${esc(swapInfo.error)}` : " — swap manually"}`);
+  }
+  if (trade.closeTx) lines.push("", `Tx: <code>${esc(trade.closeTx)}</code>`);
+  send(lines.join("\n"), { parse_mode: "HTML", reply_markup: METLEX_KEYBOARD });
 }
 
 export function notifyError(msg) {

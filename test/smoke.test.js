@@ -35,6 +35,7 @@ const MODULES = [
   "../src/meteora/sdk.js",
   "../src/meteora/positions.js",
   "../src/meteora/close.js",
+  "../src/meteora/claim.js",
   "../src/meteora/open-token-position.js",
   "../src/notify/telegram.js",
   "../src/entry/index.js",
@@ -60,6 +61,8 @@ const MODULES = [
   "../src/tg/start.js",
   "../src/tg/help.js",
   "../src/tg/settings.js",
+  "../src/lp/claim.js",
+  "../src/lp/close-trade.js",
 ];
 
 test("every module loads without import errors", async () => {

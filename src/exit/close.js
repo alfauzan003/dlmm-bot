@@ -3,7 +3,7 @@ import { isOn } from "../state/settings.js";
 import log from "../core/logger.js";
 import * as tg from "../notify/telegram.js";
 import { closePosition } from "../meteora/close.js";
-import { waitClosedPositionPnl } from "../meteora/positions.js";
+import { waitClosedPositionEntry, pnlFromEntry, usdPnlFromEntry } from "../meteora/positions.js";
 import { getTokenBalance } from "../solana/balances.js";
 import { swapToSol } from "../solana/swap.js";
 import { recordClose, getTrackedPosition, getOpenTrackedPositions } from "../state/positions.js";
@@ -20,7 +20,7 @@ import { humanReason, fmtPct } from "../core/report.js";
 const closingPositions = new Set();
 
 export async function handleClose(pos, reason, opts = {}) {
-  const { skipAutoSwap = false, skipDeactivate = false } = opts;
+  const { skipAutoSwap = false, skipDeactivate = false, silent = false } = opts;
   const pairLabel = pos.pair || pos.position?.slice(0, 8) || "?";
   const positionAddress = pos.position;
 
@@ -39,7 +39,9 @@ export async function handleClose(pos, reason, opts = {}) {
     if (result?.success) {
       // PnL final dari endpoint closed Meteora (agar alert sama dengan dashboard).
       // Dijalankan paralel dengan swap; fallback ke PnL live bila belum ter-index.
-      const realizedPnlPromise = result.dryRun ? Promise.resolve(null) : waitClosedPositionPnl(pos.pool, pos.position);
+      const closedEntryPromise = result.dryRun
+        ? Promise.resolve(null)
+        : waitClosedPositionEntry(pos.pool, pos.position);
       // Ambil tracked sebelum clearTrailingState agar referensi trailing masih tersedia.
       const trackedClose = getTrackedPosition(pos.position);
       const wasDca = trackedClose?.isDca === true;
@@ -93,23 +95,29 @@ export async function handleClose(pos, reason, opts = {}) {
         }
       }
 
-      const finalPnl = await realizedPnlPromise;
+      const closedEntry = await closedEntryPromise;
+      const finalPnl = pnlFromEntry(closedEntry);
       const realizedPnl = finalPnl ?? pos.pnlPct;
       if (finalPnl == null) log.warn(`${pairLabel}: PnL final Meteora belum tersedia — pakai PnL live`);
-      recordClose(pos.position, reason, realizedPnl);
+      // PnL USD final dari entri closed; fallback ke PnL USD live posisi.
+      const finalUsd = usdPnlFromEntry(closedEntry).pnlUsd;
+      const livePnlUsd = Number.isFinite(pos.pnlUsd) ? pos.pnlUsd : null;
+      const pnlUsd = Number.isFinite(finalUsd) ? finalUsd : livePnlUsd;
+      const closeTx = result.txs?.at(-1) ?? null;
+      recordClose(pos.position, reason, realizedPnl, { pnlUsd, closeTx });
 
       const swapTxt = swapInfo ? (swapInfo.success ? "token di-swap ke SOL" : "token GAGAL di-swap") : "tanpa swap";
       log.info(`🔒 CLOSE ${pairLabel} — ${humanReason(reason)} | PnL ${fmtPct(realizedPnl)} | ${swapTxt}`);
       log.debug(`[detail] reason=${reason} | position ${positionAddress} | peakRef=${peakPnl ?? "-"}`);
       recordAction(`CLOSE ${pairLabel} — ${humanReason(reason)} | PnL ${fmtPct(realizedPnl)}`);
 
-      tg.notifyClose(pairLabel, reason, realizedPnl, swapInfo, lowestPnl, peakPnl);
+      if (!silent) tg.notifyClose(pairLabel, reason, realizedPnl, swapInfo, lowestPnl, peakPnl, { closeTx });
 
       // Sesi pool selesai (tak ada posisi tersisa, termasuk DCA) → tandai '#'
       // di pool.txt agar tidak di-entry lagi tanpa pengawasan manual.
       const stillOpenInPool = getOpenTrackedPositions().some((p) => p.pool === pos.pool);
       if (!skipDeactivate && !stillOpenInPool) deactivatePool(pos.pool, "entry+exit selesai");
-      return { success: true, swapInfo };
+      return { success: true, swapInfo, closeTx, pnlUsd, pnlPct: realizedPnl };
     } else {
       const brief = String(result?.error || "unknown").split("\n")[0];
       log.error(`Close failed for ${pairLabel}: ${brief}`);

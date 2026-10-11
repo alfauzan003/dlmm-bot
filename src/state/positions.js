@@ -136,7 +136,8 @@ export function recordClose(positionAddress, reason, pnlPct, extra = {}) {
   if (!positionAddress) return;
   const state = readState();
   const p = state.positions[positionAddress];
-  if (!p) return;
+  // Sudah tertutup: jangan timpa closePnlUsd/closeTx/closedAt (retry atau panggilan ganda).
+  if (!p || p.closed) return;
 
   p.closed = true;
   p.closedAt = Date.now();
