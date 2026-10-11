@@ -7,8 +7,7 @@ import log from "../core/logger.js";
 import { sleep } from "../core/utils.js";
 import { getConnection } from "../solana/connection.js";
 import { getWallet } from "../solana/wallet.js";
-import { getTokenBalance } from "../solana/balances.js";
-import { buildFeePlan } from "../solana/fees.js";
+import { buildFeePlan, checkFeeCap } from "../solana/fees.js";
 import { sendAndConfirmRobust } from "../solana/send.js";
 import { getPoolInfo } from "../entry/pool-info.js";
 import {
@@ -16,12 +15,14 @@ import {
   removeEntryInProgressMint,
   addEntryInProgressPool,
   removeEntryInProgressPool,
+  isEntryInProgressPool,
+  isPoolClosing,
 } from "../entry/runtime.js";
 import { openTokenOnlyPosition } from "../meteora/open-token-position.js";
 import { addKeepMint } from "../state/keep-mints.js";
 import { getTrackedPosition } from "../state/positions.js";
 import { addTradeLeg, getTrade, tryLockTrade, unlockTrade } from "../state/trades.js";
-import { MAX_TRADE_POSITIONS } from "./open-trade.js";
+import { MAX_TRADE_POSITIONS, SOL_BUFFER } from "./open-trade.js";
 
 export const FLIP_MAX_BINS = 70;
 export const FLIP_SHAPES = ["bid_ask", "mixed"];
@@ -82,6 +83,17 @@ async function readLegs(pool, baseIsX) {
   };
 }
 
+// Saldo token (UI) yang melempar error saat RPC gagal: getTokenBalance mengembalikan 0 saat gagal,
+// sehingga saldo "sebelum" 0 palsu akan ikut menyetor token yang sudah ada di wallet.
+async function readTokenBalance(mint) {
+  const connection = getConnection();
+  const wallet = getWallet();
+  const accounts = await connection.getTokenAccountsByOwner(wallet.publicKey, { mint: new PublicKey(mint) });
+  if (accounts.value.length === 0) return 0;
+  const info = await connection.getTokenAccountBalance(accounts.value[0].pubkey);
+  return Number(info.value.uiAmount || 0);
+}
+
 // Tarik 100% likuiditas bin [fromBinId, toBinId] satu posisi; posisi & fee tetap.
 async function removeBins(pool, { position, fromBinId, toBinId }) {
   const connection = getConnection();
@@ -111,7 +123,9 @@ function withDeps(deps = {}) {
     readLegs,
     readActiveBinId: async (pool) => (await pool.getActiveBin()).binId,
     removeBins,
-    getTokenBalance,
+    getTokenBalance: readTokenBalance,
+    getSolBalance: async () => (await getConnection().getBalance(getWallet().publicKey)) / 1e9,
+    feeCheck: () => checkFeeCap(buildFeePlan()),
     openTokenOnlyPosition,
     addKeepMint,
     sleep,
@@ -129,9 +143,20 @@ export async function planFlip(trade, { deps } = {}) {
   const { pool, baseIsX } = (await d.loadPool(trade.pool)) || {};
   if (!pool) return { error: "pool not found" };
   const { activeBinId, legs } = await d.readLegs(pool, baseIsX);
-  const own = new Set((trade.positions || []).filter((addr) => getTrackedPosition(addr)?.closed !== true));
+  // Leg hasil flip sudah berupa token di sisi token: menarik-setornya lagi hanya membuang fee & rent.
+  const flipLegs = new Set(trade.flipLegs || []);
+  const own = new Set(
+    (trade.positions || []).filter((addr) => !flipLegs.has(addr) && getTrackedPosition(addr)?.closed !== true)
+  );
   const sel = selectFlipBins({ legs: legs.filter((l) => own.has(l.position)), activeBinId, baseIsX });
   if (sel.binCount === 0) return { binCount: 0 };
+  // Cek biaya & SOL sebelum menarik apa pun: gagal setelah tarik = token terdampar di wallet.
+  const fee = d.feeCheck();
+  if (!fee.ok) return { error: `fee estimate ${fee.totalSol.toFixed(6)} SOL > cap ${fee.cap} SOL` };
+  const sol = await d.getSolBalance();
+  if (!(sol >= SOL_BUFFER)) {
+    return { error: `not enough SOL for the new position: need ${SOL_BUFFER}, have ${Number(sol).toFixed(4)}` };
+  }
   return {
     binCount: sel.binCount,
     legs: sel.legs,
@@ -148,6 +173,11 @@ export async function flipTrade(trade, { deps } = {}) {
   if (!tryLockTrade(trade.id, "flip")) return { success: false, busy: true, binCount: 0 };
   const t = getTrade(trade.id) ?? trade;
   const label = `Flip trade #${t.id} ${t.pair}`;
+  // Open/DCA/close lain di pool ini mengubah saldo token yang sama -> selisih saldo tidak bisa dipercaya.
+  if (isEntryInProgressPool(t.pool) || isPoolClosing(t.pool)) {
+    unlockTrade(trade.id);
+    return { success: false, error: "pool is busy (open/close running) — try again shortly", binCount: 0 };
+  }
   // Token ada di wallet di antara tarik & setor: lindungi dari sweep; pool ditandai supaya
   // posisi baru tidak diadopsi sebagai trade terpisah.
   addEntryInProgressPool(t.pool);
@@ -164,7 +194,14 @@ export async function flipTrade(trade, { deps } = {}) {
       return { success: true, dryRun: true, binCount };
     }
 
-    const before = await d.getTokenBalance(t.baseMint);
+    let before;
+    try {
+      before = await d.getTokenBalance(t.baseMint);
+    } catch (err) {
+      return { success: false, error: `could not read token balance: ${err?.message ?? err}`, binCount: 0 };
+    }
+    // Saldo "sesudah" yang gagal dibaca dianggap belum bertambah (dicoba ulang).
+    const readAfter = () => d.getTokenBalance(t.baseMint).catch(() => NaN);
     let failedLegs = 0;
     for (const leg of plan.legs) {
       try {
@@ -174,10 +211,10 @@ export async function flipTrade(trade, { deps } = {}) {
         log.warn(`${label}: tarik bin ${leg.position.slice(0, 8)} gagal: ${err?.message ?? err}`);
       }
     }
-    let after = await d.getTokenBalance(t.baseMint);
+    let after = await readAfter();
     for (let i = 0; i < BALANCE_RETRIES && !(after > before); i++) {
       await d.sleep(2000);
-      after = await d.getTokenBalance(t.baseMint);
+      after = await readAfter();
     }
     const tokenAmount = after - before;
     if (!(tokenAmount > 0)) {

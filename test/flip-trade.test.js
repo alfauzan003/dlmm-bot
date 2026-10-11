@@ -97,9 +97,17 @@ test("canFlip only for bid_ask and mixed", () => {
 const { planFlip, flipTrade } = await import("../src/lp/flip-trade.js");
 const { tokenOnlyRange } = await import("../src/meteora/open-token-position.js");
 const { trackPosition, recordClose } = await import("../src/state/positions.js");
-const { createTrade, getTrade, tryLockTrade, unlockTrade, tradeLock } = await import("../src/state/trades.js");
+const { createTrade, getTrade, tryLockTrade, unlockTrade, tradeLock, addTradeLeg } =
+  await import("../src/state/trades.js");
 const { listKeepMints } = await import("../src/state/keep-mints.js");
-const { isEntryInProgressPool, getEntryInProgressMints } = await import("../src/entry/runtime.js");
+const {
+  isEntryInProgressPool,
+  getEntryInProgressMints,
+  addEntryInProgressPool,
+  removeEntryInProgressPool,
+  addClosingPool,
+  removeClosingPool,
+} = await import("../src/entry/runtime.js");
 
 const EXIT = {
   tp: { on: true, pct: 15 },
@@ -145,10 +153,91 @@ function fakeDeps(overrides = {}) {
     sleep: async () => {
       calls.sleep++;
     },
+    feeCheck: () => ({ ok: true, totalSol: 0.001, cap: 0.01 }),
+    getSolBalance: async () => 1,
     ...overrides,
   };
   return { deps, calls };
 }
+
+// --- Temuan review akhir ---
+
+test("planFlip does not re-flip flip legs", async () => {
+  const trade = newTrade();
+  addTradeLeg(trade.id, "F", { flip: true });
+  const { deps } = fakeDeps({
+    readLegs: async () => ({
+      activeBinId: 100,
+      legs: [
+        { position: "L1", bins: bins(90, 100) },
+        { position: "F", bins: bins(101, 110) },
+      ],
+    }),
+  });
+  assert.deepEqual(await planFlip(getTrade(trade.id), { deps }), { binCount: 0 });
+});
+
+test("planFlip refuses when the fee estimate is over the cap", async () => {
+  const { deps } = fakeDeps({ feeCheck: () => ({ ok: false, totalSol: 0.02, cap: 0.01 }) });
+  assert.match((await planFlip(newTrade(), { deps })).error, /fee estimate 0\.020000 SOL > cap 0\.01/);
+});
+
+test("planFlip refuses when SOL is too low for the new position", async () => {
+  const { deps } = fakeDeps({ getSolBalance: async () => 0.05 });
+  assert.match((await planFlip(newTrade(), { deps })).error, /not enough SOL for the new position/);
+});
+
+test("flipTrade aborts before withdrawing when the balance cannot be read", async () => {
+  const { deps, calls } = fakeDeps({
+    getTokenBalance: async () => {
+      throw new Error("429");
+    },
+  });
+  const res = await flipTrade(newTrade(), { deps });
+  assert.equal(res.success, false);
+  assert.match(res.error, /could not read token balance/);
+  assert.equal(calls.removeBins.length, 0);
+});
+
+test("flipTrade keeps retrying when the after-read throws", async () => {
+  let n = 0;
+  let balance = 50;
+  const { deps, calls } = fakeDeps({
+    removeBins: async () => {
+      balance += 30;
+    },
+    getTokenBalance: async () => {
+      n++;
+      if (n === 2) throw new Error("429");
+      return balance;
+    },
+  });
+  const res = await flipTrade(newTrade(), { deps });
+  assert.equal(res.success, true);
+  assert.equal(res.tokenAmount, 30);
+  assert.equal(calls.sleep, 1);
+});
+
+test("flipTrade refuses while another open/close runs in the pool", async () => {
+  for (const [add, remove] of [
+    [addEntryInProgressPool, removeEntryInProgressPool],
+    [addClosingPool, removeClosingPool],
+  ]) {
+    const trade = newTrade();
+    add("PoolA");
+    try {
+      const { deps, calls } = fakeDeps();
+      const res = await flipTrade(trade, { deps });
+      assert.equal(res.success, false);
+      assert.match(res.error, /pool is busy/);
+      assert.equal(calls.readLegs, 0);
+      assert.equal(tradeLock(trade.id), null);
+    } finally {
+      remove("PoolA");
+    }
+    assert.equal(isEntryInProgressPool("PoolA"), false);
+  }
+});
 
 test("tokenOnlyRange uses explicit bins when given, else the fallback range", () => {
   assert.deepEqual(tokenOnlyRange(100, { binsBelow: 2, binsAbove: 3 }), { minBinId: 98, maxBinId: 103 });
