@@ -5,7 +5,7 @@ import log from "../core/logger.js";
 import { WSOL_MINT } from "../core/constants.js";
 import { getWallet } from "../solana/wallet.js";
 import { getConnection } from "../solana/connection.js";
-import { getPrice } from "../market/jupiter-price.js";
+import { getPrices } from "../market/jupiter-price.js";
 import { getSettings } from "../state/settings.js";
 import { withGuard } from "./bot.js";
 import { HELP_TEXT } from "./help.js";
@@ -46,10 +46,16 @@ export function buildHome({ address, balanceSol, solUsd, openTrades, openPnlUsd,
   return { text: lines.join("\n"), keyboard };
 }
 
+// force: lewati pacing poll supaya kartu home tidak kosong dan tidak mengambil jatah scanner.
+export async function fetchSolUsd() {
+  const prices = await getPrices([WSOL_MINT], { force: true });
+  return prices.get(WSOL_MINT) ?? null;
+}
+
 const DEFAULT_DEPS = {
   getAddress: async () => getWallet().publicKey.toBase58(),
   getBalance: async () => (await getConnection().getBalance(getWallet().publicKey)) / 1e9,
-  getSolUsd: () => getPrice(WSOL_MINT),
+  getSolUsd: fetchSolUsd,
   // Diganti daftar trade nyata saat modul trades ada (Task 5).
   getOpenTrades: async () => ({ count: 0, pnlUsd: 0 }),
 };

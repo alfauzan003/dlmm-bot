@@ -2,7 +2,6 @@ import config from "./config/index.js";
 import log from "./core/logger.js";
 import { startBot } from "./tg/bot.js";
 import * as start from "./tg/start.js";
-import { sendHome } from "./tg/start.js";
 import * as help from "./tg/help.js";
 import * as settings from "./tg/settings.js";
 import { startEntryScanner } from "./entry/index.js";
@@ -22,13 +21,10 @@ if (!config.walletPrivateKey) {
   process.exit(1);
 }
 
-// Bot Telegram + kartu home. Kegagalan di sini tidak boleh menghentikan exit loop.
-try {
-  const bot = await startBot([start, help, settings]);
-  if (bot) await sendHome(bot.api, { prefix: "🟢 Online" });
-} catch (err) {
-  log.error(`Telegram startup gagal: ${err?.message ?? err}`);
-}
+// Bot Telegram + kartu home: tidak di-await agar Telegram yang lambat tidak menunda scanner / exit loop.
+startBot([start, help, settings])
+  .then((bot) => bot && start.sendHome(bot.api, { prefix: "🟢 Online" }))
+  .catch((err) => log.error(`Telegram startup gagal: ${err?.message ?? err}`));
 
 // Entry scanner (Supertrend touch) — own cadence
 startEntryScanner();

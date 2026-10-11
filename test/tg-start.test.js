@@ -8,7 +8,7 @@ import path from "path";
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "meteorabot-tg-start-"));
 process.env.SETTINGS_FILE = path.join(TMP, "settings.json");
 
-const { buildHome, gatherHomeData, sendHome } = await import("../src/tg/start.js");
+const { buildHome, gatherHomeData, sendHome, fetchSolUsd } = await import("../src/tg/start.js");
 const { HELP_TEXT } = await import("../src/tg/help.js");
 const { createBot } = await import("../src/tg/bot.js");
 const startModule = await import("../src/tg/start.js");
@@ -118,4 +118,18 @@ test("unbuilt home buttons answer Coming soon", async () => {
   });
   assert.ok(calls.some((c) => c.method === "sendMessage" && c.payload.text === "Coming soon"));
   assert.ok(calls.some((c) => c.method === "answerCallbackQuery"));
+});
+
+test("fetchSolUsd bypasses poll pacing and reads the SOL price", async (t) => {
+  const { WSOL_MINT } = await import("../src/core/constants.js");
+  const { getPrices } = await import("../src/market/jupiter-price.js");
+  const fetchMock = t.mock.method(globalThis, "fetch", async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    json: async () => ({ [WSOL_MINT]: { usdPrice: 150 } }),
+  }));
+  await getPrices([WSOL_MINT]); // memajukan jatah pacing
+  assert.equal(await fetchSolUsd(), 150); // tetap dapat harga karena force
+  assert.equal(fetchMock.mock.callCount(), 2);
 });
