@@ -61,10 +61,12 @@ const PLAN = {
 };
 
 let executed = [];
+let failEditContaining = null;
 
 test.beforeEach(() => {
   Object.assign(deps, ORIGINAL_DEPS);
   executed = [];
+  failEditContaining = null;
   deps.resolveAddress = async () => ({ type: "pool", pool: { address: POOL_ADDR, name: "BONK-SOL", baseMint: "M" } });
   deps.planOpen = async (args) => ({ ...PLAN, ...args });
   deps.executeOpen = async (plan, { onProgress }) => {
@@ -86,6 +88,9 @@ function build() {
   const calls = [];
   bot.api.config.use((prev, method, payload) => {
     calls.push({ method, payload });
+    if (method === "editMessageText" && failEditContaining && payload.text.includes(failEditContaining)) {
+      throw new Error("Bad Request: message can't be edited");
+    }
     return { ok: true, result: { message_id: 1, date: 1, chat: { id: OWNER, type: "private" } } };
   });
   bot.botInfo = BOT_INFO;
@@ -355,4 +360,67 @@ test("expired wizard", async () => {
   session.del("wizard");
   await bot.handleUpdate(cbUpdate("op:shp:spot"));
   assert.ok(texts(calls).some((t) => t.includes("expired")));
+});
+
+test("result edit failing still delivers the success message by reply", async () => {
+  const { bot, calls } = build();
+  const token = await toConfirm(bot, calls);
+  failEditContaining = "Opened";
+  await bot.handleUpdate(cbUpdate(token));
+  assert.equal(executed.length, 1);
+  const sentTexts = calls.filter((c) => c.method === "sendMessage").map((c) => c.payload.text);
+  assert.ok(sentTexts.some((t) => t.includes("✅ Opened #7")));
+  assert.ok(!sentTexts.some((t) => t.includes("Confirm failed")));
+  const reply = calls.filter((c) => c.method === "sendMessage").at(-1);
+  assert.ok(reply.payload.reply_markup.inline_keyboard.flat().some((b) => b.callback_data === "pos:open:7"));
+});
+
+test("a shape tap with no range re-shows the range step and never plans", async () => {
+  let planned = 0;
+  deps.planOpen = async () => void planned++;
+  session.put("wizard", { id: 99, step: "range", poolAddress: POOL_ADDR, pool: { name: "BONK-SOL" }, depositSol: 0.5 });
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("op:shp:spot"));
+  assert.equal(planned, 0);
+  assert.ok(lastData(calls).includes("op:rng:balanced"));
+  assert.equal(session.get("wizard").step, "range");
+});
+
+test("a shape tap with no deposit re-shows the deposit step", async () => {
+  let planned = 0;
+  deps.planOpen = async () => void planned++;
+  session.put("wizard", { id: 99, step: "deposit", poolAddress: POOL_ADDR, pool: { name: "BONK-SOL" } });
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("op:shp:curve"));
+  assert.equal(planned, 0);
+  assert.equal(lastData(calls)[0], "op:dep:0.5");
+});
+
+test("a range tap with no deposit re-shows the deposit step", async () => {
+  session.put("wizard", { id: 99, step: "deposit", poolAddress: POOL_ADDR, pool: { name: "BONK-SOL" } });
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("op:rng:balanced"));
+  assert.equal(lastData(calls)[0], "op:dep:0.5");
+  assert.equal(session.get("wizard").below, undefined);
+});
+
+test("confirming an old token does not delete a newer wizard", async () => {
+  const { bot, calls } = build();
+  const token = await toConfirm(bot, calls);
+  await bot.handleUpdate(textUpdate(POOL_ADDR)); // wizard baru
+  const newer = session.get("wizard");
+  assert.equal(newer.step, "deposit");
+  assert.ok(newer.id);
+  await bot.handleUpdate(cbUpdate(token));
+  assert.equal(executed.length, 1);
+  assert.equal(session.get("wizard")?.id, newer.id);
+});
+
+test("the default shape button is labelled spot ✓ with unchanged data", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(textUpdate(POOL_ADDR));
+  await bot.handleUpdate(cbUpdate("op:dep:0.5"));
+  await bot.handleUpdate(cbUpdate("op:rng:balanced"));
+  const spot = lastMarkup(calls).find((b) => b.callback_data === "op:shp:spot");
+  assert.equal(spot.text, "spot ✓");
 });

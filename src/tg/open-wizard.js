@@ -1,5 +1,6 @@
 // Wizard /open: alamat → pool → deposit SOL → range → shape → konfirmasi → open on-chain.
 import { InlineKeyboard } from "grammy";
+import log from "../core/logger.js";
 import { resolveAddress, poolButtonLabel } from "../lp/pool-lookup.js";
 import { RANGE_PRESETS, parseCustomRange } from "../lp/range.js";
 import { SHAPES, planOpen, executeOpen } from "../lp/open-trade.js";
@@ -33,6 +34,8 @@ const show = (ctx, text, keyboard) => {
   const extra = { ...HTML, ...(keyboard ? { reply_markup: keyboard } : {}) };
   return ctx.callbackQuery ? editSafe(ctx, text, extra) : ctx.reply(text, extra);
 };
+
+let wizardSeq = 0;
 
 const save = (wizard) => session.put("wizard", wizard);
 
@@ -90,7 +93,8 @@ function rangeKeyboard() {
   return kb.text("Custom", "op:rng:custom").row().text("◀ Back", "op:back");
 }
 
-const SHAPE_LABELS = { spot: "Spot", curve: "Curve", bid_ask: "Bid-Ask", mixed: "Mixed" };
+// spot = default (ditandai ✓).
+const SHAPE_LABELS = { spot: "spot ✓", curve: "curve", bid_ask: "bid_ask", mixed: "mixed" };
 
 function shapeKeyboard() {
   const kb = new InlineKeyboard();
@@ -116,8 +120,33 @@ async function showShape(ctx, wizard) {
   await show(ctx, "Choose the liquidity shape:", shapeKeyboard());
 }
 
+const STEP_VIEWS = { deposit: showDeposit, range: showRange, shape: showShape };
+const STEP_DONE = {
+  deposit: (w) => w.depositSol > 0,
+  range: (w) => w.below > 0 && w.above >= 0,
+  shape: (w) => SHAPES.includes(w.shape),
+};
+
+// Tombol basi bisa menimpa wizard yang field-nya belum lengkap: tampilkan langkah paling awal yang kosong
+// (false = jangan lanjut). upTo = langkah yang akan dikerjakan; "plan" = semua langkah harus lengkap.
+async function ensureReady(ctx, wizard, upTo) {
+  if (!wizard.poolAddress) {
+    await ctx.reply(EXPIRED);
+    return false;
+  }
+  for (const step of Object.keys(STEP_DONE)) {
+    if (step === upTo) return true;
+    if (!STEP_DONE[step](wizard)) {
+      await STEP_VIEWS[step](ctx, wizard);
+      return false;
+    }
+  }
+  return true;
+}
+
 // Semua input diketahui → rencana. Error/throw ditampilkan sebagai teks, bukan kartu konfirmasi.
 async function showPlan(ctx, wizard) {
+  if (!(await ensureReady(ctx, wizard, "plan"))) return;
   wizard.step = "confirm";
   wizard.plan = null;
   save(wizard);
@@ -142,7 +171,7 @@ async function showPlan(ctx, wizard) {
   }
   wizard.plan = plan;
   save(wizard);
-  const token = session.issueToken({ action: "open", plan });
+  const token = session.issueToken({ action: "open", plan, wizardId: wizard.id });
   const kb = new InlineKeyboard()
     .text("✅ Confirm", `ok:${token}`)
     .row()
@@ -170,11 +199,11 @@ async function startFromAddress(ctx, address) {
     return;
   }
   if (res.type === "pool") {
-    const wizard = { step: "deposit", poolAddress: res.pool.address, pool: { name: res.pool.name } };
+    const wizard = { id: ++wizardSeq, step: "deposit", poolAddress: res.pool.address, pool: { name: res.pool.name } };
     await showDeposit(ctx, wizard);
     return;
   }
-  const wizard = { step: "pool", candidates: res.pools };
+  const wizard = { id: ++wizardSeq, step: "pool", candidates: res.pools };
   save(wizard);
   const kb = new InlineKeyboard();
   res.pools.forEach((p, i) => kb.text(poolButtonLabel(p), `op:pool:${i}`).row());
@@ -196,21 +225,37 @@ function wizardCallback(label, handler, { keepPrompt = false } = {}) {
 
 async function runConfirm(ctx, payload) {
   const { plan } = payload;
-  session.del("wizard");
+  // Hanya hapus wizard yang menerbitkan token ini (wizard baru jangan ikut terhapus).
+  if (session.get("wizard")?.id === payload.wizardId) session.del("wizard");
   const exit = deps.getExitPreset();
-  const edit = (text, keyboard) => editSafe(ctx, text, { ...HTML, ...(keyboard ? { reply_markup: keyboard } : {}) });
+  const extra = (keyboard) => ({ ...HTML, ...(keyboard ? { reply_markup: keyboard } : {}) });
+  const edit = (text, keyboard) => editSafe(ctx, text, extra(keyboard));
+  // Hasil akhir harus sampai ke pengguna (posisi mungkin sudah terbuka): edit gagal → kirim pesan baru.
+  const finish = async (text, keyboard) => {
+    try {
+      await edit(text, keyboard);
+    } catch (err) {
+      log.warn(`Open wizard: edit hasil gagal, kirim pesan baru: ${firstLine(err)}`);
+      await ctx.reply(text, extra(keyboard));
+    }
+  };
   await edit("⏳ Opening…");
   const res = await deps.executeOpen(plan, { onProgress: (text) => edit(`⏳ ${esc(text)}`) });
   if (!res.success) {
-    await edit(`❌ Open failed: ${esc(res.error ?? "unknown error")}`);
+    await finish(`❌ Open failed: ${esc(res.error ?? "unknown error")}`);
     return;
   }
   if (res.dryRun) {
-    await edit(`🧪 Dry run — nothing was sent.\n\n${buildConfirm(plan, exit)}`);
+    await finish(`🧪 Dry run — nothing was sent.
+
+${buildConfirm(plan, exit)}`);
     return;
   }
-  const warning = res.warning ? `\n⚠️ ${esc(res.warning)}` : "";
-  await edit(`✅ Opened #${res.trade.id}${warning}`, new InlineKeyboard().text("Manage", `pos:open:${res.trade.id}`));
+  const warning = res.warning
+    ? `
+⚠️ ${esc(res.warning)}`
+    : "";
+  await finish(`✅ Opened #${res.trade.id}${warning}`, new InlineKeyboard().text("Manage", `pos:open:${res.trade.id}`));
 }
 
 async function startPrompt(ctx) {
@@ -250,6 +295,7 @@ export function register(bot) {
       await ctx.reply(EXPIRED);
       return;
     }
+    if (!(await ensureReady(ctx, wizard, "deposit"))) return;
     wizard.depositSol = amount;
     await showRange(ctx, wizard);
   });
@@ -266,6 +312,7 @@ export function register(bot) {
       await ctx.reply(EXPIRED);
       return;
     }
+    if (!(await ensureReady(ctx, wizard, "range"))) return;
     wizard.below = range.below;
     wizard.above = range.above;
     await showShape(ctx, wizard);
@@ -289,7 +336,8 @@ export function register(bot) {
     "op:dep:custom",
     wizardCallback(
       "Deposit",
-      async (ctx) => {
+      async (ctx, wizard) => {
+        if (!(await ensureReady(ctx, wizard, "deposit"))) return;
         session.put("prompt", { kind: "open-deposit" });
         await ctx.reply("Send the deposit in SOL (e.g. 0.3)");
       },
@@ -300,6 +348,7 @@ export function register(bot) {
   bot.callbackQuery(
     /^op:dep:(0\.5|0\.7|0\.9|1)$/,
     wizardCallback("Deposit", async (ctx, wizard) => {
+      if (!(await ensureReady(ctx, wizard, "deposit"))) return;
       wizard.depositSol = Number(ctx.match[1]);
       await showRange(ctx, wizard);
     })
@@ -309,7 +358,8 @@ export function register(bot) {
     "op:rng:custom",
     wizardCallback(
       "Range",
-      async (ctx) => {
+      async (ctx, wizard) => {
+        if (!(await ensureReady(ctx, wizard, "range"))) return;
         session.put("prompt", { kind: "open-range" });
         await ctx.reply(RANGE_PROMPT, { parse_mode: "Markdown" });
       },
@@ -322,6 +372,7 @@ export function register(bot) {
     wizardCallback("Range", async (ctx, wizard) => {
       const preset = RANGE_PRESETS.find((p) => p.key === ctx.match[1]);
       if (!preset) return;
+      if (!(await ensureReady(ctx, wizard, "range"))) return;
       wizard.below = preset.below;
       wizard.above = preset.above;
       await showShape(ctx, wizard);
@@ -332,6 +383,7 @@ export function register(bot) {
     /^op:shp:(\w+)$/,
     wizardCallback("Shape", async (ctx, wizard) => {
       if (!SHAPES.includes(ctx.match[1])) return;
+      if (!(await ensureReady(ctx, wizard, "shape"))) return;
       wizard.shape = ctx.match[1];
       await showPlan(ctx, wizard);
     })
