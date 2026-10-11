@@ -18,7 +18,7 @@
 - **Bot menulis ke `pool.txt`**: mengomentari (`#`) pool yang sudah selesai. Jangan biarkan `pool.txt` terbuka di editor saat bot jalan (save akan menimpa mark bot).
 - File state runtime **git-ignored** dan tidak boleh di-commit: `state.json`, `settings.json`, `wallet.key`, `pool.txt`, `decision-log.json`, `pnl-history.json`, `supertrend-cache.json`, `logs/`, `.env`.
 - **Default strategi ada di `strat.conf`** (di-commit). Tuning dilakukan di sini lalu `git commit`, bukan di `.env`. Bila key sama, `strat.conf` **menang** atas `.env` (`loadEnv` di `src/config/env.js`). `SOL_MODE=false` → PnL dalam USD.
-- **Toggle di `settings.json`** (dibuat saat start pertama: Auto Exit ON; Auto-entry, Deterministic exit, DCA OFF) diubah lewat `/settings` dan **menang** atas `ENTRY_ENABLED` / `DCA_ENABLED` di `strat.conf`.
+- **Toggle di `settings.json`** (dibuat saat start pertama: Auto Exit ON; Auto-entry, Deterministic exit, DCA OFF) diubah lewat `/settings` dan jadi **satu-satunya** saklar on/off fitur tersebut (tidak ada `ENTRY_ENABLED` / `DCA_ENABLED` di `strat.conf`).
 - Tes memakai override env (`STATE_FILE`, `DECISION_LOG_FILE`, `PNL_HISTORY_FILE`, `SETTINGS_FILE`, `WALLET_KEY_FILE`) supaya tidak menyentuh file produksi — ikuti pola ini untuk tes baru.
 - `test/smoke.test.js` mengimpor semua modul; kalau pindah/ganti nama file, update daftar `MODULES` di file itu.
 - `scripts/pnl-report.js` **read-only** — tidak menyentuh `state.json`, tidak mengirim transaksi.

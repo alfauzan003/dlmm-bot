@@ -146,8 +146,8 @@ Before any automatic close the bot re-checks the PnL once and closes only if the
 | Deterministic Exit | OFF | Apply the older rule-based exits to all positions, manual ones included |
 | DCA | OFF | Averaging-down on auto-entry positions only; manual positions are never DCA'd |
 
-The toggles are saved in `settings.json`. They take effect without a restart. After the first start these four win
-over `ENTRY_ENABLED` and `DCA_ENABLED` in `strat.conf`; all other tuning stays in `strat.conf`.
+The toggles are saved in `settings.json`. They take effect without a restart and are the only on/off switch for
+these features; all other tuning stays in `strat.conf`.
 
 ## Upgrading from the old bot
 
