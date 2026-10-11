@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { Keypair } from "@solana/web3.js";
+import bs58 from "bs58";
 
 // Arahkan semua file runtime ke direktori sementara SEBELUM modul di-import.
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "meteorabot-dca-origin-"));
@@ -14,6 +16,9 @@ process.env.SETTINGS_FILE = path.join(TMP, "settings.json");
 process.env.DECISION_LOG_FILE = path.join(TMP, "decision-log.json");
 process.env.PNL_HISTORY_FILE = path.join(TMP, "pnl-history.json");
 process.env.SUPERTREND_CACHE_FILE = path.join(TMP, "supertrend-cache.json");
+// Wallet sekali pakai: fetchPoolPnl memanggil getWallet(), jangan bergantung pada .env.
+process.env.WALLET_KEY_FILE = path.join(TMP, "wallet.key");
+fs.writeFileSync(process.env.WALLET_KEY_FILE, bs58.encode(Keypair.generate().secretKey));
 
 const POOL = "PoolDcaOrigin1111111111111111111111111111111";
 const realStrat = fs.readFileSync(new URL("../strat.conf", import.meta.url), "utf8");
