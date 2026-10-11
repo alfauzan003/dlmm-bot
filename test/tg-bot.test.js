@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBot, withGuard, COMMANDS, registerPrompt, registerConfirm } from "../src/tg/bot.js";
+import { createBot, withGuard, COMMANDS, registerPrompt, registerConfirm, runPolling } from "../src/tg/bot.js";
 import * as session from "../src/tg/session.js";
 
 const OWNER = 123;
@@ -211,4 +211,32 @@ test("ok: token dispatches to the confirm handler once, then expires", async () 
   const alerts = calls.filter((c) => c.method === "answerCallbackQuery" && c.payload.text);
   assert.equal(alerts.length, 1);
   assert.equal(alerts[0].payload.text, "This button expired — start again");
+});
+
+test("polling restarts with backoff after an error and alerts once per failure", async (t) => {
+  t.mock.method(console, "log", () => {}); // logger.error mencetak ke console
+  let starts = 0;
+  const failures = 6;
+  const bot = {
+    start: async (opts) => {
+      starts++;
+      assert.equal(opts.drop_pending_updates, true);
+      if (starts <= failures) throw new Error(`409 Conflict\nstack`);
+    },
+  };
+  const alerts = [];
+  const waits = [];
+  await runPolling(bot, { notify: (msg) => alerts.push(msg), wait: async (ms) => void waits.push(ms) });
+  assert.equal(starts, failures + 1);
+  assert.deepEqual(waits, [30000, 60000, 120000, 240000, 300000, 300000]);
+  assert.equal(alerts.length, failures);
+  assert.equal(alerts[0], "Telegram polling stopped: 409 Conflict — retrying");
+});
+
+test("a clean polling stop is not restarted", async () => {
+  let starts = 0;
+  const alerts = [];
+  await runPolling({ start: async () => void starts++ }, { notify: (m) => alerts.push(m), wait: async () => {} });
+  assert.equal(starts, 1);
+  assert.deepEqual(alerts, []);
 });

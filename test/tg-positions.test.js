@@ -410,6 +410,28 @@ test("Close only passes swap=false", async () => {
   assert.equal(opts.swap, false);
 });
 
+test("close succeeded but the final edit fails: the result is sent as a new message", async (t) => {
+  t.mock.method(console, "log", () => {}); // logger mencetak ke console
+  const trade = newTrade();
+  deps.closeTrade = async (tr) => ({ success: true, trade: tr, failed: [], swapInfo: null });
+  const { bot, calls } = build();
+  const { swap } = await tokens(bot, calls, trade.id);
+  // Edit pertama (progres) berhasil, edit hasil akhir gagal (mis. pesan sudah dihapus).
+  let editsSeen = 0;
+  bot.api.config.use((prev, method, payload, signal) => {
+    if (method === "editMessageText" && ++editsSeen === 2) {
+      return { ok: false, error_code: 400, description: "Bad Request: message to edit not found" };
+    }
+    return prev(method, payload, signal);
+  });
+  const before = calls.length;
+  await bot.handleUpdate(cbUpdate(swap));
+  const texts = sent(calls.slice(before));
+  assert.equal(texts.length, 1);
+  assert.ok(texts[0].includes(`✅ Trade #${trade.id} closed.`), texts[0]);
+  assert.ok(!texts.some((x) => x.includes("Close failed")));
+});
+
 test("close: busy and partial failure messages", async () => {
   const trade = newTrade();
   const { bot, calls } = build();

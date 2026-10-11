@@ -4,6 +4,7 @@ import { WSOL_MINT } from "../core/constants.js";
 import { getConnection } from "../solana/connection.js";
 import { getWallet } from "../solana/wallet.js";
 import { getDlmmSdk } from "./sdk.js";
+import { isOn } from "../state/settings.js";
 
 const poolMetaCache = new Map();
 const POOL_META_TTL = 15 * 60 * 1000;
@@ -316,11 +317,15 @@ export async function fetchPoolPnl(poolAddress, { ttlSec = 5, force = false, str
   }
 }
 
+// Cache dianggap segar selama satu interval loop exit; watcher DCA yang
+// me-refresh tiap pollIntervalSec. Saat DCA nonaktif, ttl 0 = selalu fetch
+// (perilaku lama).
+export function pnlCacheTtlSec() {
+  return isOn("dca") ? config.pollIntervalHold * 60 : 0;
+}
+
 async function enrichPnl(positions) {
-  // Cache dianggap segar selama satu interval loop exit; watcher DCA yang
-  // me-refresh tiap pollIntervalSec. Saat DCA nonaktif, ttl 0 = selalu fetch
-  // (perilaku lama).
-  const ttlSec = config.dca.enabled ? config.pollIntervalHold * 60 : 0;
+  const ttlSec = pnlCacheTtlSec();
 
   // Group positions by pool for batch PnL fetches
   const byPool = {};

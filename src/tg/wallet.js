@@ -93,6 +93,11 @@ async function showDeposit(ctx) {
 // ---- Withdraw ----
 
 async function startWithdraw(ctx) {
+  // Open yang sedang berjalan butuh SOL di wallet (sama dengan import).
+  if (deps.isOpenInProgress()) {
+    await ctx.reply(OPEN_BUSY);
+    return;
+  }
   session.put("prompt", { kind: "wallet-withdraw-address" });
   await ctx.reply("📤 Withdraw SOL\n\nSend the destination address");
 }
@@ -154,6 +159,10 @@ async function onWithdrawAmount(ctx, prompt) {
 }
 
 async function runWithdraw(ctx, { to, amountSol }) {
+  if (deps.isOpenInProgress()) {
+    await ctx.editMessageText(OPEN_BUSY).catch(() => ctx.reply(OPEN_BUSY));
+    return;
+  }
   const dryRun = deps.isDryRun();
   const amount = fmtSolFull(amountSol);
   await ctx.editMessageText(`⏳ ${dryRun ? "Simulating" : "Sending"} ${amount}…`).catch(() => {});

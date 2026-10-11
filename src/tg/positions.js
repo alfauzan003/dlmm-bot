@@ -212,7 +212,14 @@ async function runAction(ctx, id, { progress, label, work, describe }) {
     log.error(`Positions: ${label} trade #${id} gagal: ${err?.stack || err}`);
     line = `⚠️ ${label} failed: ${esc(String(err?.message ?? err).split("\n")[0])}`;
   }
-  await editSafe(ctx, screen(id, line), { ...HTML, reply_markup: resultKeyboard(id) });
+  const extra = { ...HTML, reply_markup: resultKeyboard(id) };
+  try {
+    await editSafe(ctx, screen(id, line), extra);
+  } catch (err) {
+    // Aksi sudah jalan: jangan sampai tampil "⚠️ ... failed" — kirim hasilnya sebagai pesan baru.
+    log.warn(`Positions: edit hasil ${label} trade #${id} gagal: ${err?.message ?? err}`);
+    await ctx.reply(screen(id, line), extra);
+  }
 }
 
 function swapLine(swapInfo, requested) {

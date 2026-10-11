@@ -1,11 +1,37 @@
 // Runtime-only state shared between the entry scanner and the exit monitor.
 
+// Set dengan hitungan referensi: add menaikkan, delete menurunkan, entri hilang di 0.
+// Auto-entry dan open manual di pool/mint sama tidak saling melepas tanda in-progress.
+class RefCountSet extends Set {
+  #counts = new Map();
+
+  add(value) {
+    this.#counts.set(value, (this.#counts.get(value) || 0) + 1);
+    return super.add(value);
+  }
+
+  delete(value) {
+    const n = this.#counts.get(value) || 0;
+    if (n > 1) {
+      this.#counts.set(value, n - 1);
+      return true;
+    }
+    this.#counts.delete(value);
+    return super.delete(value);
+  }
+
+  clear() {
+    this.#counts.clear();
+    super.clear();
+  }
+}
+
 // Base mints currently being acquired by an in-flight entry (swap → position).
 // Used by the safety sweep so it never sells tokens mid-entry.
-const entryInProgressMints = new Set();
+const entryInProgressMints = new RefCountSet();
 const entryUsage = new Map();
 // Pool yang sedang diproses entry/DCA (cegah entry & DCA bentrok di pool sama).
-const entryInProgressPools = new Set();
+const entryInProgressPools = new RefCountSet();
 // Pool yang sedang ditutup (cegah DCA bertabrakan dengan close/swap).
 const closingPools = new Set();
 // Backoff per-pool setelah eksekusi DCA gagal.

@@ -5,6 +5,8 @@ import log from "../core/logger.js";
 import * as session from "./session.js";
 import { extractAddress } from "./parse.js";
 import { parseSecretKey } from "../solana/wallet.js";
+import { notifyError } from "../notify/telegram.js";
+import { sleep } from "../core/utils.js";
 
 export const COMMANDS = [
   { command: "start", description: "Main menu + wallet card" },
@@ -192,8 +194,27 @@ export async function startBot(modules) {
     // Gagal sementara (jaringan/Telegram) tidak boleh menggagalkan boot bot yang juga mengelola posisi.
     log.warn(`Telegram setMyCommands gagal: ${err?.message ?? err}`);
   }
-  bot
-    .start({ drop_pending_updates: true })
-    .catch((err) => log.error(`Telegram polling berhenti: ${err?.message ?? err}`));
+  runPolling(bot).catch((err) => log.error(`Telegram polling loop gagal: ${err?.message ?? err}`));
   return bot;
+}
+
+const POLL_RETRY_FIRST_MS = 30_000;
+const POLL_RETRY_MAX_MS = 5 * 60_000;
+
+// Long polling; bila berhenti karena error: log, alert, lalu mulai lagi dengan backoff
+// (30 s, 60 s, … maks 5 menit). Berhenti bersih (bot.stop) tidak di-restart.
+export async function runPolling(bot, { notify = notifyError, wait = sleep } = {}) {
+  let delay = POLL_RETRY_FIRST_MS;
+  while (true) {
+    try {
+      await bot.start({ drop_pending_updates: true });
+      return;
+    } catch (err) {
+      const first = String(err?.message ?? err).split("\n")[0];
+      log.error(`Telegram polling berhenti: ${first} — coba lagi dalam ${Math.round(delay / 1000)} s`);
+      notify(`Telegram polling stopped: ${first} — retrying`);
+      await wait(delay);
+      delay = Math.min(delay * 2, POLL_RETRY_MAX_MS);
+    }
+  }
 }

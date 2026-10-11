@@ -571,3 +571,27 @@ test("export never leaks the key to the console on success", async (t) => {
   await new Promise((r) => setImmediate(r));
   assert.ok(!logLines.some((l) => l.includes(secret)));
 });
+
+test("withdraw is refused while an open is in progress, at start and at confirm", async () => {
+  const { bot, calls } = build();
+  addEntryInProgressPool("PoolBusy");
+  try {
+    await bot.handleUpdate(cbUpdate("wal:wd"));
+    assert.equal(session.get("prompt"), null);
+    assert.ok(texts(calls).at(-1).includes("An open is in progress"));
+  } finally {
+    removeEntryInProgressPool("PoolBusy");
+  }
+  await bot.handleUpdate(cbUpdate("wal:wd"));
+  await bot.handleUpdate(textUpdate(DEST));
+  await bot.handleUpdate(textUpdate("0.1"));
+  const token = tokenOf(calls, "✅ Confirm");
+  addEntryInProgressPool("PoolBusy");
+  try {
+    await bot.handleUpdate(cbUpdate(`ok:${token}`));
+    assert.equal(sentWithdraws.length, 0);
+    assert.ok(texts(calls).at(-1).includes("An open is in progress"));
+  } finally {
+    removeEntryInProgressPool("PoolBusy");
+  }
+});
