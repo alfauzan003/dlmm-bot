@@ -23,6 +23,7 @@ const {
   unlockTrade,
 } = await import("../src/state/trades.js");
 const { setToggle } = await import("../src/state/settings.js");
+const { __setSender } = await import("../src/notify/telegram.js");
 const { addEntryInProgressPool, removeEntryInProgressPool } = await import("../src/entry/runtime.js");
 const { syncTrades, runTradeExits, tradeAwareClose, settleTradesForPositions, legacyAdoptionCount, settleOpenTrades } =
   await import("../src/exit/trade-loop.js");
@@ -161,6 +162,9 @@ test("does not adopt positions of a pool that is being opened", () => {
 test("closed-but-live position is never adopted again (3 ticks)", (t) => {
   reset();
   const logMock = t.mock.method(console, "log", () => {}); // log.warn mencetak ke console
+  const sent = [];
+  __setSender((text) => sent.push(text));
+  t.after(() => __setSender(null));
   trackPosition("PosD", "PoolA", "AAA-SOL", "MintA", null, "spot");
   markClosedNotDetected("PosD");
   for (let i = 0; i < 3; i++) syncTrades([live("PosD", 1)], { wasTracked: new Set(["PosD"]) });
@@ -168,6 +172,8 @@ test("closed-but-live position is never adopted again (3 ticks)", (t) => {
   // Peringatan sekali per alamat, bukan tiap tick.
   const warns = logMock.mock.calls.filter((c) => String(c.arguments[0]).includes("closed di state"));
   assert.equal(warns.length, 1);
+  // Alert Telegram juga sekali per alamat.
+  assert.deepEqual(sent, ["Position PosD is still on-chain but marked closed — check it on Meteora."]);
 });
 
 test("depositUsd stays null while a leg is unknown", () => {

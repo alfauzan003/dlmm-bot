@@ -13,6 +13,7 @@ import {
   updateTradeProgress,
 } from "../state/trades.js";
 import { closeTrade } from "../lp/close-trade.js";
+import { notifyClosedButLive } from "../notify/telegram.js";
 import { isEntryInProgressPool } from "../entry/runtime.js";
 import { handleClose } from "./close.js";
 import { aggregateTradePnl, evaluateTradeExit } from "./trade-exit.js";
@@ -67,6 +68,7 @@ export function syncTrades(positions, { wasTracked = new Set(), bootedAt = PROCE
         log.warn(
           `${pos.pair || pos.position.slice(0, 8)}: posisi masih terbaca live tapi sudah closed di state — tidak diadopsi`
         );
+        notifyClosedButLive(pos.position);
       }
       continue;
     }

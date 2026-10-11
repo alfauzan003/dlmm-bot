@@ -188,6 +188,11 @@ export function notifyPositionMissing(position, pair, cycles) {
   send(`posisi ${short} dari pool ${pair || "?"} tidak terbaca ${cycles} cycle.`);
 }
 
+export function notifyClosedButLive(position) {
+  const short = position?.slice(0, 8) || "?";
+  send(`Position ${short} is still on-chain but marked closed — check it on Meteora.`);
+}
+
 export function notifyPoolExpired({ pool, pair, expiryHours }) {
   const label = pair || pool;
   send(
