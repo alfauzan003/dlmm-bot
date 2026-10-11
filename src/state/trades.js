@@ -29,9 +29,7 @@ export function createTrade({
   const trades = ensureTrades(state);
   // Satu posisi hanya boleh milik satu trade (terbuka atau tertutup): kembalikan trade yang ada,
   // trade terbuka diutamakan. Trade tertutup tidak pernah dibuat ulang (cegah PnL terhitung dobel).
-  const owners = Object.values(trades).filter(
-    (t) => t && (positions || []).some((addr) => t.positions.includes(addr))
-  );
+  const owners = Object.values(trades).filter((t) => t && (positions || []).some((addr) => t.positions.includes(addr)));
   const existing = owners.find((t) => t.closed !== true) ?? owners[0];
   if (existing) return existing;
   const id = state.nextTradeId;
