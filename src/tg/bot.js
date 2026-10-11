@@ -71,7 +71,12 @@ export async function startBot(modules) {
     return null;
   }
   const bot = createBot({ token, chatId, modules });
-  await bot.api.setMyCommands(COMMANDS);
+  try {
+    await bot.api.setMyCommands(COMMANDS);
+  } catch (err) {
+    // Gagal sementara (jaringan/Telegram) tidak boleh menggagalkan boot bot yang juga mengelola posisi.
+    log.warn(`Telegram setMyCommands gagal: ${err?.message ?? err}`);
+  }
   bot
     .start({ drop_pending_updates: true })
     .catch((err) => log.error(`Telegram polling berhenti: ${err?.message ?? err}`));

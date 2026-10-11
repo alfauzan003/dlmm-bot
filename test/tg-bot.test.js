@@ -48,12 +48,16 @@ test("COMMANDS lists the seven commands", () => {
   );
 });
 
-test("foreign chat is ignored", async () => {
+test("foreign chat is ignored", async (t) => {
+  const logMock = t.mock.method(console, "log", () => {}); // log.warn mencetak ke console
   let hits = 0;
   const { bot, calls } = build([{ register: (b) => b.command("start", () => void hits++) }]);
   await bot.handleUpdate(startUpdate(999));
   assert.equal(hits, 0);
   assert.equal(calls.length, 0);
+  assert.ok(
+    logMock.mock.calls.some((c) => String(c.arguments[0]).includes("[WARN]") && String(c.arguments[0]).includes("999"))
+  );
 });
 
 test("owner chat reaches handlers", async () => {
