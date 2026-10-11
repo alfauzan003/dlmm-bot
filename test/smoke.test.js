@@ -66,6 +66,7 @@ const MODULES = [
   "../src/tg/positions.js",
   "../src/lp/claim.js",
   "../src/lp/close-trade.js",
+  "../src/lp/range.js",
 ];
 
 test("every module loads without import errors", async () => {
