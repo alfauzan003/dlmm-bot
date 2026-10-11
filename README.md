@@ -139,6 +139,12 @@ Before any automatic close the bot re-checks the PnL once and closes only if the
 The toggles are saved in `settings.json`. They take effect without a restart. After the first start these four win
 over `ENTRY_ENABLED` and `DCA_ENABLED` in `strat.conf`; all other tuning stays in `strat.conf`.
 
+## Upgrading from the old bot
+
+- Positions the old bot already tracked (in `state.json`) are adopted as trades **without TP / SL / Trail**, so
+  nothing is sold on the first start. The online message says how many; set exits per trade in `/positions`.
+- Deterministic Exit, DCA and Auto Entry start OFF. Turn them on in `/settings` to keep the old behavior.
+
 ## PnL and Metlex
 
 `/pnl` shows realized USD profit for Today, This week (from Monday) and This month, with trade count, win rate,

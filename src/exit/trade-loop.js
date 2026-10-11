@@ -1,6 +1,7 @@
 import log from "../core/logger.js";
+import { readState } from "../state/store.js";
 import { fetchPoolPnl, usdPnlFromEntry } from "../meteora/positions.js";
-import { getTrackedPosition } from "../state/positions.js";
+import { getOpenTrackedPositions, getTrackedPosition } from "../state/positions.js";
 import { exitPresetForNewTrade, isOn } from "../state/settings.js";
 import {
   createTrade,
@@ -33,23 +34,59 @@ function exitAllOff() {
   };
 }
 
+// Waktu proses ini mulai. Posisi yang sudah di-track sebelum ini = posisi bot lama (legacy).
+export const PROCESS_BOOT_AT = Date.now();
+
+// Posisi bot lama (di-track sebelum boot ini, atau tanpa firstSeenAt) — diadopsi tanpa exit.
+function isLegacy(tracked, bootedAt) {
+  return !(Number.isFinite(tracked?.firstSeenAt) && tracked.firstSeenAt >= bootedAt);
+}
+
+// Berapa posisi lama yang akan diadopsi tanpa TP/SL (untuk pesan online saat boot).
+export function legacyAdoptionCount({ bootedAt = PROCESS_BOOT_AT } = {}) {
+  const owned = new Set();
+  for (const t of Object.values(readState().trades || {})) for (const addr of t?.positions || []) owned.add(addr);
+  return getOpenTrackedPositions().filter((p) => p.position && !owned.has(p.position) && isLegacy(p, bootedAt)).length;
+}
+
+// Alamat closed-tapi-masih-live yang sudah diperingatkan (sekali per alamat).
+const warnedClosedLive = new Set();
+
 // Bungkus posisi live yang belum punya trade, isi depositUsd bila sudah diketahui,
 // lalu selesaikan trade yang semua leg-nya sudah tertutup (oleh engine lama / di luar bot).
-export function syncTrades(positions, { wasTracked = new Set() } = {}) {
+export function syncTrades(positions, { wasTracked = new Set(), bootedAt = PROCESS_BOOT_AT } = {}) {
   for (const pos of positions || []) {
     if (!pos?.position || findTradeByPosition(pos.position)) continue;
     // Pool sedang dibuka (open/entry/DCA berjalan): pembuka mencatat trade-nya sendiri, jangan dipecah.
     if (isEntryInProgressPool(pos.pool)) continue;
+    // Sudah ditandai closed di state (DRY_RUN close, RPC tertinggal, salah deteksi hilang): jangan
+    // diadopsi lagi — trade baru akan langsung diselesaikan dan PnL terhitung dobel tiap tick.
+    if (getTrackedPosition(pos.position)?.closed === true) {
+      if (!warnedClosedLive.has(pos.position)) {
+        warnedClosedLive.add(pos.position);
+        log.warn(
+          `${pos.pair || pos.position.slice(0, 8)}: posisi masih terbaca live tapi sudah closed di state — tidak diadopsi`
+        );
+      }
+      continue;
+    }
     const auto = wasTracked.has(pos.position);
+    // Hanya posisi yang di-track selama proses ini mendapat preset Auto Exit; posisi bot lama
+    // (sebelum upgrade/restart) diadopsi tanpa exit supaya tidak langsung dijual saat boot.
+    const preset = auto && !isLegacy(getTrackedPosition(pos.position), bootedAt);
     const trade = createTrade({
       pool: pos.pool,
       pair: pos.pair,
       baseMint: pos.baseMint,
       positions: [pos.position],
       origin: auto ? "auto" : "external",
-      exit: auto ? exitPresetForNewTrade() : exitAllOff(),
+      exit: preset ? exitPresetForNewTrade() : exitAllOff(),
     });
-    log.info(`${pos.pair || pos.position.slice(0, 8)}: posisi diadopsi sebagai trade #${trade.id} (${trade.origin})`);
+    // Alamat sudah milik trade tertutup (createTrade menolak membuat ulang).
+    if (trade.closed === true) continue;
+    log.info(
+      `${pos.pair || pos.position.slice(0, 8)}: posisi diadopsi sebagai trade #${trade.id} (${trade.origin}${auto && !preset ? ", lama — tanpa exit" : ""})`
+    );
   }
 
   const live = byAddress(positions);

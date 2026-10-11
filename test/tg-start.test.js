@@ -8,7 +8,7 @@ import path from "path";
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "meteorabot-tg-start-"));
 process.env.SETTINGS_FILE = path.join(TMP, "settings.json");
 
-const { buildHome, gatherHomeData, sendHome, fetchSolUsd } = await import("../src/tg/start.js");
+const { buildHome, gatherHomeData, sendHome, fetchSolUsd, onlinePrefix } = await import("../src/tg/start.js");
 const { HELP_TEXT } = await import("../src/tg/help.js");
 const { DEFAULT_SETTINGS } = await import("../src/state/settings.js");
 
@@ -60,6 +60,11 @@ test("gatherHomeData does not throw when sources fail", async (t) => {
   assert.equal(data.balanceSol, null);
   assert.equal(data.solUsd, null);
   assert.equal(data.openPnlUsd, null);
+});
+
+test("onlinePrefix mentions positions adopted without TP/SL", () => {
+  assert.equal(onlinePrefix(0), "🟢 Online");
+  assert.equal(onlinePrefix(3), "🟢 Online\n⚠️ 3 existing position(s) adopted without TP/SL — set them in /positions");
 });
 
 test("HELP_TEXT covers flows and commands", () => {

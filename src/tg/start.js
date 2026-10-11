@@ -81,6 +81,13 @@ export async function gatherHomeData(deps = DEFAULT_DEPS) {
   };
 }
 
+// Prefix pesan online saat boot; sebut posisi lama yang diadopsi tanpa TP/SL (bila ada).
+export function onlinePrefix(legacyCount) {
+  const head = "🟢 Online";
+  if (!(legacyCount > 0)) return head;
+  return `${head}\n⚠️ ${legacyCount} existing position(s) adopted without TP/SL — set them in /positions`;
+}
+
 // Kirim kartu home. ctx → balas ke chat itu; bot.api → kirim ke config.telegramChatId.
 export async function sendHome(ctxOrApi, { prefix = "", deps } = {}) {
   const data = await gatherHomeData(deps);

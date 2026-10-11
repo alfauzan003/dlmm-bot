@@ -27,10 +27,12 @@ export function createTrade({
 }) {
   const state = readState();
   const trades = ensureTrades(state);
-  // Satu posisi hanya boleh milik satu trade terbuka: kembalikan trade yang ada.
-  const existing = Object.values(trades).find(
-    (t) => t && t.closed !== true && (positions || []).some((addr) => t.positions.includes(addr))
+  // Satu posisi hanya boleh milik satu trade (terbuka atau tertutup): kembalikan trade yang ada,
+  // trade terbuka diutamakan. Trade tertutup tidak pernah dibuat ulang (cegah PnL terhitung dobel).
+  const owners = Object.values(trades).filter(
+    (t) => t && (positions || []).some((addr) => t.positions.includes(addr))
   );
+  const existing = owners.find((t) => t.closed !== true) ?? owners[0];
   if (existing) return existing;
   const id = state.nextTradeId;
   state.nextTradeId = id + 1;

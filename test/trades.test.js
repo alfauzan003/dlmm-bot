@@ -113,6 +113,18 @@ test("createTrade returns the open trade that already owns a position", () => {
   assert.equal(getTrade(a.id).origin, "manual");
 });
 
+test("createTrade refuses addresses that belong to a closed trade", () => {
+  reset();
+  const a = newTrade(["P1"]);
+  markClosedNotDetected("P1");
+  settleTradeIfDone(a.id);
+  assert.equal(getTrade(a.id).closed, true);
+  const again = newTrade(["P1"], { origin: "external" });
+  assert.equal(again.id, a.id);
+  assert.equal(again.closed, true);
+  assert.equal(Object.keys(JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")).trades).length, 1);
+});
+
 test("updateTradeMeta sets origin, exit, depositSol and resets arming on exit", () => {
   reset();
   const t = newTrade(["P1"], { origin: "external" });

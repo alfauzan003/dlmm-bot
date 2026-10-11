@@ -12,6 +12,7 @@ import * as wallet from "./tg/wallet.js";
 import { startEntryScanner } from "./entry/index.js";
 import { startDcaWatcher } from "./entry/dca.js";
 import { mainLoop } from "./exit/index.js";
+import { legacyAdoptionCount } from "./exit/trade-loop.js";
 
 log.info("========================================");
 log.info("  Meteora Bot starting...");
@@ -26,9 +27,13 @@ if (!hasWalletKey()) {
   process.exit(1);
 }
 
+// Dihitung sebelum loop exit sempat mengadopsi: posisi bot lama yang diadopsi tanpa TP/SL.
+const legacyCount = legacyAdoptionCount();
+if (legacyCount > 0) log.warn(`${legacyCount} posisi lama akan diadopsi tanpa TP/SL — atur di /positions`);
+
 // Bot Telegram + kartu home: tidak di-await agar Telegram yang lambat tidak menunda scanner / exit loop.
 startBot([start, help, settings, positions, openWizard, pnl, wallet])
-  .then((bot) => bot && start.sendHome(bot.api, { prefix: "🟢 Online" }))
+  .then((bot) => bot && start.sendHome(bot.api, { prefix: start.onlinePrefix(legacyCount) }))
   .catch((err) => log.error(`Telegram startup gagal: ${err?.message ?? err}`));
 
 // Entry scanner (Supertrend touch) — own cadence

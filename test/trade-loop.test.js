@@ -24,7 +24,7 @@ const {
 } = await import("../src/state/trades.js");
 const { setToggle } = await import("../src/state/settings.js");
 const { addEntryInProgressPool, removeEntryInProgressPool } = await import("../src/entry/runtime.js");
-const { syncTrades, runTradeExits, tradeAwareClose, settleTradesForPositions } =
+const { syncTrades, runTradeExits, tradeAwareClose, settleTradesForPositions, legacyAdoptionCount } =
   await import("../src/exit/trade-loop.js");
 
 const EXIT = {
@@ -37,6 +37,12 @@ function reset() {
   fs.rmSync(process.env.STATE_FILE, { force: true });
   fs.rmSync(process.env.DECISION_LOG_FILE, { force: true });
   fs.rmSync(process.env.SETTINGS_FILE, { force: true });
+}
+
+// Semua trade (terbuka + tertutup) langsung dari file state.
+function listTrades() {
+  if (!fs.existsSync(process.env.STATE_FILE)) return [];
+  return Object.values(JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")).trades || {});
 }
 
 function live(addr, pnlUsd, extra = {}) {
@@ -102,13 +108,40 @@ test("adopts external position with exits off", () => {
 
 test("adopts bot-tracked position as auto with preset", () => {
   reset();
-  syncTrades([live("PosY", 1)], { wasTracked: new Set(["PosY"]) });
+  const bootedAt = Date.now() - 1000;
+  trackPosition("PosY", "PoolA", "AAA-SOL", "MintA", null, "spot");
+  syncTrades([live("PosY", 1)], { wasTracked: new Set(["PosY"]), bootedAt });
   const t = findTradeByPosition("PosY");
   assert.equal(t.origin, "auto");
   assert.deepEqual(t.exit, EXIT);
   // Tidak dobel pada tick berikutnya.
-  syncTrades([live("PosY", 1)], { wasTracked: new Set(["PosY"]) });
+  syncTrades([live("PosY", 1)], { wasTracked: new Set(["PosY"]), bootedAt });
   assert.equal(listOpenTrades().length, 1);
+});
+
+test("position tracked before this boot is adopted as auto with all exits off (legacy)", () => {
+  reset();
+  trackPosition("PosL", "PoolA", "AAA-SOL", "MintA", null, "spot");
+  const bootedAt = Date.now() + 1000; // proses ini mulai setelah posisi pertama terlihat
+  syncTrades([live("PosL", 1)], { wasTracked: new Set(["PosL"]), bootedAt });
+  const t = findTradeByPosition("PosL");
+  assert.equal(t.origin, "auto");
+  assert.equal(t.exit.tp.on, false);
+  assert.equal(t.exit.sl.on, false);
+  assert.equal(t.exit.trail.on, false);
+  assert.equal(t.exit.tp.pct, 15);
+});
+
+test("legacyAdoptionCount counts open tracked positions from before boot without a trade", () => {
+  reset();
+  trackPosition("PosL1", "PoolA", "AAA-SOL", "MintA", null, "spot");
+  trackPosition("PosL2", "PoolA", "AAA-SOL", "MintA", null, "spot");
+  trackPosition("PosL3", "PoolA", "AAA-SOL", "MintA", null, "spot");
+  markClosedNotDetected("PosL3");
+  newTrade(["PosT"]);
+  const bootedAt = Date.now() + 1000;
+  assert.equal(legacyAdoptionCount({ bootedAt }), 2);
+  assert.equal(legacyAdoptionCount({ bootedAt: 0 }), 0);
 });
 
 test("does not adopt positions of a pool that is being opened", () => {
@@ -123,6 +156,18 @@ test("does not adopt positions of a pool that is being opened", () => {
   }
   syncTrades([pos], { wasTracked: new Set() });
   assert.equal(findTradeByPosition("PosO").origin, "external");
+});
+
+test("closed-but-live position is never adopted again (3 ticks)", (t) => {
+  reset();
+  const logMock = t.mock.method(console, "log", () => {}); // log.warn mencetak ke console
+  trackPosition("PosD", "PoolA", "AAA-SOL", "MintA", null, "spot");
+  markClosedNotDetected("PosD");
+  for (let i = 0; i < 3; i++) syncTrades([live("PosD", 1)], { wasTracked: new Set(["PosD"]) });
+  assert.deepEqual(listTrades(), []);
+  // Peringatan sekali per alamat, bukan tiap tick.
+  const warns = logMock.mock.calls.filter((c) => String(c.arguments[0]).includes("closed di state"));
+  assert.equal(warns.length, 1);
 });
 
 test("depositUsd stays null while a leg is unknown", () => {
