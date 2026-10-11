@@ -100,8 +100,14 @@ export function syncTrades(positions, { wasTracked = new Set(), bootedAt = PROCE
         );
       }
     }
-    settleTradeIfDone(trade.id);
   }
+  settleOpenTrades();
+}
+
+// Selesaikan setiap trade terbuka yang semua leg-nya sudah closed di state (mis. leg terakhir
+// ditutup engine lama). Dipanggil juga saat tidak ada posisi live (loop exit berhenti lebih awal).
+export function settleOpenTrades() {
+  for (const trade of listOpenTrades()) settleTradeIfDone(trade.id);
 }
 
 // Selesaikan trade yang memuat alamat posisi yang baru ditandai hilang.
@@ -114,12 +120,16 @@ export function settleTradesForPositions(addresses) {
   for (const id of ids) settleTradeIfDone(id);
 }
 
-// Baca ulang PnL pool secara paksa; null bila gagal atau ada leg yang tidak terbaca.
+// Leg yang sudah tertutup di state tidak ikut PnL trade (sisa leg tetap punya TP/SL/Trail).
+const isLegClosed = (addr) => getTrackedPosition(addr)?.closed === true;
+
+// Baca ulang PnL pool secara paksa; null bila gagal atau ada leg terbuka yang tidak terbaca.
 async function rereadTrade(trade, live, fetchPnl) {
   const fresh = await fetchPnl(trade.pool, { force: true, strict: true });
   if (!(fresh instanceof Map)) return null;
   const map = new Map();
   for (const addr of trade.positions) {
+    if (isLegClosed(addr)) continue;
     const entry = fresh.get(addr);
     if (!entry) return null;
     const base = live.get(addr) ?? { position: addr, pool: trade.pool, pair: trade.pair, baseMint: trade.baseMint };
@@ -141,7 +151,7 @@ export async function runTradeExits(positions, { deps = {} } = {}) {
       handled.add(trade.id);
       continue;
     }
-    const agg = aggregateTradePnl(trade, live);
+    const agg = aggregateTradePnl(trade, live, { isClosed: isLegClosed });
     if (!agg) continue;
 
     const first = evaluateTradeExit(trade, agg.pnlPct);
@@ -155,7 +165,7 @@ export async function runTradeExits(positions, { deps = {} } = {}) {
     // satu bacaan glitch tidak menggeser peak lalu memicu trail di tick berikutnya.
     const label = `${trade.pair || trade.pool?.slice(0, 8)} #${trade.id}`;
     const positionsByAddr = await rereadTrade(trade, live, fetchPnl);
-    const freshAgg = positionsByAddr ? aggregateTradePnl(trade, positionsByAddr) : null;
+    const freshAgg = positionsByAddr ? aggregateTradePnl(trade, positionsByAddr, { isClosed: isLegClosed }) : null;
     if (!freshAgg) {
       log.warn(`${label}: ${first.reason} terpicu tapi baca ulang PnL gagal/tidak lengkap — tunda`);
       continue;

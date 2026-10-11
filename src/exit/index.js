@@ -36,7 +36,13 @@ import { handleSpotOorKiri } from "./spot-fallback.js";
 import { handleSpotOorKananReentry, canSpotReenter } from "./spot-reentry.js";
 import { getTrade, tradeLock, listOpenTrades } from "../state/trades.js";
 import { closeTrade } from "../lp/close-trade.js";
-import { syncTrades, runTradeExits, tradeAwareClose, settleTradesForPositions } from "./trade-loop.js";
+import {
+  syncTrades,
+  runTradeExits,
+  tradeAwareClose,
+  settleTradesForPositions,
+  settleOpenTrades,
+} from "./trade-loop.js";
 
 let cycleCount = 0;
 let lastStatusSent = 0;
@@ -197,6 +203,8 @@ export async function mainLoop() {
     resetStaleDcaPools(activePools);
 
     if (positions.length === 0) {
+      // Leg terakhir bisa ditutup engine lama tick lalu: selesaikan trade-nya sekarang.
+      settleOpenTrades();
       emitSummary([]);
       const pending = getOpenTrackedPositions().length;
       if (pending === 0) {

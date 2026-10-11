@@ -1,12 +1,14 @@
 // Evaluasi TP/SL/Trail per trade (murni, tanpa I/O). Dipakai loop exit dan /positions.
 
-// PnL gabungan semua leg trade dalam USD. `positionsByAddr` hanya berisi posisi live;
-// setiap alamat di trade.positions harus ada dan pnlKnown === true, selain itu null
-// (belum ter-index -> jangan memicu exit).
-export function aggregateTradePnl(trade, positionsByAddr) {
+// PnL gabungan leg trade yang masih terbuka, dalam USD. `positionsByAddr` hanya berisi posisi live;
+// leg yang `isClosed(addr)` (sudah tertutup di state) dilewati. Setiap leg terbuka harus ada dan
+// pnlKnown === true, selain itu null (belum ter-index -> jangan memicu exit); null juga bila
+// tidak ada leg terbuka.
+export function aggregateTradePnl(trade, positionsByAddr, { isClosed = () => false } = {}) {
   let pnlUsd = 0;
   let depositUsd = 0;
   for (const addr of trade?.positions || []) {
+    if (isClosed(addr)) continue;
     const p = positionsByAddr?.get(addr);
     if (!p || p.pnlKnown !== true) return null;
     if (!Number.isFinite(p.pnlUsd) || !(p.depositUsd > 0)) return null;

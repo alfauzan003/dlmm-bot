@@ -11,7 +11,7 @@ process.env.DECISION_LOG_FILE = path.join(TMP, "decision-log.json");
 process.env.PNL_HISTORY_FILE = path.join(TMP, "pnl-history.json");
 process.env.SETTINGS_FILE = path.join(TMP, "settings.json");
 
-const { trackPosition, markClosedNotDetected } = await import("../src/state/positions.js");
+const { trackPosition, markClosedNotDetected, recordClose } = await import("../src/state/positions.js");
 const {
   createTrade,
   getTrade,
@@ -24,7 +24,7 @@ const {
 } = await import("../src/state/trades.js");
 const { setToggle } = await import("../src/state/settings.js");
 const { addEntryInProgressPool, removeEntryInProgressPool } = await import("../src/entry/runtime.js");
-const { syncTrades, runTradeExits, tradeAwareClose, settleTradesForPositions, legacyAdoptionCount } =
+const { syncTrades, runTradeExits, tradeAwareClose, settleTradesForPositions, legacyAdoptionCount, settleOpenTrades } =
   await import("../src/exit/trade-loop.js");
 
 const EXIT = {
@@ -273,6 +273,19 @@ test("sl on a multi-leg trade closes the whole trade", async () => {
   assert.ok(ids.has(t.id));
 });
 
+test("partial trade: leg A closed, leg B at -40% hits SL 25 on the remaining leg", async () => {
+  reset();
+  const t = newTrade(["PosA", "PosB"]);
+  recordClose("PosA", "manual", 5, { pnlUsd: 5 });
+  const { deps, calls } = fakeDeps({ reread: new Map([["PosB", entry(-40)]]) });
+  const ids = await runTradeExits([live("PosB", -40)], { deps });
+  assert.equal(calls.fetch.length, 1);
+  assert.equal(calls.closeTrade.length, 1);
+  assert.equal(calls.closeTrade[0].trade.id, t.id);
+  assert.equal(calls.closeTrade[0].opts.reason, "sl");
+  assert.ok(ids.has(t.id));
+});
+
 test("peak and trail arming are persisted without a close", async () => {
   reset();
   const t = newTrade(["PosA"]);
@@ -305,6 +318,19 @@ test("one leg closed outside", () => {
   const after = getTrade(t.id);
   assert.equal(after.closed, true);
   assert.equal(after.closeReason, "closed_outside");
+});
+
+test("settleOpenTrades settles a trade whose last leg the legacy engine closed (no live positions left)", () => {
+  reset();
+  const t = newTrade(["PosA"]);
+  // handleClose (engine deterministik) mencatat close per posisi; tidak ada posisi live tersisa.
+  recordClose("PosA", "stop_loss", -30, { pnlUsd: -30, closeTx: "TxSL" });
+  settleOpenTrades();
+  const after = getTrade(t.id);
+  assert.equal(after.closed, true);
+  assert.equal(after.closeReason, "stop_loss");
+  assert.equal(after.closePnlUsd, -30);
+  assert.equal(after.closeTx, "TxSL");
 });
 
 test("settleTradesForPositions settles trades of missing addresses", () => {

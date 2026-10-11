@@ -5,6 +5,7 @@ import { getOpenPositions } from "../meteora/positions.js";
 import { aggregateTradePnl } from "../exit/trade-exit.js";
 import { claimTrade } from "../lp/claim.js";
 import { closeTrade } from "../lp/close-trade.js";
+import { getTrackedPosition } from "../state/positions.js";
 import { getTrade, listOpenTrades, setTradeExit } from "../state/trades.js";
 import { registerConfirm, registerPrompt, withGuard } from "./bot.js";
 import { esc, exitSummary, fmtPct, fmtSol, fmtUsd, fmtWib, shortAddr } from "./format.js";
@@ -26,6 +27,8 @@ const PROMPTS = {
 };
 
 const finite = (n) => typeof n === "number" && Number.isFinite(n);
+// Leg yang sudah tertutup di state tidak ikut PnL/range (sama dengan loop exit).
+const isLegClosed = (addr) => getTrackedPosition(addr)?.closed === true;
 
 // Posisi live → Map by alamat; null bila gagal (UI tampil "PnL ?").
 async function loadLive() {
@@ -42,14 +45,17 @@ async function loadLive() {
 export function liveForTrade(trade, positionsByAddr) {
   const live = { pnlPct: null, pnlUsd: null, inRange: null };
   if (!positionsByAddr) return live;
-  const agg = aggregateTradePnl(trade, positionsByAddr);
+  const agg = aggregateTradePnl(trade, positionsByAddr, { isClosed: isLegClosed });
   if (agg) {
     live.pnlPct = agg.pnlPct;
     live.pnlUsd = agg.pnlUsd;
   }
   let outside = false;
   let missing = false;
+  let openLegs = 0;
   for (const addr of trade.positions || []) {
+    if (isLegClosed(addr)) continue;
+    openLegs++;
     const p = positionsByAddr.get(addr);
     if (!p || !finite(p.activeBin) || !finite(p.lowerBin) || !finite(p.upperBin)) {
       missing = true;
@@ -58,7 +64,7 @@ export function liveForTrade(trade, positionsByAddr) {
     if (p.activeBin < p.lowerBin || p.activeBin > p.upperBin) outside = true;
   }
   if (outside) live.inRange = false;
-  else if (!missing && (trade.positions || []).length > 0) live.inRange = true;
+  else if (!missing && openLegs > 0) live.inRange = true;
   return live;
 }
 
@@ -129,7 +135,7 @@ export async function summarizeOpenTrades() {
   let known = 0;
   if (live) {
     for (const t of trades) {
-      const agg = aggregateTradePnl(t, live);
+      const agg = aggregateTradePnl(t, live, { isClosed: isLegClosed });
       if (agg) {
         sum += agg.pnlUsd;
         known++;

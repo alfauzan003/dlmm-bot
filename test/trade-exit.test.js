@@ -33,6 +33,16 @@ test("aggregate unknown when a leg is missing from the map", () => {
   assert.equal(aggregateTradePnl(allOn(), map), null);
 });
 
+test("aggregate covers only legs still open (injected isClosed)", () => {
+  const map = new Map([["b", { pnlUsd: -20, depositUsd: 50, pnlKnown: true }]]);
+  const isClosed = (addr) => addr === "a";
+  assert.deepEqual(aggregateTradePnl(allOn(), map, { isClosed }), { pnlUsd: -20, depositUsd: 50, pnlPct: -40 });
+  // Semua leg tertutup -> tidak ada yang dievaluasi.
+  assert.equal(aggregateTradePnl(allOn(), map, { isClosed: () => true }), null);
+  // Leg terbuka yang tidak diketahui tetap membuat hasil null.
+  assert.equal(aggregateTradePnl(allOn(), new Map(), { isClosed }), null);
+});
+
 test("aggregate unknown when deposit total is not positive", () => {
   const map = new Map([
     ["a", { pnlUsd: 0, depositUsd: 0, pnlKnown: true }],

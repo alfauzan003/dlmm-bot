@@ -15,6 +15,7 @@ const { createBot } = await import("../src/tg/bot.js");
 const positionsModule = await import("../src/tg/positions.js");
 const session = await import("../src/tg/session.js");
 const { createTrade, getTrade } = await import("../src/state/trades.js");
+const { trackPosition, recordClose } = await import("../src/state/positions.js");
 
 const { tradeLine, buildPositionsList, buildTradeDetail, liveForTrade, deps } = positionsModule;
 const OWNER = 123;
@@ -158,6 +159,18 @@ test("liveForTrade: range is derived from every leg and PnL from the aggregate",
   assert.equal(missing.inRange, null);
   assert.equal(missing.pnlPct, null);
   assert.deepEqual(liveForTrade(trade, null), { pnlPct: null, pnlUsd: null, inRange: null });
+});
+
+test("liveForTrade ignores legs already closed in state", () => {
+  trackPosition("CA", "PoolA", "BONK-SOL", "MintA", null, "spot");
+  recordClose("CA", "manual", 0, { pnlUsd: 0 });
+  const trade = { positions: ["CA", "CB"] };
+  const live = liveForTrade(
+    trade,
+    new Map([["CB", { activeBin: 5, lowerBin: 0, upperBin: 10, pnlUsd: -4, depositUsd: 10, pnlKnown: true }]])
+  );
+  assert.equal(live.pnlPct, -40);
+  assert.equal(live.inRange, true);
 });
 
 test("buildPositionsList: one button per trade; empty state offers Open", () => {
