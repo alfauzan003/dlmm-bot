@@ -101,9 +101,9 @@ export function register(bot) {
     "home:help",
     withGuard("Help", (ctx) => ctx.reply(HELP_TEXT))
   );
-  // Fitur belum ada: dijawab sementara.
+  // Fitur belum ada: dijawab sementara (home:open ditangani open-wizard).
   bot.callbackQuery(
-    /^home:(open|pnl|wallet)$/,
+    /^home:(pnl|wallet)$/,
     withGuard("Home", (ctx) => ctx.reply("Coming soon"))
   );
 }

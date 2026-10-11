@@ -70,10 +70,18 @@ export function registerConfirm(action, handler) {
   confirms.set(action, handler);
 }
 
-// Alamat ditempel di luar prompt: wizard /open (Task 13) menggantikan balasan sementara ini.
-async function routeAddress(ctx) {
+// Alamat ditempel di luar prompt: wizard /open mendaftarkan rutenya lewat registerAddressRoute
+// (hindari import wizard ke sini). Sebelum terdaftar, dibalas sementara.
+let addressRoute = async (ctx) => {
   await ctx.reply("Open wizard coming soon");
+};
+
+// fn(ctx, address) dipanggil saat alamat ditempel tanpa prompt yang menerimanya.
+export function registerAddressRoute(fn) {
+  addressRoute = fn;
 }
+
+const routeAddress = (ctx, address) => addressRoute(ctx, address);
 
 async function routeText(ctx) {
   const text = ctx.message.text;
