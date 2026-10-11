@@ -22,6 +22,12 @@ export function fallbackBinRange(activeBinId, binsBelow, binsAbove) {
   return { minBinId: activeBinId - below, maxBinId: activeBinId + above };
 }
 
+// Pure: rentang eksplisit (minBinId/maxBinId, dipakai flip) bila keduanya angka, selain itu fallback.
+export function tokenOnlyRange(activeBinId, { binsBelow, binsAbove, minBinId, maxBinId } = {}) {
+  if (Number.isFinite(minBinId) && Number.isFinite(maxBinId)) return { minBinId, maxBinId };
+  return fallbackBinRange(activeBinId, binsBelow, binsAbove);
+}
+
 // Buka posisi token-only satu-sisi memakai saldo token yang sudah dimiliki.
 // Tidak ada pembelian token (tanpa Jupiter). Dipakai fallback OOR kiri spot.
 export async function openTokenOnlyPosition({
@@ -30,6 +36,8 @@ export async function openTokenOnlyPosition({
   tokenAmountUi,
   binsAbove,
   binsBelow,
+  minBinId: explicitMin,
+  maxBinId: explicitMax,
   distribution = "bid_ask",
   pairName = null,
 } = {}) {
@@ -52,7 +60,12 @@ export async function openTokenOnlyPosition({
 
   const activeBin = await pool.getActiveBin();
   const activeBinId = activeBin.binId;
-  const { minBinId, maxBinId } = fallbackBinRange(activeBinId, binsBelow, binsAbove);
+  const { minBinId, maxBinId } = tokenOnlyRange(activeBinId, {
+    binsBelow,
+    binsAbove,
+    minBinId: explicitMin,
+    maxBinId: explicitMax,
+  });
 
   const strategyType = StrategyType?.[STRATEGY_ENUM[distribution] || "BidAsk"] ?? StrategyType?.BidAsk;
   if (strategyType === undefined) {
