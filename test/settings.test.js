@@ -9,8 +9,20 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "meteorabot-settings-"));
 const FILE = path.join(TMP, "settings.json");
 process.env.SETTINGS_FILE = FILE;
 
-const { DEFAULT_SETTINGS, getSettings, isOn, setToggle, setExitDefaults, exitPresetForNewTrade } =
-  await import("../src/state/settings.js");
+const {
+  DEFAULT_SETTINGS,
+  getSettings,
+  isOn,
+  setToggle,
+  setExitDefaults,
+  exitPresetForNewTrade,
+  getRangePresets,
+  setRangePreset,
+  resetRangePresets,
+  getDepositPresets,
+  setDepositPresets,
+  resetDepositPresets,
+} = await import("../src/state/settings.js");
 
 test.beforeEach(() => {
   fs.rmSync(FILE, { force: true });
@@ -64,4 +76,57 @@ test("missing keys are filled from defaults", () => {
   assert.equal(s.autoExit, true);
   assert.equal(s.exitDefaults.tpPct, 30);
   assert.equal(s.exitDefaults.slPct, 25);
+});
+
+test("range presets default to the built-in values with labels", () => {
+  const presets = getRangePresets();
+  assert.equal(presets.length, 6);
+  assert.deepEqual(presets[0], { key: "narrow", label: "Narrow", below: 20, above: 20 });
+  assert.deepEqual(presets[5], { key: "wide_sol", label: "Wide SOL", below: 65, above: 0 });
+});
+
+test("setRangePreset persists and getRangePresets reflects it", () => {
+  setRangePreset("narrow", { below: 15, above: 25 });
+  assert.deepEqual(JSON.parse(fs.readFileSync(FILE, "utf8")).rangePresets.narrow, { below: 15, above: 25 });
+  assert.deepEqual(getRangePresets()[0], { key: "narrow", label: "Narrow", below: 15, above: 25 });
+});
+
+test("setRangePreset validates values and keeps SOL presets SOL-only", () => {
+  assert.throws(() => setRangePreset("narrow", { below: 0, above: 20 }));
+  assert.throws(() => setRangePreset("narrow", { below: 100, above: 20 }));
+  assert.throws(() => setRangePreset("narrow", { below: 20, above: 1001 }));
+  assert.throws(() => setRangePreset("narrow_sol", { below: 20, above: 5 }));
+  assert.throws(() => setRangePreset("nope", { below: 20, above: 20 }));
+  setRangePreset("narrow_sol", { below: 30, above: 0 });
+  assert.equal(getRangePresets()[3].below, 30);
+});
+
+test("resetRangePresets restores defaults", () => {
+  setRangePreset("wide", { below: 80, above: 90 });
+  resetRangePresets();
+  assert.deepEqual(getRangePresets()[2], { key: "wide", label: "Wide", below: 65, above: 65 });
+});
+
+test("deposit presets default, persist, validate and reset", () => {
+  assert.deepEqual(getDepositPresets(), [0.5, 0.7, 0.9, 1]);
+  setDepositPresets([0.3, 0.5, 1, 2]);
+  assert.deepEqual(getDepositPresets(), [0.3, 0.5, 1, 2]);
+  assert.throws(() => setDepositPresets([0.3, 0.5, 1]));
+  assert.throws(() => setDepositPresets([0.3, 0, 1, 2]));
+  assert.throws(() => setDepositPresets([0.3, -1, 1, 2]));
+  resetDepositPresets();
+  assert.deepEqual(getDepositPresets(), [0.5, 0.7, 0.9, 1]);
+});
+
+test("invalid stored presets fall back to defaults", () => {
+  fs.writeFileSync(
+    FILE,
+    JSON.stringify({
+      rangePresets: { narrow: { below: 500, above: 1 }, narrow_sol: { below: 10, above: 9 } },
+      depositPresets: [1, 2],
+    })
+  );
+  assert.deepEqual(getRangePresets()[0], { key: "narrow", label: "Narrow", below: 20, above: 20 });
+  assert.deepEqual(getRangePresets()[3], { key: "narrow_sol", label: "Narrow SOL", below: 20, above: 0 });
+  assert.deepEqual(getDepositPresets(), [0.5, 0.7, 0.9, 1]);
 });

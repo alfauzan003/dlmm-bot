@@ -8,6 +8,11 @@ export const RANGE_PRESETS = [
   { key: "wide_sol", label: "Wide SOL", below: 65, above: 0 },
 ];
 
+// Label tombol preset beserta rentangnya: "Narrow (−20%/+20%)", preset SOL: "Wide SOL (−65%)".
+export function presetLabel({ label, below, above }) {
+  return above > 0 ? `${label} (−${below}%/+${above}%)` : `${label} (−${below}%)`;
+}
+
 const NUMBER = /^\d+(\.\d+)?$/;
 
 // "45" -> { below: 45, above: 0 }; "45 10" -> { below: 45, above: 10 }. Tidak valid -> null.

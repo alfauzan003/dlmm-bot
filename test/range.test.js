@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { RANGE_PRESETS, parseCustomRange, pctToBinRange, binPriceBounds } from "../src/lp/range.js";
+import { RANGE_PRESETS, parseCustomRange, pctToBinRange, binPriceBounds, presetLabel } from "../src/lp/range.js";
 
 test("presets", () => {
   assert.deepEqual(RANGE_PRESETS, [
@@ -63,4 +63,10 @@ test("binPriceBounds SOL is X inverts", () => {
   });
   assert.ok(Math.abs(lowSol - 0.000905287) < 1e-9);
   assert.ok(Math.abs(highSol - 0.001) < 1e-12);
+});
+
+test("preset label shows the range", () => {
+  assert.equal(presetLabel({ label: "Narrow", below: 20, above: 20 }), "Narrow (−20%/+20%)");
+  assert.equal(presetLabel({ label: "Wide SOL", below: 65, above: 0 }), "Wide SOL (−65%)");
+  assert.equal(presetLabel({ label: "Balanced", below: 37.5, above: 10 }), "Balanced (−37.5%/+10%)");
 });

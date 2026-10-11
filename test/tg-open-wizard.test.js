@@ -424,3 +424,50 @@ test("the default shape button is labelled spot ✓ with unchanged data", async 
   const spot = lastMarkup(calls).find((b) => b.callback_data === "op:shp:spot");
   assert.equal(spot.text, "spot ✓");
 });
+
+const presetsMod = await import("../src/state/settings.js");
+
+test("range buttons show the range of each preset", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(textUpdate(POOL_ADDR));
+  await bot.handleUpdate(cbUpdate("op:dep:0.5"));
+  const labels = lastMarkup(calls).map((b) => b.text);
+  assert.ok(labels.includes("Narrow (−20%/+20%)"));
+  assert.ok(labels.includes("Balanced (−45%/+45%)"));
+  assert.ok(labels.includes("Wide SOL (−65%)"));
+});
+
+test("edited range preset is shown and used", async () => {
+  presetsMod.setRangePreset("balanced", { below: 30, above: 10 });
+  try {
+    const { bot, calls } = build();
+    await bot.handleUpdate(textUpdate(POOL_ADDR));
+    await bot.handleUpdate(cbUpdate("op:dep:0.5"));
+    assert.ok(lastMarkup(calls).some((b) => b.text === "Balanced (−30%/+10%)"));
+    await bot.handleUpdate(cbUpdate("op:rng:balanced"));
+    assert.equal(session.get("wizard").below, 30);
+    assert.equal(session.get("wizard").above, 10);
+  } finally {
+    presetsMod.resetRangePresets();
+  }
+});
+
+test("deposit buttons come from the deposit presets", async () => {
+  presetsMod.setDepositPresets([0.3, 0.5, 1, 2]);
+  try {
+    const { bot, calls } = build();
+    await bot.handleUpdate(textUpdate(POOL_ADDR));
+    assert.deepEqual(lastData(calls), [
+      "op:dep:0.3",
+      "op:dep:0.5",
+      "op:dep:1",
+      "op:dep:2",
+      "op:dep:custom",
+      "op:cancel",
+    ]);
+    await bot.handleUpdate(cbUpdate("op:dep:2"));
+    assert.equal(session.get("wizard").depositSol, 2);
+  } finally {
+    presetsMod.resetDepositPresets();
+  }
+});

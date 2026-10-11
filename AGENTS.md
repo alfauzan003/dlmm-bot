@@ -5,7 +5,6 @@
 1. Ubah SEMINIMAL mungkin. Jangan refactor atau "perbaiki sekalian" yang tidak diminta.
 2. Kalau ragu atau perlu mengubah lebih banyak, tanyakan dulu.
 3. Sebelum bilang "selesai": jelaskan file yang diubah + dampaknya, lalu jalankan `git status` dan `git diff --stat` dan tunjukkan hasilnya.
-4. Jangan commit tanpa izin. Setelah hasil disetujui, baru tawarkan commit dengan pesan sederhana.
 
 ## Keamanan runtime (penting)
 

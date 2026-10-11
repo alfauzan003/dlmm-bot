@@ -11,7 +11,8 @@ process.env.SETTINGS_FILE = path.join(TMP, "settings.json");
 const { createBot } = await import("../src/tg/bot.js");
 const settingsModule = await import("../src/tg/settings.js");
 const session = await import("../src/tg/session.js");
-const { getSettings, isOn, DEFAULT_SETTINGS } = await import("../src/state/settings.js");
+const { getSettings, isOn, DEFAULT_SETTINGS, getRangePresets, getDepositPresets } =
+  await import("../src/state/settings.js");
 
 const { buildSettings } = settingsModule;
 const OWNER = 123;
@@ -91,6 +92,8 @@ test("buildSettings callback data", () => {
     "set:edit:tp",
     "set:edit:sl",
     "set:edit:trail",
+    "set:rng",
+    "set:dep",
   ]);
 });
 
@@ -154,4 +157,83 @@ test("text without a settings prompt does not change the defaults", async () => 
   const { bot } = build();
   await bot.handleUpdate(textUpdate("20"));
   assert.equal(getSettings().exitDefaults.tpPct, 15);
+});
+
+const lastKeyboard = (calls) =>
+  [...calls]
+    .reverse()
+    .find((c) => c.payload.reply_markup)
+    ?.payload.reply_markup.inline_keyboard.flat() ?? [];
+const lastText = (calls) => [...calls].reverse().find((c) => c.payload.text)?.payload.text;
+
+test("buildSettings shows the deposit presets", () => {
+  const { keyboard } = buildSettings(DEFAULT_SETTINGS, false);
+  const labels = keyboard.inline_keyboard.flat().map((b) => b.text);
+  assert.ok(labels.includes("📐 Range presets"));
+  assert.ok(labels.includes("💰 Deposits 0.5 / 0.7 / 0.9 / 1"));
+});
+
+test("range presets screen lists presets with their ranges", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("set:rng"));
+  const kb = lastKeyboard(calls);
+  assert.ok(kb.some((b) => b.text === "Narrow (−20%/+20%)" && b.callback_data === "set:rng:narrow"));
+  assert.ok(kb.some((b) => b.text === "Wide SOL (−65%)" && b.callback_data === "set:rng:wide_sol"));
+  assert.ok(kb.some((b) => b.callback_data === "set:rng:reset"));
+  assert.ok(kb.some((b) => b.callback_data === "set:back"));
+});
+
+test("editing a two-sided range preset takes two numbers", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("set:rng:narrow"));
+  assert.deepEqual(session.get("prompt"), { kind: "settings-range", key: "narrow" });
+  await bot.handleUpdate(textUpdate("30"));
+  assert.equal(lastText(calls), "Invalid value, try again");
+  assert.equal(getRangePresets()[0].below, 20);
+  await bot.handleUpdate(textUpdate("15 25"));
+  assert.deepEqual(getRangePresets()[0], { key: "narrow", label: "Narrow", below: 15, above: 25 });
+  assert.equal(session.get("prompt"), null);
+  assert.ok(lastKeyboard(calls).some((b) => b.text === "Narrow (−15%/+25%)"));
+});
+
+test("editing a SOL range preset takes one number", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("set:rng:narrow_sol"));
+  await bot.handleUpdate(textUpdate("20 5"));
+  assert.equal(lastText(calls), "Invalid value, try again");
+  await bot.handleUpdate(textUpdate("100"));
+  assert.equal(lastText(calls), "Invalid value, try again");
+  await bot.handleUpdate(textUpdate("30"));
+  assert.deepEqual(getRangePresets()[3], { key: "narrow_sol", label: "Narrow SOL", below: 30, above: 0 });
+});
+
+test("range presets reset to defaults", async () => {
+  const { bot } = build();
+  await bot.handleUpdate(cbUpdate("set:rng:wide"));
+  await bot.handleUpdate(textUpdate("80 90"));
+  assert.equal(getRangePresets()[2].below, 80);
+  await bot.handleUpdate(cbUpdate("set:rng:reset"));
+  assert.deepEqual(getRangePresets()[2], { key: "wide", label: "Wide", below: 65, above: 65 });
+});
+
+test("deposit presets screen edits and resets the four amounts", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("set:dep"));
+  const kb = lastKeyboard(calls).map((b) => b.callback_data);
+  assert.deepEqual(kb, ["set:dep:edit", "set:dep:reset", "set:back"]);
+  await bot.handleUpdate(cbUpdate("set:dep:edit"));
+  assert.deepEqual(session.get("prompt"), { kind: "settings-deposits" });
+  await bot.handleUpdate(textUpdate("0.3 0.5"));
+  assert.equal(lastText(calls), "Invalid value, try again");
+  await bot.handleUpdate(textUpdate("0,3 0.5 1 2"));
+  assert.deepEqual(getDepositPresets(), [0.3, 0.5, 1, 2]);
+  assert.equal(session.get("prompt"), null);
+  await bot.handleUpdate(cbUpdate("set:dep:reset"));
+  assert.deepEqual(getDepositPresets(), [0.5, 0.7, 0.9, 1]);
+});
+
+test("back returns to the main settings screen", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("set:back"));
+  assert.ok(lastText(calls).startsWith("⚙️ Settings"));
 });

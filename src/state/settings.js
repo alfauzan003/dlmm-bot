@@ -1,8 +1,12 @@
 import fs from "fs";
 import { SETTINGS_FILE } from "../core/paths.js";
+import { RANGE_PRESETS } from "../lp/range.js";
 
 // Toggle yang bisa diubah dari Telegram; disimpan di settings.json.
 export const TOGGLES = ["autoExit", "autoEntry", "deterministicExit", "dca"];
+
+// Preset SOL-only = preset bawaan dengan above 0; tetap SOL-only walau diubah.
+const SOL_ONLY_KEYS = new Set(RANGE_PRESETS.filter((p) => p.above === 0).map((p) => p.key));
 
 export const DEFAULT_SETTINGS = {
   autoExit: true,
@@ -10,7 +14,19 @@ export const DEFAULT_SETTINGS = {
   deterministicExit: false,
   dca: false,
   exitDefaults: { tpPct: 15, slPct: 25, trailStartPct: 5, trailDistancePct: 3 },
+  rangePresets: Object.fromEntries(RANGE_PRESETS.map((p) => [p.key, { below: p.below, above: p.above }])),
+  depositPresets: [0.5, 0.7, 0.9, 1],
 };
+
+// Batas sama dengan range custom: below (0, 99], above [0, 1000]; preset SOL harus above 0.
+function validRange(key, r) {
+  if (!r || !Number.isFinite(r.below) || !Number.isFinite(r.above)) return false;
+  if (!(r.below > 0 && r.below <= 99) || !(r.above >= 0 && r.above <= 1000)) return false;
+  return SOL_ONLY_KEYS.has(key) ? r.above === 0 : true;
+}
+
+const validDeposits = (list) =>
+  Array.isArray(list) && list.length === 4 && list.every((n) => Number.isFinite(n) && n > 0);
 
 function withDefaults(raw) {
   const src = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
@@ -20,6 +36,14 @@ function withDefaults(raw) {
   for (const key of Object.keys(out.exitDefaults)) {
     if (Number.isFinite(ed[key])) out.exitDefaults[key] = ed[key];
   }
+  const rp = src.rangePresets && typeof src.rangePresets === "object" ? src.rangePresets : {};
+  out.rangePresets = {};
+  for (const [key, def] of Object.entries(DEFAULT_SETTINGS.rangePresets)) {
+    out.rangePresets[key] = validRange(key, rp[key]) ? { below: rp[key].below, above: rp[key].above } : { ...def };
+  }
+  out.depositPresets = validDeposits(src.depositPresets)
+    ? [...src.depositPresets]
+    : [...DEFAULT_SETTINGS.depositPresets];
   return out;
 }
 
@@ -57,6 +81,48 @@ export function setExitDefaults(partial = {}) {
   for (const key of Object.keys(settings.exitDefaults)) {
     if (Number.isFinite(partial[key])) settings.exitDefaults[key] = partial[key];
   }
+  write(settings);
+  return settings;
+}
+
+// Preset range untuk wizard /open: label bawaan + nilai dari settings.json.
+export function getRangePresets() {
+  const { rangePresets } = getSettings();
+  return RANGE_PRESETS.map((p) => ({ key: p.key, label: p.label, ...rangePresets[p.key] }));
+}
+
+export function setRangePreset(key, { below, above }) {
+  if (!(key in DEFAULT_SETTINGS.rangePresets)) throw new Error(`Unknown range preset: ${key}`);
+  if (!validRange(key, { below, above })) throw new Error(`Invalid range for ${key}`);
+  const settings = getSettings();
+  settings.rangePresets[key] = { below, above };
+  write(settings);
+  return settings;
+}
+
+export function resetRangePresets() {
+  const settings = getSettings();
+  settings.rangePresets = withDefaults({}).rangePresets;
+  write(settings);
+  return settings;
+}
+
+// 4 tombol deposit cepat (SOL) di wizard /open.
+export function getDepositPresets() {
+  return getSettings().depositPresets;
+}
+
+export function setDepositPresets(list) {
+  if (!validDeposits(list)) throw new Error("Deposit presets must be 4 positive amounts");
+  const settings = getSettings();
+  settings.depositPresets = [...list];
+  write(settings);
+  return settings;
+}
+
+export function resetDepositPresets() {
+  const settings = getSettings();
+  settings.depositPresets = [...DEFAULT_SETTINGS.depositPresets];
   write(settings);
   return settings;
 }

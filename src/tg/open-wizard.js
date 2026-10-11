@@ -2,16 +2,15 @@
 import { InlineKeyboard } from "grammy";
 import log from "../core/logger.js";
 import { resolveAddress, poolButtonLabel } from "../lp/pool-lookup.js";
-import { RANGE_PRESETS, parseCustomRange } from "../lp/range.js";
+import { parseCustomRange, presetLabel } from "../lp/range.js";
 import { SHAPES, planOpen, executeOpen } from "../lp/open-trade.js";
-import { exitPresetForNewTrade } from "../state/settings.js";
+import { exitPresetForNewTrade, getDepositPresets, getRangePresets } from "../state/settings.js";
 import { registerAddressRoute, registerConfirm, registerPrompt, withGuard } from "./bot.js";
 import { esc, exitSummary, fmtSol } from "./format.js";
 import { extractAddress, parseSolAmount } from "./parse.js";
 import * as session from "./session.js";
 
 const HTML = { parse_mode: "HTML" };
-const DEPOSITS = ["0.5", "0.7", "0.9", "1"];
 const EXPIRED = "This wizard expired — send /open again";
 const RANGE_PROMPT = "Send `45` for −45% SOL only, or `45 10` for −45% / +10%";
 
@@ -80,15 +79,15 @@ const cancelRow = (kb) => kb.text("✖ Cancel", "op:cancel");
 
 function depositKeyboard() {
   const kb = new InlineKeyboard();
-  for (const d of DEPOSITS) kb.text(d, `op:dep:${d}`);
+  for (const d of getDepositPresets()) kb.text(String(d), `op:dep:${d}`);
   return cancelRow(kb.text("Custom", "op:dep:custom").row());
 }
 
 function rangeKeyboard() {
   const kb = new InlineKeyboard();
-  RANGE_PRESETS.forEach((p, i) => {
-    kb.text(p.label, `op:rng:${p.key}`);
-    if (i % 3 === 2) kb.row();
+  getRangePresets().forEach((p, i) => {
+    kb.text(presetLabel(p), `op:rng:${p.key}`);
+    if (i % 2 === 1) kb.row();
   });
   return kb.text("Custom", "op:rng:custom").row().text("◀ Back", "op:back");
 }
@@ -346,7 +345,7 @@ export function register(bot) {
   );
 
   bot.callbackQuery(
-    /^op:dep:(0\.5|0\.7|0\.9|1)$/,
+    /^op:dep:(\d+(?:\.\d+)?)$/,
     wizardCallback("Deposit", async (ctx, wizard) => {
       if (!(await ensureReady(ctx, wizard, "deposit"))) return;
       wizard.depositSol = Number(ctx.match[1]);
@@ -370,7 +369,7 @@ export function register(bot) {
   bot.callbackQuery(
     /^op:rng:(\w+)$/,
     wizardCallback("Range", async (ctx, wizard) => {
-      const preset = RANGE_PRESETS.find((p) => p.key === ctx.match[1]);
+      const preset = getRangePresets().find((p) => p.key === ctx.match[1]);
       if (!preset) return;
       if (!(await ensureReady(ctx, wizard, "range"))) return;
       wizard.below = preset.below;

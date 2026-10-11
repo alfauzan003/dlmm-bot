@@ -59,7 +59,7 @@ Strategy defaults live in `strat.conf` (committed to git). If a key is in both f
 | `/positions` | List open trades; claim fees, set TP / SL / Trail, close |
 | `/pnl` | Profit Today / This week / This month, recent closes, Metlex hand-off |
 | `/wallet` | Deposit address, withdraw, export key, import key |
-| `/settings` | Four on/off toggles and the Auto Exit defaults |
+| `/settings` | Four on/off toggles, the Auto Exit defaults, range presets and deposit quick-picks |
 | `/help` | Short how-to and command list |
 
 You can also paste a token mint or pool address anywhere in the chat to start `/open`. The bot sends a short
@@ -69,7 +69,8 @@ You can also paste a token mint or pool address anywhere in the chat to start `/
 
 1. Send a pool address or a token mint. For a mint, the bot lists the top SOL pools by TVL; pick one. Only SOL pairs
    are supported.
-2. **Deposit** (SOL): `0.5`, `0.7`, `0.9`, `1` or `Custom`. There is no default.
+2. **Deposit** (SOL): `0.5`, `0.7`, `0.9`, `1` or `Custom`. There is no default. The four quick-pick amounts can be
+   changed in `/settings` → `💰 Deposits`.
 3. **Range**: pick a preset or send a custom range.
 4. **Shape**: pick how liquidity is spread.
 5. Review the confirm screen (range as % and as prices, bins, number of positions, SOL to swap, refundable rent,
@@ -93,6 +94,9 @@ refused.
 | Custom `45 10` | -45% / +10% | yes |
 
 Custom rules: below must be above 0 and at most 99; above must be 0 to 1000. Anything else is rejected.
+The preset buttons show their range, e.g. `Narrow (−20%/+20%)`. Change a preset's values in `/settings` →
+`📐 Range presets` (two numbers like `20 20`; the SOL presets take one number and stay SOL only), or reset them to
+the defaults above.
 When the range reaches above the current price, part of the deposit is swapped to the token through Jupiter.
 
 ### Shapes
@@ -188,7 +192,7 @@ These are created while the bot runs and are git-ignored. Do not edit them while
 | File | Purpose |
 |---|---|
 | `state.json` | Trades, positions and auto-entry/exit state |
-| `settings.json` | Toggles and Auto Exit defaults |
+| `settings.json` | Toggles, Auto Exit defaults, range and deposit presets |
 | `wallet.key` | Imported wallet key (overrides `.env`) |
 | `pool.txt` | Pools for auto-entry, one address per line; the bot comments out finished pools with `#` |
 | `decision-log.json`, `pnl-history.json`, `supertrend-cache.json` | Logs and caches |
