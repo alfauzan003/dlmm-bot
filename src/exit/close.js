@@ -12,6 +12,7 @@ import { clearBounceRecovery } from "../state/bounce.js";
 import { clearDcaState, resetPoolDcaState, getPoolDcaCount, markPoolDcaCloseSafeguard, isTrailingTpReason } from "../state/dca.js";
 import { clearTrailingTimer } from "./trailing.js";
 import { addClosingPool, removeClosingPool, recordAction } from "../entry/runtime.js";
+import { removeKeepMint } from "../state/keep-mints.js";
 import { deactivatePool } from "../entry/index.js";
 import { humanReason, fmtPct } from "../core/report.js";
 
@@ -20,7 +21,7 @@ import { humanReason, fmtPct } from "../core/report.js";
 const closingPositions = new Set();
 
 export async function handleClose(pos, reason, opts = {}) {
-  const { skipAutoSwap = false, skipDeactivate = false, silent = false } = opts;
+  const { skipAutoSwap = false, skipDeactivate = false, silent = false, deps = {} } = opts;
   const pairLabel = pos.pair || pos.position?.slice(0, 8) || "?";
   const positionAddress = pos.position;
 
@@ -34,7 +35,7 @@ export async function handleClose(pos, reason, opts = {}) {
   addClosingPool(pos.pool);
 
   try {
-    const result = await closePosition(positionAddress);
+    const result = await (deps.closePosition ?? closePosition)(positionAddress);
 
     if (result?.success) {
       // PnL final dari endpoint closed Meteora (agar alert sama dengan dashboard).
@@ -79,15 +80,17 @@ export async function handleClose(pos, reason, opts = {}) {
       // Auto-swap base token to SOL (Jupiter V2, with retries)
       let swapInfo = null;
       if (!skipAutoSwap && config.swap.autoSwapAfterClose && result.baseMint) {
-        const balance = await getTokenBalance(result.baseMint);
+        const balance = await (deps.getTokenBalance ?? getTokenBalance)(result.baseMint);
         if (balance > 0) {
-          const swapResult = await swapToSol(result.baseMint, balance);
+          const swapResult = await (deps.swapToSol ?? swapToSol)(result.baseMint, balance);
           swapInfo = {
             mint: result.baseMint.slice(0, 8),
             success: swapResult?.success === true,
             error: swapResult?.success ? null : String(swapResult?.error || "unknown").split("\n")[0],
           };
           if (swapResult?.success) {
+            // Token sudah dijual: jangan lagi dikecualikan dari safety sweep.
+            removeKeepMint(result.baseMint);
             log.debug(`[detail] swap ${pairLabel} proceeds → SOL`);
           } else {
             log.warn(`Swap failed for ${pairLabel}: ${swapResult?.error}`);

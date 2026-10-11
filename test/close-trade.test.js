@@ -15,7 +15,8 @@ const { createTrade, getTrade, setTradeDepositUsd, tryLockTrade, tradeLock, unlo
   await import("../src/state/trades.js");
 const { closeTrade } = await import("../src/lp/close-trade.js");
 const { claimTrade } = await import("../src/lp/claim.js");
-const { listKeepMints } = await import("../src/state/keep-mints.js");
+const { listKeepMints, addKeepMint } = await import("../src/state/keep-mints.js");
+const { handleClose } = await import("../src/exit/close.js");
 
 const EXIT = {
   tp: { on: true, pct: 15 },
@@ -320,4 +321,21 @@ test("plain claim keeps the mint; claim with swap releases it", async () => {
   assert.deepEqual(listKeepMints(), ["MintA"]);
   await claimTrade(t, { swap: true, deps });
   assert.deepEqual(listKeepMints(), []);
+});
+
+test("legacy handleClose clears a kept mint once it auto-swaps it; a failed swap keeps it", async () => {
+  for (const swapOk of [false, true]) {
+    reset();
+    trackPosition("PosK", "PoolA", "AAA-SOL", "MintA", null, "spot");
+    addKeepMint("MintA");
+    const deps = {
+      closePosition: async () => ({ success: true, dryRun: true, baseMint: "MintA" }),
+      getTokenBalance: async () => 10,
+      swapToSol: async () => (swapOk ? { success: true } : { success: false, error: "no route" }),
+    };
+    const pos = { position: "PosK", pool: "PoolA", pair: "AAA-SOL", baseMint: "MintA", pnlPct: 1 };
+    const res = await handleClose(pos, "stop_loss", { silent: true, skipDeactivate: true, deps });
+    assert.equal(res.success, true);
+    assert.deepEqual(listKeepMints(), swapOk ? [] : ["MintA"]);
+  }
 });
