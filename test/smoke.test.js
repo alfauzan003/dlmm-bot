@@ -16,6 +16,7 @@ const MODULES = [
   "../src/state/bounce.js",
   "../src/state/dca.js",
   "../src/state/history.js",
+  "../src/state/settings.js",
   "../src/solana/connection.js",
   "../src/solana/wallet.js",
   "../src/solana/balances.js",

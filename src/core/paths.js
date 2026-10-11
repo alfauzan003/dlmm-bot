@@ -21,3 +21,5 @@ export const LOG_DIR = path.join(ROOT, "logs");
 export const STATE_FILE = resolveFile("STATE_FILE", "state.json");
 export const DECISION_LOG_FILE = resolveFile("DECISION_LOG_FILE", "decision-log.json");
 export const PNL_HISTORY_FILE = resolveFile("PNL_HISTORY_FILE", "pnl-history.json");
+export const SETTINGS_FILE = resolveFile("SETTINGS_FILE", "settings.json");
+export const WALLET_KEY_FILE = resolveFile("WALLET_KEY_FILE", "wallet.key");

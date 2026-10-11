@@ -26,7 +26,7 @@ function mockFetch(handler) {
   global.fetch = handler;
 }
 
-test("waitClosedPositionPnl: ketemu langsung (pakai pnlSolPctChange)", async () => {
+test("waitClosedPositionPnl: ketemu langsung (pakai pnlPctChange, mode USD)", async () => {
   mockFetch(async () => ({
     ok: true,
     json: async () => ({
@@ -35,7 +35,7 @@ test("waitClosedPositionPnl: ketemu langsung (pakai pnlSolPctChange)", async () 
     }),
   }));
   const pnl = await waitClosedPositionPnl(POOL, POS, { timeoutMs: 50, intervalMs: 1, wallet: WALLET });
-  assert.equal(pnl, 22.23);
+  assert.equal(pnl, 21.93);
 });
 
 test("waitClosedPositionPnl: ketemu setelah retry", async () => {
@@ -45,7 +45,7 @@ test("waitClosedPositionPnl: ketemu setelah retry", async () => {
     return {
       ok: true,
       json: async () => ({
-        positions: calls < 2 ? [] : [{ positionAddress: POS, pnlSolPctChange: "18.12" }],
+        positions: calls < 2 ? [] : [{ positionAddress: POS, pnlSolPctChange: "17.5", pnlPctChange: "18.12" }],
         hasNext: false,
       }),
     };
