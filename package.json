@@ -1,0 +1,38 @@
+{
+  "name": "meteorabot",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js",
+    "test": "node --test",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"{src,scripts,test}/**/*.js\"",
+    "format:check": "prettier --check \"{src,scripts,test}/**/*.js\"",
+    "pm2": "pm2 start ecosystem.config.cjs",
+    "pm2:stop": "pm2 stop ecosystem.config.cjs",
+    "pm2:logs": "pm2 logs meteorabot-v3",
+    "pm2:monit": "pm2 monit",
+    "pm2:logrotate": "pm2 install pm2-logrotate && pm2 set pm2-logrotate:max_size 10M && pm2 set pm2-logrotate:retain 7 && pm2 set pm2-logrotate:compress true",
+    "postinstall": "node scripts/patch-anchor.js"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.31.0",
+    "@meteora-ag/dlmm": "^1.9.10",
+    "@solana/web3.js": "^1.91.6",
+    "bn.js": "^5.2.1",
+    "bs58": "^6.0.0",
+    "gmgn-cli": "^1.6.6"
+  },
+  "allowScripts": {
+    "bigint-buffer@1.1.5": true,
+    "bufferutil@4.1.0": true,
+    "utf-8-validate@6.0.6": true
+  },
+  "devDependencies": {
+    "eslint": "^9.39.5",
+    "prettier": "^3.9.7"
+  }
+}

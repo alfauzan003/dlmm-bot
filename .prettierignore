@@ -1,0 +1,9 @@
+node_modules/
+logs/
+package-lock.json
+state.json
+decision-log.json
+pnl-history.json
+.env
+.env.example
+pool.txt

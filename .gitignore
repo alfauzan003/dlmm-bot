@@ -1,0 +1,14 @@
+node_modules/
+.env
+.gh-token
+pool.txt
+*.log
+*.swp
+.DS_Store
+state.json
+decision-log.json
+pnl-history.json
+supertrend-cache.json
+rclone-current-linux-amd64.zip
+backup/
+updatelist.txt
