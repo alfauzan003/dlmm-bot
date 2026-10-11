@@ -223,6 +223,8 @@ const config = {
   spotMinBins: Math.max(1, Math.floor(num(e.SPOT_MIN_BINS, 200))),
   pollIntervalHold: num(e.POLL_INTERVAL_HOLD, 0.2),
   pollIntervalIdle: num(e.POLL_INTERVAL_IDLE, 5),
+  // Interval loop TP/SL/Trail per trade (detik), terpisah dari loop exit utama.
+  tradeExitIntervalSec: Math.max(1, num(e.TRADE_EXIT_INTERVAL_SEC, 1)),
   trailingConfirmDelaySec: num(e.TRAILING_CONFIRM_DELAY_SEC, 10),
   // Jumlah siklus berturut-turut posisi tidak terbaca on-chain sebelum
   // dianggap sudah ditutup manual.

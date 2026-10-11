@@ -25,8 +25,15 @@ const {
 const { setToggle } = await import("../src/state/settings.js");
 const { __setSender } = await import("../src/notify/telegram.js");
 const { addEntryInProgressPool, removeEntryInProgressPool } = await import("../src/entry/runtime.js");
-const { syncTrades, runTradeExits, tradeAwareClose, settleTradesForPositions, legacyAdoptionCount, settleOpenTrades } =
-  await import("../src/exit/trade-loop.js");
+const {
+  syncTrades,
+  runTradeExits,
+  runFastTradeExitTick,
+  tradeAwareClose,
+  settleTradesForPositions,
+  legacyAdoptionCount,
+  settleOpenTrades,
+} = await import("../src/exit/trade-loop.js");
 
 const EXIT = {
   tp: { on: true, pct: 15 },
@@ -311,6 +318,69 @@ test("trail confirmed against the stored peak closes", async () => {
   await runTradeExits([live("PosA", 6)], { deps });
   assert.equal(calls.closeTrade.length, 1);
   assert.equal(calls.closeTrade[0].opts.reason, "trail");
+});
+
+test("fast tick reads fresh PnL per pool and closes on tp", async () => {
+  reset();
+  const t = newTrade(["PosA"]);
+  const { deps, calls } = fakeDeps({ reread: new Map([["PosA", entry(16)]]) });
+  // Snapshot loop utama masih PnL lama (0); PnL segar dari fetch yang memicu TP.
+  const ids = await runFastTradeExitTick({ positions: [live("PosA", 0, { lowerBin: 1 })], deps });
+  assert.equal(calls.fetch.length, 2); // bacaan tick + baca ulang konfirmasi
+  assert.equal(calls.fetch[0].pool, "PoolA");
+  assert.equal(calls.fetch[0].opts.force, true);
+  assert.equal(calls.closeTrade.length, 1);
+  assert.equal(calls.closeTrade[0].opts.reason, "tp");
+  // Field on-chain dari snapshot ikut terbawa ke close.
+  assert.equal(calls.closeTrade[0].opts.positionsByAddr.get("PosA").lowerBin, 1);
+  assert.ok(ids.has(t.id));
+});
+
+test("fast tick skips trades with every exit off", async () => {
+  reset();
+  newTrade(["PosA"], {
+    tp: { on: false, pct: 15 },
+    sl: { on: false, pct: 25 },
+    trail: { on: false, startPct: 5, distancePct: 3 },
+  });
+  const { deps, calls } = fakeDeps({ reread: new Map([["PosA", entry(16)]]) });
+  await runFastTradeExitTick({ positions: [live("PosA", 0)], deps });
+  assert.equal(calls.fetch.length, 0);
+});
+
+test("fast tick ignores positions missing from the main loop snapshot", async () => {
+  reset();
+  newTrade(["PosA"]);
+  const { deps, calls } = fakeDeps({ reread: new Map([["PosA", entry(16)]]) });
+  // Masih "open" di Meteora tapi sudah tidak terbaca on-chain -> jangan coba close.
+  await runFastTradeExitTick({ positions: [], deps });
+  assert.equal(calls.fetch.length, 0);
+  assert.equal(calls.closeTrade.length, 0);
+});
+
+test("fast tick skips a locked trade", async () => {
+  reset();
+  const t = newTrade(["PosA"]);
+  assert.ok(tryLockTrade(t.id, "close"));
+  try {
+    const { deps, calls } = fakeDeps({ reread: new Map([["PosA", entry(16)]]) });
+    await runFastTradeExitTick({ positions: [live("PosA", 0)], deps });
+    assert.equal(calls.fetch.length, 0);
+    assert.equal(calls.closeTrade.length, 0);
+  } finally {
+    unlockTrade(t.id);
+  }
+});
+
+test("unchanged progress does not rewrite state", async () => {
+  reset();
+  const t = newTrade(["PosA"]);
+  updateTradeProgress(t.id, { peakPnlPct: 7, trailArmed: true });
+  const { deps } = fakeDeps({ reread: null });
+  const before = fs.readFileSync(process.env.STATE_FILE, "utf8");
+  fs.writeFileSync(process.env.STATE_FILE, before.replace(/\n/g, "\r\n")); // penanda: tulis ulang menghapus CRLF
+  await runTradeExits([live("PosA", 6)], { deps });
+  assert.ok(fs.readFileSync(process.env.STATE_FILE, "utf8").includes("\r\n"));
 });
 
 test("one leg closed outside", () => {

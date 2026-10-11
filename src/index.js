@@ -12,7 +12,7 @@ import * as wallet from "./tg/wallet.js";
 import { startEntryScanner } from "./entry/index.js";
 import { startDcaWatcher } from "./entry/dca.js";
 import { mainLoop } from "./exit/index.js";
-import { legacyAdoptionCount } from "./exit/trade-loop.js";
+import { legacyAdoptionCount, tradeExitLoop } from "./exit/trade-loop.js";
 
 log.info("========================================");
 log.info("  Meteora Bot starting...");
@@ -41,6 +41,13 @@ startEntryScanner();
 
 // DCA watcher (arm/trail/confirm) — own cadence (DCA_POLL_INTERVAL_SEC)
 startDcaWatcher();
+
+// TP/SL/Trail per trade — own cadence (TRADE_EXIT_INTERVAL_SEC)
+tradeExitLoop(config.tradeExitIntervalSec).catch((err) => {
+  log.error(`Fatal trade exit error: ${err.message}`);
+  console.error(err);
+  process.exit(1);
+});
 
 // Exit monitor (deterministic rules from exitbot) — runs forever
 mainLoop().catch((err) => {

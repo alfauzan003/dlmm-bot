@@ -36,7 +36,7 @@ import { getTrade, tradeLock, listOpenTrades } from "../state/trades.js";
 import { closeTrade } from "../lp/close-trade.js";
 import {
   syncTrades,
-  runTradeExits,
+  setLivePositions,
   tradeAwareClose,
   settleTradesForPositions,
   settleOpenTrades,
@@ -192,6 +192,7 @@ export async function mainLoop() {
     resetStaleDcaPools(activePools);
 
     if (positions.length === 0) {
+      setLivePositions([]);
       // Leg terakhir bisa ditutup engine lama tick lalu: selesaikan trade-nya sekarang.
       settleOpenTrades();
       emitSummary([]);
@@ -249,17 +250,13 @@ export async function mainLoop() {
       }
     }
 
-    // Trade: adopsi posisi baru, lalu TP/SL/Trail per trade (selalu jalan).
+    // Trade: adopsi posisi baru. TP/SL/Trail jalan di loop cepat sendiri (tradeExitLoop)
+    // memakai snapshot posisi ini.
     syncTrades(positions, { wasTracked });
+    setLivePositions(positions);
     const tradeIdByAddr = new Map();
     for (const t of listOpenTrades()) for (const addr of t.positions) tradeIdByAddr.set(addr, t.id);
-    let handledTradeIds;
-    try {
-      handledTradeIds = await runTradeExits(positions);
-    } catch (err) {
-      log.error(`Trade exit error: ${err.message}`);
-      handledTradeIds = new Set();
-    }
+    const handledTradeIds = new Set();
     const positionsByAddr = new Map(positions.filter((p) => p.position).map((p) => [p.position, p]));
     const closeForTrade = (p, reason, opts) => tradeAwareClose(p, reason, opts, { positionsByAddr });
     const deterministic = isOn("deterministicExit");
@@ -316,6 +313,9 @@ export async function mainLoop() {
       log.debug(
         `[detail] ${pairLabel}: ${exit.reason}${exit.action === "close" ? " → CLOSE" : ""}${warmup ? " [warmup]" : ""}`
       );
+
+      // Loop TP/SL/Trail cepat bisa menutup posisi ini selama tick berjalan.
+      if (getTrackedPosition(pos.position)?.closed === true) continue;
 
       const trade = exit.action === "close" && tradeId != null ? getTrade(tradeId) : null;
       if (trade && tradeLock(trade.id)) {

@@ -1,4 +1,5 @@
 import log from "../core/logger.js";
+import { sleep } from "../core/utils.js";
 import { readState } from "../state/store.js";
 import { fetchPoolPnl, usdPnlFromEntry } from "../meteora/positions.js";
 import { getOpenTrackedPositions, getTrackedPosition } from "../state/positions.js";
@@ -159,7 +160,11 @@ export async function runTradeExits(positions, { deps = {} } = {}) {
 
     const first = evaluateTradeExit(trade, agg.pnlPct);
     if (!first.reason) {
-      updateTradeProgress(trade.id, { peakPnlPct: first.peakPnlPct, trailArmed: first.trailArmed });
+      // Tulis state hanya bila berubah (loop cepat jalan tiap detik).
+      const prevPeak = Number.isFinite(trade.peakPnlPct) ? trade.peakPnlPct : null;
+      if (first.peakPnlPct !== prevPeak || first.trailArmed !== (trade.trailArmed === true)) {
+        updateTradeProgress(trade.id, { peakPnlPct: first.peakPnlPct, trailArmed: first.trailArmed });
+      }
       continue;
     }
 
@@ -191,6 +196,53 @@ export async function runTradeExits(positions, { deps = {} } = {}) {
     }
   }
   return handled;
+}
+
+// Snapshot posisi live dari siklus terakhir loop utama (on-chain). Loop cepat hanya
+// memakai posisi yang ada di sini: posisi yang sudah hilang on-chain tapi masih
+// "open" di Meteora tidak dicoba ditutup berulang-ulang.
+let livePositions = [];
+export function setLivePositions(positions) {
+  livePositions = Array.isArray(positions) ? positions : [];
+}
+
+const hasExitOn = (t) => t.exit?.tp?.on === true || t.exit?.sl?.on === true || t.exit?.trail?.on === true;
+
+// Satu tick loop TP/SL/Trail cepat: baca PnL segar (satu request per pool) untuk trade
+// terbuka yang punya exit aktif, lalu jalankan runTradeExits.
+export async function runFastTradeExitTick({ positions = livePositions, deps = {} } = {}) {
+  const fetchPnl = deps.fetchPoolPnl ?? fetchPoolPnl;
+  const base = byAddress(positions);
+  const pools = new Set();
+  for (const t of listOpenTrades()) {
+    if (hasExitOn(t) && !tradeLock(t.id) && t.positions.some((addr) => base.has(addr))) pools.add(t.pool);
+  }
+  if (pools.size === 0) return new Set();
+
+  const fresh = [];
+  for (const pool of pools) {
+    const map = await fetchPnl(pool, { force: true, strict: true });
+    if (!(map instanceof Map)) continue;
+    for (const [addr, entry] of map) {
+      const pos = base.get(addr);
+      if (pos) fresh.push({ ...pos, ...usdPnlFromEntry(entry) });
+    }
+  }
+  return runTradeExits(fresh, { deps });
+}
+
+// Loop TP/SL/Trail: tick dimulai tiap `intervalSec` (lebih lambat bila fetch lebih lama).
+export async function tradeExitLoop(intervalSec) {
+  const intervalMs = intervalSec * 1000;
+  for (;;) {
+    const started = Date.now();
+    try {
+      await runFastTradeExitTick();
+    } catch (err) {
+      log.error(`Trade exit error: ${err.message}`);
+    }
+    await sleep(Math.max(0, intervalMs - (Date.now() - started)));
+  }
 }
 
 // Penutup sadar-trade untuk engine deterministik (termasuk timer trailing):
