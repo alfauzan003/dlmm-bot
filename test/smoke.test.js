@@ -55,6 +55,9 @@ const MODULES = [
   "../src/tg/bot.js",
   "../src/tg/session.js",
   "../src/tg/format.js",
+  "../src/tg/start.js",
+  "../src/tg/help.js",
+  "../src/tg/settings.js",
 ];
 
 test("every module loads without import errors", async () => {

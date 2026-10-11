@@ -1,11 +1,13 @@
-import config, { BINS_BELOW, BINS_ABOVE, STRATEGY } from "./config/index.js";
+import config from "./config/index.js";
 import log from "./core/logger.js";
-import * as tg from "./notify/telegram.js";
-import { startEntryScanner, getPoolNames } from "./entry/index.js";
+import { startBot } from "./tg/bot.js";
+import * as start from "./tg/start.js";
+import { sendHome } from "./tg/start.js";
+import * as help from "./tg/help.js";
+import * as settings from "./tg/settings.js";
+import { startEntryScanner } from "./entry/index.js";
 import { startDcaWatcher } from "./entry/dca.js";
 import { mainLoop } from "./exit/index.js";
-
-const STRATEGY_LABEL = { spot: "Spot", curve: "Curve", bid_ask: "BidAsk" };
 
 log.info("========================================");
 log.info("  Meteora Bot starting...");
@@ -20,20 +22,13 @@ if (!config.walletPrivateKey) {
   process.exit(1);
 }
 
-const poolNames = await getPoolNames();
-
-tg.notifyStartup({
-  mode: config.dryRun ? "DRY RUN" : "LIVE",
-  strategy: STRATEGY_LABEL[STRATEGY] || STRATEGY,
-  binsBelow: BINS_BELOW,
-  binsAbove: BINS_ABOVE,
-  sizeSplit: config.entry.sizeSplit,
-  scanIntervalSec: config.entry.scanIntervalSec,
-  jupiterPollIntervalSec: config.jupiterPollIntervalSec,
-  timeframe: config.entry.timeframe,
-  expiryHours: config.entry.expiryHours,
-  poolNames,
-});
+// Bot Telegram + kartu home. Kegagalan di sini tidak boleh menghentikan exit loop.
+try {
+  const bot = await startBot([start, help, settings]);
+  if (bot) await sendHome(bot.api, { prefix: "🟢 Online" });
+} catch (err) {
+  log.error(`Telegram startup gagal: ${err?.message ?? err}`);
+}
 
 // Entry scanner (Supertrend touch) — own cadence
 startEntryScanner();

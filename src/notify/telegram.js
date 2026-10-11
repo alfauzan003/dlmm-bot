@@ -9,9 +9,12 @@ const TOKEN = config.telegramBotToken;
 const CHAT_ID = config.telegramChatId;
 const BASE = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;
 
-function send(text) {
+function send(text, extra = {}) {
   if (!BASE || !CHAT_ID) return;
-  const body = JSON.stringify({ chat_id: CHAT_ID, text: String(text).slice(0, 4096) });
+  const payload = { chat_id: CHAT_ID, text: String(text).slice(0, 4096) };
+  if (extra.parse_mode) payload.parse_mode = extra.parse_mode;
+  if (extra.reply_markup) payload.reply_markup = extra.reply_markup;
+  const body = JSON.stringify(payload);
   const url = new URL(`${BASE}/sendMessage`);
   const req = https.request(
     url,
@@ -34,31 +37,6 @@ function send(text) {
   req.on("error", (err) => log.warn(`Telegram error: ${err.message}`));
   req.write(body);
   req.end();
-}
-
-export function notifyStartup(info = {}) {
-  const lines = ["🤖 Meteora Bot — AKTIF", "━━━━━━━━━━━━━━━━━━"];
-
-  if (info.mode) lines.push(`Mode     : ${info.mode}`);
-
-  if (info.strategy) {
-    const bins =
-      info.binsBelow != null && info.binsAbove != null ? ` (bins -${info.binsBelow}/+${info.binsAbove})` : "";
-    lines.push(`Strategy : ${info.strategy}${bins}`);
-  }
-
-  const entryParts = [];
-  if (info.sizeSplit != null) entryParts.push(`split ${info.sizeSplit} SOL`);
-  if (info.scanIntervalSec != null) entryParts.push(`refresh ${info.scanIntervalSec}s`);
-  if (info.jupiterPollIntervalSec != null) entryParts.push(`Jupiter poll ${info.jupiterPollIntervalSec}s`);
-  if (info.timeframe) entryParts.push(`TF ${info.timeframe}`);
-  if (entryParts.length) lines.push(`Entry    : ${entryParts.join(" | ")}`);
-
-  if (info.expiryHours != null) lines.push(`Expiry   : ${info.expiryHours} jam`);
-
-  if (info.poolNames?.length) lines.push(`Pools    : ${info.poolNames.join(", ")}`);
-
-  send(lines.join("\n"));
 }
 
 export function notifyEntry({ pair, pool, feeMode, feeSol }) {
