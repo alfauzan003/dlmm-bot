@@ -62,6 +62,8 @@ const MODULES = [
   "../src/tg/start.js",
   "../src/tg/help.js",
   "../src/tg/settings.js",
+  "../src/tg/parse.js",
+  "../src/tg/positions.js",
   "../src/lp/claim.js",
   "../src/lp/close-trade.js",
 ];

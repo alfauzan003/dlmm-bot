@@ -1,7 +1,9 @@
 // Inti bot Telegram (grammY): guard satu pengguna, registrasi modul, router teks, startBot.
-import { Bot } from "grammy";
+import { Bot, InlineKeyboard } from "grammy";
 import config from "../config/index.js";
 import log from "../core/logger.js";
+import * as session from "./session.js";
+import { extractAddress } from "./parse.js";
 
 export const COMMANDS = [
   { command: "start", description: "Main menu + wallet card" },
@@ -38,6 +40,71 @@ export function withGuard(label, handler) {
   };
 }
 
+// Tombol menu utama (dipakai kartu home dan petunjuk router teks).
+export function homeKeyboard() {
+  return new InlineKeyboard()
+    .text("➕ Open", "home:open")
+    .text("📂 Positions", "home:positions")
+    .row()
+    .text("📊 PnL", "home:pnl")
+    .text("👛 Wallet", "home:wallet")
+    .row()
+    .text("⚙️ Settings", "home:settings")
+    .text("❓ Help", "home:help");
+}
+
+const EXPIRED = "This button expired — start again";
+const HINT = "Paste a token or pool address to open a position, or pick from the menu.";
+
+// Registri router: prompt (menunggu teks) dan konfirmasi (token ok:<token>), diisi modul.
+const prompts = new Map(); // kind -> { handler, acceptsAddress }
+const confirms = new Map(); // action -> handler
+
+// handler(ctx, prompt). Prompt yang tidak menerima alamat dibatalkan bila pengguna menempelkan alamat.
+export function registerPrompt(kind, handler, { acceptsAddress = false } = {}) {
+  prompts.set(kind, { handler, acceptsAddress });
+}
+
+// handler(ctx, payload) dipanggil sekali per token sesuai payload.action.
+export function registerConfirm(action, handler) {
+  confirms.set(action, handler);
+}
+
+// Alamat ditempel di luar prompt: wizard /open (Task 13) menggantikan balasan sementara ini.
+async function routeAddress(ctx) {
+  await ctx.reply("Open wizard coming soon");
+}
+
+async function routeText(ctx) {
+  const text = ctx.message.text;
+  if (text.startsWith("/")) return;
+  const address = extractAddress(text);
+  const prompt = session.get("prompt");
+  if (prompt) {
+    const entry = prompts.get(prompt.kind);
+    if (entry && (entry.acceptsAddress || !address)) {
+      await entry.handler(ctx, prompt);
+      return;
+    }
+    session.del("prompt");
+  }
+  if (address) {
+    await routeAddress(ctx, address);
+    return;
+  }
+  await ctx.reply(HINT, { reply_markup: homeKeyboard() });
+}
+
+async function routeConfirm(ctx) {
+  const payload = session.redeemToken(ctx.match[1]);
+  const handler = payload ? confirms.get(payload.action) : null;
+  if (!handler) {
+    await ctx.answerCallbackQuery({ text: EXPIRED, show_alert: true });
+    return;
+  }
+  await handler(ctx, payload);
+}
+
 export function createBot({ token, chatId, modules = [] }) {
   const bot = new Bot(token);
   const owner = String(chatId);
@@ -52,10 +119,16 @@ export function createBot({ token, chatId, modules = [] }) {
     await next();
   });
 
+  // Pesan "/..." membatalkan prompt yang menunggu; perintahnya ditangani handler command.
+  bot.on("message:text", async (ctx, next) => {
+    if (ctx.message.text.startsWith("/")) session.del("prompt");
+    await next();
+  });
+
   for (const m of modules) m.register(bot);
 
-  // Router teks (diisi task berikutnya).
-  bot.on("message:text", async () => {});
+  bot.callbackQuery(/^ok:(\w+)$/, withGuard("Confirm", routeConfirm));
+  bot.on("message:text", withGuard("Message", routeText));
 
   bot.catch((err) => {
     log.error(`Telegram bot error: ${err?.error?.stack || err?.message || err}`);

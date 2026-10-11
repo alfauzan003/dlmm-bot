@@ -1,7 +1,8 @@
 // /settings: toggle ON/OFF + default Auto Exit (TP / SL / Trail).
 import { InlineKeyboard } from "grammy";
 import config from "../config/index.js";
-import { withGuard } from "./bot.js";
+import { registerPrompt, withGuard } from "./bot.js";
+import { parseExitInput } from "./parse.js";
 import * as session from "./session.js";
 import { getSettings, setToggle, setExitDefaults, TOGGLES } from "../state/settings.js";
 
@@ -41,16 +42,12 @@ export function buildSettings(settings, dryRun) {
   return { text, keyboard };
 }
 
-// Parser sementara (diganti parseExitInput di Task 9): angka positif terbatas.
-function parseStub(field, raw) {
-  const nums = String(raw ?? "")
-    .trim()
-    .split(/\s+/)
-    .map(Number);
-  if (!nums.every((n) => Number.isFinite(n) && n > 0)) return null;
-  if (field === "trail") return nums.length === 2 ? { trailStartPct: nums[0], trailDistancePct: nums[1] } : null;
-  if (nums.length !== 1) return null;
-  return field === "tp" ? { tpPct: nums[0] } : { slPct: nums[0] };
+// Default Auto Exit tidak punya on/off (toggle Auto Exit yang mengatur), jadi "off" tidak valid.
+function parseDefaults(field, raw) {
+  const parsed = parseExitInput(field, raw);
+  if (!parsed?.on) return null;
+  if (field === "trail") return { trailStartPct: parsed.startPct, trailDistancePct: parsed.distancePct };
+  return field === "tp" ? { tpPct: parsed.pct } : { slPct: parsed.pct };
 }
 
 export async function replySettings(ctx) {
@@ -81,20 +78,14 @@ export function register(bot) {
     })
   );
 
-  // Jawaban prompt; teks lain diteruskan ke handler berikutnya.
-  bot.on(
-    "message:text",
-    withGuard("Settings input", async (ctx, next) => {
-      const prompt = session.get("prompt");
-      if (prompt?.kind !== "settings-exit" || ctx.message.text.startsWith("/")) return next();
-      const parsed = parseStub(prompt.field, ctx.message.text);
-      if (!parsed) {
-        await ctx.reply("Invalid value, try again");
-        return;
-      }
-      setExitDefaults(parsed);
-      session.del("prompt");
-      await replySettings(ctx);
-    })
-  );
+  registerPrompt("settings-exit", async (ctx, prompt) => {
+    const parsed = parseDefaults(prompt.field, ctx.message.text);
+    if (!parsed) {
+      await ctx.reply("Invalid value, try again");
+      return;
+    }
+    setExitDefaults(parsed);
+    session.del("prompt");
+    await replySettings(ctx);
+  });
 }

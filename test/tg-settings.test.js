@@ -133,17 +133,25 @@ test("invalid prompt answer keeps the prompt and changes nothing", async () => {
   const { bot, calls } = build();
   session.put("prompt", { kind: "settings-exit", field: "sl" });
   await bot.handleUpdate(textUpdate("abc"));
-  await bot.handleUpdate(textUpdate("-5"));
+  await bot.handleUpdate(textUpdate("off"));
+  await bot.handleUpdate(textUpdate("0"));
   assert.deepEqual(session.get("prompt"), { kind: "settings-exit", field: "sl" });
   assert.equal(getSettings().exitDefaults.slPct, 25);
   const replies = calls.filter((c) => c.method === "sendMessage");
-  assert.equal(replies.length, 2);
+  assert.equal(replies.length, 3);
   assert.ok(replies.every((c) => c.payload.text === "Invalid value, try again"));
 });
 
-test("text without a settings prompt is ignored by the module", async () => {
-  const { bot, calls } = build();
+test("a signed SL answer is accepted as a plain percentage", async () => {
+  const { bot } = build();
+  session.put("prompt", { kind: "settings-exit", field: "sl" });
+  await bot.handleUpdate(textUpdate("-30"));
+  assert.equal(getSettings().exitDefaults.slPct, 30);
+  assert.equal(session.get("prompt"), null);
+});
+
+test("text without a settings prompt does not change the defaults", async () => {
+  const { bot } = build();
   await bot.handleUpdate(textUpdate("20"));
-  assert.equal(calls.length, 0);
   assert.equal(getSettings().exitDefaults.tpPct, 15);
 });

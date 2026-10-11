@@ -1,5 +1,4 @@
 // /start: kartu home (wallet, saldo, trade terbuka, toggle aktif) + tombol menu.
-import { InlineKeyboard } from "grammy";
 import config from "../config/index.js";
 import log from "../core/logger.js";
 import { WSOL_MINT } from "../core/constants.js";
@@ -7,9 +6,10 @@ import { getWallet } from "../solana/wallet.js";
 import { getConnection } from "../solana/connection.js";
 import { getPrices } from "../market/jupiter-price.js";
 import { getSettings } from "../state/settings.js";
-import { withGuard } from "./bot.js";
+import { homeKeyboard, withGuard } from "./bot.js";
 import { HELP_TEXT } from "./help.js";
 import { replySettings } from "./settings.js";
+import { summarizeOpenTrades } from "./positions.js";
 import { esc, fmtSol, fmtUsd } from "./format.js";
 
 const HTML = { parse_mode: "HTML" };
@@ -34,16 +34,7 @@ export function buildHome({ address, balanceSol, solUsd, openTrades, openPnlUsd,
     `⚡ On: ${on.length ? on.join(", ") : "none"}`,
   ];
   if (dryRun) lines.push("", "🧪 DRY RUN");
-  const keyboard = new InlineKeyboard()
-    .text("➕ Open", "home:open")
-    .text("📂 Positions", "home:positions")
-    .row()
-    .text("📊 PnL", "home:pnl")
-    .text("👛 Wallet", "home:wallet")
-    .row()
-    .text("⚙️ Settings", "home:settings")
-    .text("❓ Help", "home:help");
-  return { text: lines.join("\n"), keyboard };
+  return { text: lines.join("\n"), keyboard: homeKeyboard() };
 }
 
 // force: lewati pacing poll supaya kartu home tidak kosong dan tidak mengambil jatah scanner.
@@ -56,8 +47,7 @@ const DEFAULT_DEPS = {
   getAddress: async () => getWallet().publicKey.toBase58(),
   getBalance: async () => (await getConnection().getBalance(getWallet().publicKey)) / 1e9,
   getSolUsd: fetchSolUsd,
-  // Diganti daftar trade nyata saat modul trades ada (Task 5).
-  getOpenTrades: async () => ({ count: 0, pnlUsd: 0 }),
+  getOpenTrades: summarizeOpenTrades,
 };
 
 // Kumpulkan data home; sumber yang gagal/lambat jadi null (ditampilkan "?"), tidak pernah melempar.
@@ -113,7 +103,7 @@ export function register(bot) {
   );
   // Fitur belum ada: dijawab sementara.
   bot.callbackQuery(
-    /^home:(open|positions|pnl|wallet)$/,
+    /^home:(open|pnl|wallet)$/,
     withGuard("Home", (ctx) => ctx.reply("Coming soon"))
   );
 }

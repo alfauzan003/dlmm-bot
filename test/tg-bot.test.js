@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBot, withGuard, COMMANDS } from "../src/tg/bot.js";
+import { createBot, withGuard, COMMANDS, registerPrompt, registerConfirm } from "../src/tg/bot.js";
+import * as session from "../src/tg/session.js";
 
 const OWNER = 123;
 const BOT_INFO = {
@@ -97,4 +98,96 @@ test("withGuard answers callback queries even when the handler throws", async (t
   });
   assert.ok(calls.some((c) => c.method === "answerCallbackQuery"));
   assert.ok(calls.some((c) => c.method === "sendMessage" && c.payload.text === "⚠️ cb failed: nope"));
+});
+
+const POOL_ADDR = "BGm1tav58oGcsQJehL9WXBFXF7D27vZsKefj4xJKD5Y";
+const sentTexts = (calls) => calls.filter((c) => c.method === "sendMessage").map((c) => c.payload.text);
+const cb = (data) => ({
+  update_id: 7,
+  callback_query: {
+    id: "q7",
+    from: { id: OWNER, is_bot: false, first_name: "U" },
+    chat_instance: "c",
+    data,
+    message: { message_id: 1, date: 1, chat: { id: OWNER, type: "private" }, text: "hi" },
+  },
+});
+
+test("text router: pending prompt gets the text", async () => {
+  const seen = [];
+  registerPrompt("t-basic", async (ctx, prompt) => void seen.push([ctx.message.text, prompt.n]));
+  session.put("prompt", { kind: "t-basic", n: 1 });
+  const { bot, calls } = build([]);
+  await bot.handleUpdate(startUpdate(OWNER, "20"));
+  assert.deepEqual(seen, [["20", 1]]);
+  assert.equal(calls.length, 0);
+  session.del("prompt");
+});
+
+test("text router: an address clears a prompt that does not accept addresses", async () => {
+  const seen = [];
+  registerPrompt("t-noaddr", async (ctx) => void seen.push(ctx.message.text));
+  session.put("prompt", { kind: "t-noaddr" });
+  const { bot, calls } = build([]);
+  await bot.handleUpdate(startUpdate(OWNER, POOL_ADDR));
+  assert.deepEqual(seen, []);
+  assert.equal(session.get("prompt"), null);
+  assert.deepEqual(sentTexts(calls), ["Open wizard coming soon"]);
+});
+
+test("text router: a prompt registered with acceptsAddress keeps the address", async () => {
+  const seen = [];
+  registerPrompt("t-addr", async (ctx) => void seen.push(ctx.message.text), { acceptsAddress: true });
+  session.put("prompt", { kind: "t-addr" });
+  const { bot } = build([]);
+  await bot.handleUpdate(startUpdate(OWNER, POOL_ADDR));
+  assert.deepEqual(seen, [POOL_ADDR]);
+  session.del("prompt");
+});
+
+test("text router: a slash message clears the prompt and skips the prompt handler", async () => {
+  const seen = [];
+  registerPrompt("t-slash", async (ctx) => void seen.push(ctx.message.text));
+  session.put("prompt", { kind: "t-slash" });
+  const { bot, calls } = build([]);
+  await bot.handleUpdate(startUpdate(OWNER, "/unknown"));
+  assert.deepEqual(seen, []);
+  assert.equal(session.get("prompt"), null);
+  assert.equal(calls.length, 0);
+});
+
+test("text router: a known command also clears the prompt", async () => {
+  session.put("prompt", { kind: "t-slash" });
+  let hits = 0;
+  const { bot } = build([{ register: (b) => b.command("start", () => void hits++) }]);
+  await bot.handleUpdate(startUpdate(OWNER, "/start"));
+  assert.equal(hits, 1);
+  assert.equal(session.get("prompt"), null);
+});
+
+test("text router: an address without a prompt goes to the open route", async () => {
+  const { bot, calls } = build([]);
+  await bot.handleUpdate(startUpdate(OWNER, `see https://solscan.io/account/${POOL_ADDR}`));
+  assert.deepEqual(sentTexts(calls), ["Open wizard coming soon"]);
+});
+
+test("text router: other text gets a hint with the home keyboard", async () => {
+  const { bot, calls } = build([]);
+  await bot.handleUpdate(startUpdate(OWNER, "hello"));
+  const msg = calls.find((c) => c.method === "sendMessage");
+  assert.ok(msg.payload.text.length > 0);
+  assert.ok(msg.payload.reply_markup.inline_keyboard.flat().some((b) => b.callback_data === "home:positions"));
+});
+
+test("ok: token dispatches to the confirm handler once, then expires", async () => {
+  const seen = [];
+  registerConfirm("t-act", async (ctx, payload) => void seen.push(payload));
+  const token = session.issueToken({ action: "t-act", id: 5 });
+  const { bot, calls } = build([]);
+  await bot.handleUpdate(cb(`ok:${token}`));
+  await bot.handleUpdate(cb(`ok:${token}`));
+  assert.deepEqual(seen, [{ action: "t-act", id: 5 }]);
+  const alerts = calls.filter((c) => c.method === "answerCallbackQuery" && c.payload.text);
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].payload.text, "This button expired — start again");
 });
