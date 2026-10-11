@@ -11,7 +11,7 @@ process.env.DECISION_LOG_FILE = path.join(TMP, "decision-log.json");
 process.env.PNL_HISTORY_FILE = path.join(TMP, "pnl-history.json");
 process.env.SETTINGS_FILE = path.join(TMP, "settings.json");
 
-const { runSafetySweep } = await import("../src/exit/sweep.js");
+const { runSafetySweep, sweepClosedPosition } = await import("../src/exit/sweep.js");
 const { setToggle } = await import("../src/state/settings.js");
 const { addKeepMint } = await import("../src/state/keep-mints.js");
 
@@ -49,5 +49,37 @@ test("sweep runs when a legacy toggle is on and skips mints the user kept", asyn
     await runSafetySweep({ deps: { sweepToSol } });
     assert.equal(calls.length, 1, name);
     assert.ok(calls[0].excludeMints.includes("KeptMint"), name);
+  }
+});
+
+function fakeSwap() {
+  const calls = [];
+  const deps = {
+    getTokenBalance: async () => 42,
+    swapToSol: async (mint, amount) => {
+      calls.push({ mint, amount });
+      return { success: true };
+    },
+  };
+  return { calls, deps };
+}
+
+test("closed-position swap is a no-op while autoEntry, deterministicExit and dca are all off", async () => {
+  reset();
+  const { calls, deps } = fakeSwap();
+  await sweepClosedPosition("GoneMint", "GONE-SOL", { deps });
+  assert.equal(calls.length, 0);
+});
+
+test("closed-position swap runs when a legacy toggle is on, but never for kept mints", async () => {
+  for (const name of ["autoEntry", "deterministicExit", "dca"]) {
+    reset();
+    setToggle(name, true);
+    addKeepMint("KeptMint");
+    const { calls, deps } = fakeSwap();
+    await sweepClosedPosition("KeptMint", "KEPT-SOL", { deps });
+    assert.equal(calls.length, 0, name);
+    await sweepClosedPosition("GoneMint", "GONE-SOL", { deps });
+    assert.deepEqual(calls, [{ mint: "GoneMint", amount: 42 }], name);
   }
 });

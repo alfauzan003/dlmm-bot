@@ -4,8 +4,6 @@ import log from "../core/logger.js";
 import { sleep, minutes } from "../core/utils.js";
 import { getOpenPositions } from "../meteora/positions.js";
 import { fetchCandles, fetchVolume } from "../market/candles.js";
-import { getTokenBalance } from "../solana/balances.js";
-import { swapToSol } from "../solana/swap.js";
 import * as tg from "../notify/telegram.js";
 import {
   trackPosition,
@@ -30,7 +28,7 @@ import { clearDcaState, resetStaleDcaPools, getPoolDcaCount, effectiveDcaArmPct 
 import { getEntryInProgressPools, getClosingPools, takeRecentActions } from "../entry/runtime.js";
 import { getWatchSnapshot, deactivatePool } from "../entry/index.js";
 import { buildSummaryBlock, humanReason, fmtPct } from "../core/report.js";
-import { runSafetySweep } from "./sweep.js";
+import { runSafetySweep, sweepClosedPosition } from "./sweep.js";
 import { handleClose } from "./close.js";
 import { handleSpotOorKiri } from "./spot-fallback.js";
 import { handleSpotOorKananReentry, canSpotReenter } from "./spot-reentry.js";
@@ -47,15 +45,6 @@ import {
 let cycleCount = 0;
 let lastStatusSent = 0;
 let lastSummaryAt = 0;
-
-// Best-effort: saat posisi dianggap ditutup manual, coba swap sisa token ke SOL.
-// Kalau tidak ada saldo atau gagal, abaikan (safety sweep per-siklus tetap jalan).
-function sweepClosedPosition(baseMint, label) {
-  if (!baseMint) return;
-  getTokenBalance(baseMint)
-    .then((balance) => (balance > 0 ? swapToSol(baseMint, balance) : null))
-    .catch((err) => log.warn(`${label}: best-effort swap gagal: ${err.message}`));
-}
 
 // Posisi yang tidak lagi terbaca on-chain selama `missingCycleThreshold`
 // siklus berturut-turut dianggap sudah ditutup manual: tandai closed,
