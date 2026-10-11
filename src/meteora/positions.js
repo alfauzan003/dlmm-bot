@@ -288,8 +288,9 @@ export async function waitClosedPositionPnl(poolAddress, positionAddress, opts) 
 }
 
 // Satu request PnL ringan untuk seluruh posisi di pool. `force` = refresh
-// walaupun cache masih segar (dipakai watcher DCA).
-export async function fetchPoolPnl(poolAddress, { ttlSec = 5, force = false } = {}) {
+// walaupun cache masih segar (dipakai watcher DCA). `strict` = kembalikan null
+// saat fetch gagal (bukan cache lama) agar konfirmasi exit tidak memakai data basi.
+export async function fetchPoolPnl(poolAddress, { ttlSec = 5, force = false, strict = false } = {}) {
   if (!poolAddress) return new Map();
   const now = Date.now();
   const ttl = Math.max(0, Number(ttlSec) || 0);
@@ -300,7 +301,7 @@ export async function fetchPoolPnl(poolAddress, { ttlSec = 5, force = false } = 
     const walletStr = getWallet().publicKey.toString();
     const url = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${walletStr}&status=open&pageSize=100&page=1`;
     const res = await fetch(url);
-    if (!res.ok) return cached ? cached.map : new Map();
+    if (!res.ok) return strict ? null : cached ? cached.map : new Map();
     const data = await res.json();
     const map = new Map();
     for (const entry of data.positions || []) {
@@ -311,7 +312,7 @@ export async function fetchPoolPnl(poolAddress, { ttlSec = 5, force = false } = 
     return map;
   } catch (err) {
     log.warn(`fetchPoolPnl failed: ${err.message}`);
-    return cached ? cached.map : new Map();
+    return strict ? null : cached ? cached.map : new Map();
   }
 }
 

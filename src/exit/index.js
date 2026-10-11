@@ -34,6 +34,9 @@ import { runSafetySweep } from "./sweep.js";
 import { handleClose } from "./close.js";
 import { handleSpotOorKiri } from "./spot-fallback.js";
 import { handleSpotOorKananReentry, canSpotReenter } from "./spot-reentry.js";
+import { getTrade, tradeLock, listOpenTrades } from "../state/trades.js";
+import { closeTrade } from "../lp/close-trade.js";
+import { syncTrades, runTradeExits, tradeAwareClose, settleTradesForPositions } from "./trade-loop.js";
 
 let cycleCount = 0;
 let lastStatusSent = 0;
@@ -53,6 +56,7 @@ function sweepClosedPosition(baseMint, label) {
 // bersihkan state trailing/bounce, lalu kirim alert Telegram sekali.
 function handleMissingPositions(seen) {
   const threshold = config.missingCycleThreshold;
+  const marked = [];
   for (const p of getOpenTrackedPositions()) {
     if (p.position && seen.has(p.position)) {
       resetMissedCycle(p.position);
@@ -66,6 +70,7 @@ function handleMissingPositions(seen) {
       continue;
     }
     markClosedNotDetected(p.position);
+    marked.push(p.position);
     clearTrailingTimer(p.position);
     clearTrailingState(p.position);
     clearBounceRecovery(p.position);
@@ -77,6 +82,7 @@ function handleMissingPositions(seen) {
       deactivatePool(p.pool, "posisi ditutup manual / hilang");
     }
   }
+  return marked;
 }
 
 // --- Ringkasan naratif untuk log PM2 ---
@@ -179,7 +185,9 @@ export async function mainLoop() {
       continue;
     }
 
-    handleMissingPositions(new Set(positions.map((p) => p.position).filter(Boolean)));
+    const missing = handleMissingPositions(new Set(positions.map((p) => p.position).filter(Boolean)));
+    // Trade yang semua leg-nya kini tertutup → selesai (closed_outside).
+    settleTradesForPositions(missing);
 
     // Sesi DCA per pool: reset counter untuk pool yang tidak lagi punya posisi
     // aktif (termasuk in-flight & yang sedang closing).
@@ -202,6 +210,9 @@ export async function mainLoop() {
     }
 
     log.debug(`[detail] ${positions.length} posisi terbuka — cek tiap ${Math.round(config.pollIntervalHold * 60)}s`);
+
+    // Posisi yang sudah di-track bot sebelum tick ini (adopsi trade: auto vs external).
+    const wasTracked = new Set(positions.map((p) => p.position).filter((addr) => addr && getTrackedPosition(addr)));
 
     for (const pos of positions) {
       if (!pos.position) {
@@ -239,6 +250,21 @@ export async function mainLoop() {
       if (pos.mode === "spot") {
         recordTrackedRange(pos.position, pos.lowerBin, pos.upperBin);
       }
+    }
+
+    // Trade: adopsi posisi baru, lalu TP/SL/Trail per trade (selalu jalan).
+    syncTrades(positions, { wasTracked });
+    const tradeIdByAddr = new Map();
+    for (const t of listOpenTrades()) for (const addr of t.positions) tradeIdByAddr.set(addr, t.id);
+    const handledTradeIds = await runTradeExits(positions);
+    const positionsByAddr = new Map(positions.filter((p) => p.position).map((p) => [p.position, p]));
+    const closeForTrade = (p, reason, opts) => tradeAwareClose(p, reason, opts, { positionsByAddr });
+    const deterministic = isOn("deterministicExit");
+
+    for (const pos of positions) {
+      if (!pos.position) continue;
+      const pairLabel = pos.pair || pos.position.slice(0, 8);
+      const tracked = getTrackedPosition(pos.position);
 
       // Track PnL peaks
       if (pos.pnlPct != null) updatePnlPeaks(pos.position, pos.pnlPct);
@@ -255,6 +281,10 @@ export async function mainLoop() {
         recordPnlSnapshot(pos.position, pairLabel, pos.pnlPct, pos.marketCap, pos.feePct24h, volumeData);
       }
 
+      // Trade sedang diproses (lock) atau sudah ditangani TP/SL/Trail tick ini → lewati.
+      const tradeId = tradeIdByAddr.get(pos.position);
+      if (tradeId != null && (handledTradeIds.has(tradeId) || tradeLock(tradeId))) continue;
+
       // Safeguard: posisi asli ditandai agar ikut close setelah DCA terakhir
       // exit karena trailing TP (lihat exit/close.js).
       if (isOn("dca") && tracked?.dcaCloseSafeguard) {
@@ -262,13 +292,16 @@ export async function mainLoop() {
         continue;
       }
 
+      // Engine deterministik lama hanya saat toggle-nya ON.
+      if (!deterministic) continue;
+
       // Evaluasi exit by mode. Warmup (khusus mode yang diatur): tahan trailing
       // & arm indikator beberapa menit pertama; stop loss/OOR/yield tetap jalan.
       const rules = config.rulesFor(pos.mode);
       const warmup = isExitWarmup(tracked?.firstSeenAt, rules.exitWarmupMinutes);
 
       // Trailing TP + bounce recovery state machines
-      if (!warmup) processTrailing(pos, tracked, pairLabel, handleClose);
+      if (!warmup) processTrailing(pos, tracked, pairLabel, closeForTrade);
       processBounceRecovery(pos, pairLabel);
 
       let exit = evaluateExit(pos, null, { warmup });
@@ -281,7 +314,14 @@ export async function mainLoop() {
         `[detail] ${pairLabel}: ${exit.reason}${exit.action === "close" ? " → CLOSE" : ""}${warmup ? " [warmup]" : ""}`
       );
 
-      if (exit.action === "close") {
+      const trade = exit.action === "close" && tradeId != null ? getTrade(tradeId) : null;
+      if (trade && tradeLock(trade.id)) {
+        log.info(`${pairLabel}: trade #${trade.id} sedang diproses — skip close (${exit.reason})`);
+      } else if (trade && trade.positions.length > 1) {
+        // Trade multi-leg: tutup seluruh trade; follow-up (fallback/re-entry) hanya untuk trade satu leg.
+        handledTradeIds.add(trade.id);
+        await closeTrade(trade, { reason: exit.reason, swap: true, positionsByAddr });
+      } else if (exit.action === "close") {
         // OOR kiri spot: fallback konversi ke posisi token-only (close tanpa swap).
         let handled = false;
         if (exit.reason === "oor_kiri" && pos.mode === "spot") {

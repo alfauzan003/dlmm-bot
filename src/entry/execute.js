@@ -13,6 +13,8 @@ import { getDlmmSdk } from "../meteora/sdk.js";
 import { getPoolInfo } from "./pool-info.js";
 import { guardPoolPrice } from "./price-guard.js";
 import { trackPosition } from "../state/positions.js";
+import { createTrade } from "../state/trades.js";
+import { exitPresetForNewTrade } from "../state/settings.js";
 import { incrementEntryUsage, getEntryUsage, recordAction } from "./runtime.js";
 
 const STRATEGY_ENUM = { spot: "Spot", curve: "Curve", bid_ask: "BidAsk" };
@@ -209,6 +211,15 @@ export async function executeEntry(poolAddress, signal, sizeSol, opts = {}) {
   const pair = pairName || `${baseMint.slice(0, 4)}-SOL`;
 
   trackPosition(positionAddress, poolAddress, pair, baseMint, collectFeeMode, "bidask:double", isDca);
+  createTrade({
+    pool: poolAddress,
+    pair,
+    baseMint,
+    positions: [positionAddress],
+    depositSol: sizeSol,
+    origin: "auto",
+    exit: exitPresetForNewTrade(),
+  });
   const uses = countUsage ? incrementEntryUsage(poolAddress) : getEntryUsage(poolAddress);
 
   if (isDca) {
