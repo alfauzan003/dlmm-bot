@@ -10,8 +10,6 @@ process.env.SETTINGS_FILE = path.join(TMP, "settings.json");
 
 const { buildHome, gatherHomeData, sendHome, fetchSolUsd } = await import("../src/tg/start.js");
 const { HELP_TEXT } = await import("../src/tg/help.js");
-const { createBot } = await import("../src/tg/bot.js");
-const startModule = await import("../src/tg/start.js");
 const { DEFAULT_SETTINGS } = await import("../src/state/settings.js");
 
 test.after(() => {
@@ -86,38 +84,6 @@ test("sendHome via api sends to the configured chat with prefix and keyboard", a
   assert.equal(sent[0].extra.parse_mode, "HTML");
   assert.ok(sent[0].extra.reply_markup.inline_keyboard.length > 0);
   assert.ok(sent[0].text.includes("$200.00"));
-});
-
-test("unbuilt home buttons answer Coming soon", async () => {
-  const bot = createBot({ token: "123:dummy", chatId: "123", modules: [startModule] });
-  const calls = [];
-  bot.api.config.use((prev, method, payload) => {
-    calls.push({ method, payload });
-    return { ok: true, result: { message_id: 1, date: 1, chat: { id: 123, type: "private" } } };
-  });
-  bot.botInfo = {
-    id: 1,
-    is_bot: true,
-    first_name: "T",
-    username: "t_bot",
-    can_join_groups: true,
-    can_read_all_group_messages: false,
-    supports_inline_queries: false,
-    can_connect_to_business: false,
-    has_main_web_app: false,
-  };
-  await bot.handleUpdate({
-    update_id: 9,
-    callback_query: {
-      id: "q",
-      from: { id: 123, is_bot: false, first_name: "U" },
-      chat_instance: "c",
-      data: "home:wallet",
-      message: { message_id: 1, date: 1, chat: { id: 123, type: "private" }, text: "x" },
-    },
-  });
-  assert.ok(calls.some((c) => c.method === "sendMessage" && c.payload.text === "Coming soon"));
-  assert.ok(calls.some((c) => c.method === "answerCallbackQuery"));
 });
 
 test("fetchSolUsd bypasses poll pacing and reads the SOL price", async (t) => {

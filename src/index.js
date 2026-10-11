@@ -1,12 +1,14 @@
 import config from "./config/index.js";
 import log from "./core/logger.js";
 import { startBot } from "./tg/bot.js";
+import { hasWalletKey } from "./solana/wallet.js";
 import * as start from "./tg/start.js";
 import * as help from "./tg/help.js";
 import * as settings from "./tg/settings.js";
 import * as positions from "./tg/positions.js";
 import * as openWizard from "./tg/open-wizard.js";
 import * as pnl from "./tg/pnl.js";
+import * as wallet from "./tg/wallet.js";
 import { startEntryScanner } from "./entry/index.js";
 import { startDcaWatcher } from "./entry/dca.js";
 import { mainLoop } from "./exit/index.js";
@@ -19,13 +21,13 @@ log.info(
 );
 log.info("========================================");
 
-if (!config.walletPrivateKey) {
-  log.error("WALLET_PRIVATE_KEY is not set — exiting");
+if (!hasWalletKey()) {
+  log.error("Wallet key is not set (wallet.key or WALLET_PRIVATE_KEY) — exiting");
   process.exit(1);
 }
 
 // Bot Telegram + kartu home: tidak di-await agar Telegram yang lambat tidak menunda scanner / exit loop.
-startBot([start, help, settings, positions, openWizard, pnl])
+startBot([start, help, settings, positions, openWizard, pnl, wallet])
   .then((bot) => bot && start.sendHome(bot.api, { prefix: "🟢 Online" }))
   .catch((err) => log.error(`Telegram startup gagal: ${err?.message ?? err}`));
 
