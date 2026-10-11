@@ -55,6 +55,11 @@ let candidateCache = [];
 let _refreshBusy = false;
 let _watchBusy = false;
 
+// Seam khusus test: isi kandidat tanpa RPC (refreshCandidates butuh getPoolInfo).
+export function _setCandidatesForTest(list) {
+  candidateCache = list;
+}
+
 // Matikan pool secara persisten: beri `#` di pool.txt + hentikan pemantauan
 // in-process seketika (poll harga cepat tidak mengecek `skipped`). Hapus `#`
 // secara manual untuk mengaktifkan kembali.
