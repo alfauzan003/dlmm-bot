@@ -52,6 +52,9 @@ const MODULES = [
   "../src/exit/close.js",
   "../src/exit/spot-fallback.js",
   "../src/exit/spot-reentry.js",
+  "../src/tg/bot.js",
+  "../src/tg/session.js",
+  "../src/tg/format.js",
 ];
 
 test("every module loads without import errors", async () => {

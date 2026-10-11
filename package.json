@@ -24,7 +24,8 @@
     "@solana/web3.js": "^1.91.6",
     "bn.js": "^5.2.1",
     "bs58": "^6.0.0",
-    "gmgn-cli": "^1.6.6"
+    "gmgn-cli": "^1.6.6",
+    "grammy": "^1.46.0"
   },
   "allowScripts": {
     "bigint-buffer@1.1.5": true,
