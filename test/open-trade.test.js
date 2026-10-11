@@ -26,16 +26,23 @@ function reset() {
 }
 
 // Fake SDK + pool + RPC. `autofill` = token (raw) yang dibutuhkan per 1 SOL di sisi SOL.
+// Rent seperti RPC mainnet: (ukuran posisi + 128) x 6960 lamport; ukuran = 8112 + 112 per bin di atas 70.
+const rentLamports = (bins) => (8112 + Math.max(0, bins - 70) * 112 + 128) * 6960;
+// Lebar posisi multi2 tanpa ALT (70 + 91 x 3), ditulis literal agar tidak ikut parallelWidth.
+const LEG_WIDTH = 343;
+
 function fakeDeps({
   balance = 10,
   autofill = () => 1e9,
-  positionCount,
   landed = false,
   sendFails = 0,
+  failSend = null,
   binStep = 100,
+  held = 0,
 } = {}) {
-  const calls = { swap: [], swapToSol: [], send: [], init: [], multi: [], add: [], progress: [] };
+  const calls = { swap: [], swapToSol: [], send: [], init: [], multi: [], add: [], progress: [], keypairs: [] };
   let sendCount = 0;
+  let tokenBalance = held;
   const sdk = {
     StrategyType: STRATEGY,
     DEFAULT_BIN_PER_POSITION: new BN(70),
@@ -43,13 +50,7 @@ function fakeDeps({
     ALT_ADDRESS: {},
     autoFillXByStrategy: (active, step, amountY, ax, ay, lo, hi, type) => new BN(autofill(type)),
     autoFillYByStrategy: (active, step, amountX, ax, ay, lo, hi, type) => new BN(autofill(type)),
-    getPositionCountByBinCount: (n) => positionCount ?? Math.ceil(n / 1400),
-    getPositionRentExemption: async () => 0.06e9,
-    chunkBinRangeIntoExtendedPositions: (lo, hi) => {
-      const out = [];
-      for (let s = lo; s <= hi; s += 1400) out.push({ lowerBinId: s, upperBinId: Math.min(s + 1399, hi) });
-      return out;
-    },
+    getPositionRentExemption: async (connection, bins) => rentLamports(bins.toNumber()),
   };
   const pool = {
     lbPair: { binStep },
@@ -65,9 +66,9 @@ function fakeDeps({
     },
     initializeMultiplePositionAndAddLiquidityByStrategy2: async (gen, x, y, strategy) => {
       calls.multi.push({ x, y, strategy });
-      const width = 70 + 91 * 3;
-      const count = Math.ceil((strategy.maxBinId - strategy.minBinId + 1) / width);
+      const count = Math.ceil((strategy.maxBinId - strategy.minBinId + 1) / LEG_WIDTH);
       const keypairs = await gen(count);
+      calls.keypairs.push(...keypairs);
       return {
         instructionsByPositions: keypairs.map((kp) => ({
           positionKeypair: kp,
@@ -80,7 +81,8 @@ function fakeDeps({
     loadSdk: async () => sdk,
     getConnection: () => ({
       getBalance: async () => balance * 1e9,
-      getAccountInfo: async () => (landed ? { data: Buffer.alloc(0) } : null),
+      getAccountInfo: async (pubkey) =>
+        (typeof landed === "function" ? landed(pubkey, calls) : landed) ? { data: Buffer.alloc(0) } : null,
     }),
     getWallet: () => WALLET,
     getPoolInfo: async () => ({
@@ -92,7 +94,7 @@ function fakeDeps({
       collectFeeMode: 0,
     }),
     getMintDecimals: async () => 6,
-    getTokenBalance: async () => 1000,
+    getTokenBalance: async () => tokenBalance,
     guardPoolPrice: async ({ getActiveBin }) => ({
       activeBin: await getActiveBin(),
       guard: { ok: true, unavailable: false, deviationPct: 0.5 },
@@ -101,6 +103,7 @@ function fakeDeps({
     }),
     swapSolToToken: async (mint, sol) => {
       calls.swap.push([mint, sol]);
+      tokenBalance += 123.456;
       return { success: true, amountOut: 123.456 };
     },
     swapToSol: async (mint, amount) => {
@@ -112,7 +115,7 @@ function fakeDeps({
     sendAndConfirmRobust: async ({ tx, signers }) => {
       calls.send.push({ tx, signers });
       sendCount++;
-      if (sendCount <= sendFails) {
+      if (sendCount <= sendFails || failSend?.(sendCount)) {
         const e = new Error("Tx tidak terkonfirmasi");
         e.signature = "sig-fail";
         throw e;
@@ -205,17 +208,35 @@ test("insufficient SOL refused before swap", async () => {
   assert.equal(calls.send.length, 0);
 });
 
-test("extra rent of positions beyond the first is required", async () => {
-  // binStep 2, 20/20 -> ~2000 bin = 2 posisi: butuh deposit + buffer + rent posisi ke-2 (0.06).
-  const { deps } = fakeDeps({ balance: 1.1, binStep: 2 });
+test("rent above one standard position is required (several positions)", async () => {
+  // binStep 10, 20/20 -> 406 bin = posisi 343 + 63 bin. Rent 0.2702 + 0.0574 - standar 0.0574.
+  const { deps } = fakeDeps({ balance: 1.3, binStep: 10 });
   const plan = await planOpen({ ...base, deps });
-  assert.match(plan.error, /need 1\.1400/);
+  assert.equal(plan.error, "Not enough SOL: need 1.3502, have 1.3000 (short 0.0502)");
+});
+
+test("wide single position with deposit + 0.09 is refused before swap", async () => {
+  // binStep 100, 65/65 -> 156 bin dalam satu posisi: rent 0.1244, 0.0670 di atas posisi standar.
+  const { deps: rich } = fakeDeps();
+  const plan = await planOpen({ ...base, below: 65, above: 65, deps: rich });
+  assert.equal(plan.binCount, 156);
+  assert.equal(plan.positionCount, 1);
+  assert.ok(Math.abs(plan.rentSol - rentLamports(156) / 1e9) < 1e-12);
+
+  const { deps, calls } = fakeDeps({ balance: 1.09 });
+  const refused = await planOpen({ ...base, below: 65, above: 65, deps });
+  assert.equal(refused.error, "Not enough SOL: need 1.1470, have 1.0900 (short 0.0570)");
+  const res = await withLive(() => executeOpen(plan, { deps }));
+  assert.equal(res.success, false);
+  assert.match(res.error, /short 0\.0570/);
+  assert.equal(calls.swap.length, 0);
 });
 
 test("too many positions refused", async () => {
-  const { deps } = fakeDeps({ positionCount: 11 });
+  // binStep 1, 20/20 -> 4055 bin -> ceil(4055 / 343) = 12 posisi multi2.
+  const { deps } = fakeDeps({ binStep: 1 });
   const plan = await planOpen({ ...base, deps });
-  assert.equal(plan.error, "range too wide: 11 positions (max 10)");
+  assert.equal(plan.error, "range too wide: 12 positions (max 10)");
 });
 
 test("dry run sends nothing", async () => {
@@ -260,7 +281,8 @@ test("single position opens, tracks and creates a manual trade", async () => {
 
 test("failed open with nothing landed reverts swap", async () => {
   reset();
-  const { deps, calls } = fakeDeps({ sendFails: 1, landed: false });
+  // Token milik user yang sudah ada (500) tidak ikut dijual.
+  const { deps, calls } = fakeDeps({ sendFails: 1, landed: false, held: 500 });
   const plan = await planOpen({ ...base, deps });
   const res = await withLive(() => executeOpen(plan, { deps }));
   assert.equal(res.success, false);
@@ -313,7 +335,9 @@ test("wide range opens several positions under one trade", async () => {
   // binStep 10: 20/20 -> ~400 bin -> 2 posisi paralel (343 bin per posisi).
   const { deps, calls } = fakeDeps({ binStep: 10 });
   const plan = await planOpen({ ...base, deps });
-  assert.ok(plan.binCount > 343 && plan.binCount <= 686, `binCount ${plan.binCount}`);
+  assert.equal(plan.binCount, 406);
+  assert.equal(plan.positionCount, 2);
+  assert.ok(Math.abs(plan.rentSol - (rentLamports(343) + rentLamports(63)) / 1e9) < 1e-12);
   const res = await withLive(() => executeOpen(plan, { deps }));
   assert.equal(res.success, true);
   assert.equal(calls.init.length, 0);
@@ -324,7 +348,43 @@ test("wide range opens several positions under one trade", async () => {
   // Tiap tx ditandatangani wallet + keypair posisinya.
   assert.equal(calls.send[0].signers[1].publicKey.toString(), res.positions[0]);
   assert.equal(calls.send[3].signers[1].publicKey.toString(), res.positions[1]);
+  // Mode dari lebar seluruh range (406 >= 200), juga untuk leg terakhir yang hanya 63 bin.
   assert.equal(getTrackedPosition(res.positions[0]).mode, "spot");
+  assert.equal(getTrackedPosition(res.positions[1]).mode, "spot");
+  assert.equal(calls.multi[0].strategy.minBinId, plan.lowerBin);
+  assert.equal(calls.multi[0].strategy.maxBinId, plan.upperBin);
+});
+
+test("SOL-only narrow trade is tracked as bidask:sol", async () => {
+  reset();
+  const { deps, calls } = fakeDeps();
+  const plan = await planOpen({ ...base, below: 20, above: 0, deps });
+  const res = await withLive(() => executeOpen(plan, { deps }));
+  assert.equal(res.success, true);
+  assert.equal(calls.swap.length, 0);
+  assert.equal(getTrackedPosition(res.positions[0]).mode, "bidask:sol");
+});
+
+test("partial multi-position open keeps landed legs and reverts unused tokens", async () => {
+  reset();
+  // 2 posisi x 2 tx; tx ke-3 (posisi ke-2) gagal, hanya posisi pertama ada on-chain.
+  const { deps, calls } = fakeDeps({
+    binStep: 10,
+    failSend: (n) => n === 3,
+    landed: (pubkey, c) => pubkey.equals(c.keypairs[0].publicKey),
+  });
+  const plan = await planOpen({ ...base, shape: "mixed", deps });
+  const res = await withLive(() => executeOpen(plan, { deps }));
+  assert.equal(res.success, true);
+  assert.deepEqual(res.positions, [calls.keypairs[0].publicKey.toString()]);
+  assert.equal(getTrackedPosition(calls.keypairs[1].publicKey.toString()), null);
+  assert.deepEqual(getTrade(res.trade.id).positions, res.positions);
+  assert.match(res.warning, /Open incomplete: 1 of 2 positions/);
+  assert.match(res.warning, /Spot layer skipped/);
+  assert.match(res.warning, /swapped back to SOL/);
+  assert.equal(calls.add.length, 0);
+  assert.equal(calls.swapToSol.length, 1);
+  assert.ok(calls.swapToSol[0][1] > 0 && calls.swapToSol[0][1] <= 123.456);
 });
 
 test("mixed adds a Spot layer to the same position", async () => {
@@ -354,7 +414,8 @@ test("mixed Spot layer failure keeps the trade with a warning", async () => {
   };
   const res = await withLive(() => executeOpen(plan, { deps }));
   assert.equal(res.success, true);
-  assert.match(res.warning, /Spot/);
-  assert.equal(calls.swapToSol.length, 0);
+  assert.match(res.warning, /Spot layer \(30%\) failed/);
+  assert.match(res.warning, /swapped back to SOL/);
+  assert.equal(calls.swapToSol.length, 1);
   assert.equal(getTrade(res.trade.id).closed, false);
 });

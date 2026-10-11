@@ -23,6 +23,7 @@ const {
   unlockTrade,
 } = await import("../src/state/trades.js");
 const { setToggle } = await import("../src/state/settings.js");
+const { addEntryInProgressPool, removeEntryInProgressPool } = await import("../src/entry/runtime.js");
 const { syncTrades, runTradeExits, tradeAwareClose, settleTradesForPositions } =
   await import("../src/exit/trade-loop.js");
 
@@ -108,6 +109,20 @@ test("adopts bot-tracked position as auto with preset", () => {
   // Tidak dobel pada tick berikutnya.
   syncTrades([live("PosY", 1)], { wasTracked: new Set(["PosY"]) });
   assert.equal(listOpenTrades().length, 1);
+});
+
+test("does not adopt positions of a pool that is being opened", () => {
+  reset();
+  const pos = live("PosO", 1);
+  addEntryInProgressPool(pos.pool);
+  try {
+    syncTrades([pos], { wasTracked: new Set() });
+    assert.equal(findTradeByPosition("PosO"), null);
+  } finally {
+    removeEntryInProgressPool(pos.pool);
+  }
+  syncTrades([pos], { wasTracked: new Set() });
+  assert.equal(findTradeByPosition("PosO").origin, "external");
 });
 
 test("depositUsd stays null while a leg is unknown", () => {

@@ -12,6 +12,7 @@ import {
   updateTradeProgress,
 } from "../state/trades.js";
 import { closeTrade } from "../lp/close-trade.js";
+import { isEntryInProgressPool } from "../entry/runtime.js";
 import { handleClose } from "./close.js";
 import { aggregateTradePnl, evaluateTradeExit } from "./trade-exit.js";
 
@@ -37,6 +38,8 @@ function exitAllOff() {
 export function syncTrades(positions, { wasTracked = new Set() } = {}) {
   for (const pos of positions || []) {
     if (!pos?.position || findTradeByPosition(pos.position)) continue;
+    // Pool sedang dibuka (open/entry/DCA berjalan): pembuka mencatat trade-nya sendiri, jangan dipecah.
+    if (isEntryInProgressPool(pos.pool)) continue;
     const auto = wasTracked.has(pos.position);
     const trade = createTrade({
       pool: pos.pool,

@@ -90,19 +90,23 @@ export async function planOpen({ poolAddress, depositSol, below, above, shape, d
     baseIsX,
   });
 
-  const positionCount = sdk.getPositionCountByBinCount(binCount);
+  // Jumlah posisi = yang benar-benar dibuat: <= 70 bin satu posisi, lebih lebar per potongan multi2.
+  const ranges = positionRanges(sdk, pool, lowerBin, upperBin);
+  const positionCount = ranges.length;
   if (positionCount > MAX_TRADE_POSITIONS) {
     return { error: `range too wide: ${positionCount} positions (max ${MAX_TRADE_POSITIONS})` };
   }
 
+  // Rent tumbuh dengan lebar posisi: semua rent di atas satu posisi standar 70 bin ikut dicek
+  // (buffer 0.08 SOL menutup posisi standar itu).
   const connection = d.getConnection();
-  const rents = await Promise.all(
-    sdk
-      .chunkBinRangeIntoExtendedPositions(lowerBin, upperBin)
-      .map((c) => sdk.getPositionRentExemption(connection, new BN(c.upperBinId - c.lowerBinId + 1)))
-  );
+  const rentOf = (bins) => sdk.getPositionRentExemption(connection, new BN(bins));
+  const [standardRent, ...rents] = await Promise.all([
+    rentOf(sdk.DEFAULT_BIN_PER_POSITION.toNumber()),
+    ...ranges.map((r) => rentOf(r.upperBin - r.lowerBin + 1)),
+  ]);
   const rentSol = rents.reduce((s, r) => s + r, 0) / 1e9;
-  const extraRentSol = rentSol - (rents[0] ?? 0) / 1e9;
+  const extraRentSol = Math.max(0, rentSol - standardRent / 1e9);
 
   const balanceError = await checkBalance(d, depositSol, extraRentSol);
   if (balanceError) return { error: balanceError };
@@ -168,14 +172,34 @@ export async function planOpen({ poolAddress, depositSol, below, above, shape, d
   };
 }
 
-// Swap balik token hasil beli (maks. sebanyak yang dibeli) setelah open gagal total.
-async function revertSwap(d, baseMint, boughtUi) {
-  if (!(boughtUi > 0)) return;
-  const amount = Math.min(await d.getTokenBalance(baseMint), boughtUi);
-  if (!(amount > 0)) return;
-  const res = await d.swapToSol(baseMint, amount);
-  if (res.success) log.info(`Open gagal: ${amount} ${baseMint.slice(0, 8)} dikembalikan ke SOL`);
-  else log.error(`Open gagal: revert ${amount} ${baseMint.slice(0, 8)} → SOL gagal: ${res.error}`);
+// Rentang tiap posisi on-chain, sama dengan yang dibuat executeOpen (single <= 70 bin, selain itu multi2).
+function positionRanges(sdk, pool, lowerBin, upperBin) {
+  const binCount = upperBin - lowerBin + 1;
+  const width = binCount <= sdk.DEFAULT_BIN_PER_POSITION.toNumber() ? binCount : parallelWidth(sdk, pool);
+  return chunkRange(lowerBin, upperBin, width);
+}
+
+// Swap balik token yang dibeli tapi tidak masuk posisi: saldo di atas saldo sebelum swap,
+// maks. sebanyak yang dibeli (token milik user yang sudah ada tidak ikut dijual).
+async function revertUnused(d, baseMint, boughtUi, tokenBefore) {
+  if (!(boughtUi > 0)) return null;
+  try {
+    const amount = Math.min(boughtUi, Math.max(0, (await d.getTokenBalance(baseMint)) - tokenBefore));
+    if (!(amount > 0)) return null;
+    const res = await d.swapToSol(baseMint, amount);
+    if (res.success) log.info(`Open: ${amount} ${baseMint.slice(0, 8)} tak terpakai dikembalikan ke SOL`);
+    else log.error(`Open: revert ${amount} ${baseMint.slice(0, 8)} → SOL gagal: ${res.error}`);
+    return { amount, success: !!res.success };
+  } catch (err) {
+    log.error(`Open: revert ${baseMint.slice(0, 8)} → SOL error: ${err.message}`);
+    return { amount: null, success: false };
+  }
+}
+
+function revertNote(r) {
+  if (!r) return "";
+  if (r.success) return ` Unused tokens (${fmt(r.amount)}) were swapped back to SOL.`;
+  return " Swapping the unused tokens back to SOL failed.";
 }
 
 // UI -> BN raw lewat BigInt (BN(number) gagal di atas 2^53, mis. 10 juta token 9 desimal).
@@ -274,7 +298,9 @@ async function openLive(plan, progress, d) {
   const send = (tx, signers) => d.sendAndConfirmRobust({ connection, tx, signers, feePlan: txFeePlan(), wallet });
 
   let boughtUi = 0;
+  let tokenBefore = 0;
   if (plan.swapSol > 0) {
+    tokenBefore = await d.getTokenBalance(plan.baseMint);
     await progress(`Swapping ${fmt(plan.swapSol)} SOL → token…`);
     const swap = await d.swapSolToToken(plan.baseMint, plan.swapSol);
     if (!swap.success) return { success: false, error: `swap failed: ${swap.error}` };
@@ -323,7 +349,7 @@ async function openLive(plan, progress, d) {
         slippage
       );
       const items = res.instructionsByPositions;
-      const ranges = chunkRange(lowerBin, upperBin, parallelWidth(sdk, pool));
+      const ranges = positionRanges(sdk, pool, lowerBin, upperBin);
       rangesKnown = ranges.length === items.length;
       expected = items.length;
       items.forEach((it, i) => legs.push({ keypair: it.positionKeypair, ...(rangesKnown ? ranges[i] : {}) }));
@@ -341,26 +367,27 @@ async function openLive(plan, progress, d) {
   }
 
   let opened = legs;
+  let partial = false;
   let warning;
   if (openErr) {
     log.error(`Open ${plan.pair} gagal: ${openErr.message}`);
     opened = await landedLegs(connection, legs);
     if (opened.length === 0) {
-      await revertSwap(d, plan.baseMint, boughtUi);
+      await revertUnused(d, plan.baseMint, boughtUi, tokenBefore);
       return { success: false, error: openErr.message };
     }
     log.warn(`Open ${plan.pair}: ${opened.length}/${expected} posisi ada on-chain — dianggap terbuka`);
     // Multi-posisi: tx yang gagal bisa membuat sebagian likuiditas tidak masuk.
-    if (!single) warning = `Open incomplete: ${opened.length} of ${expected} positions on-chain (${openErr.message})`;
+    partial = !single;
   }
 
   // Catat posisi lalu trade tanpa await di antaranya (loop exit tidak sempat mengadopsi sebagai external).
   const positions = opened.map((l) => l.keypair.publicKey.toString());
   const exit = exitPresetForNewTrade();
-  for (const [i, leg] of opened.entries()) {
-    const span = leg.lowerBin != null ? leg.upperBin - leg.lowerBin + 1 : plan.binCount;
-    const mode = legMode(span, plan.solOnly, config.spotMinBins);
-    trackPosition(positions[i], plan.poolAddress, plan.pair, plan.baseMint, info.collectFeeMode, mode);
+  // Mode dari lebar seluruh range (bukan per leg): manual bidask:double bisa ikut DCA bila salah.
+  const mode = legMode(plan.binCount, plan.solOnly, config.spotMinBins);
+  for (const addr of positions) {
+    trackPosition(addr, plan.poolAddress, plan.pair, plan.baseMint, info.collectFeeMode, mode);
   }
   let trade = createTrade({
     pool: plan.poolAddress,
@@ -380,10 +407,18 @@ async function openLive(plan, progress, d) {
     `📌 OPEN ${plan.pair} — ${plan.depositSol} SOL ${plan.shape} (${positions.length} posisi) → trade #${trade.id}`
   );
 
-  // Mixed: lapisan Spot 30% ke posisi yang sama (per posisi, per potongan <= 70 bin).
-  if (plan.parts.length > 1 && !warning) {
+  const mixed = plan.parts.length > 1;
+  if (partial) {
+    const reverted = await revertUnused(d, plan.baseMint, boughtUi, tokenBefore);
+    warning =
+      `Open incomplete: ${opened.length} of ${expected} positions on-chain (${openErr.message}).` +
+      `${mixed ? " Spot layer skipped." : ""}${revertNote(reverted)}`;
+  } else if (mixed && !rangesKnown) {
+    const reverted = await revertUnused(d, plan.baseMint, boughtUi, tokenBefore);
+    warning = `Spot layer skipped: position ranges unknown — the BidAsk position is open.${revertNote(reverted)}`;
+  } else if (mixed) {
+    // Mixed: lapisan Spot 30% ke posisi yang sama (per posisi, per potongan <= 70 bin).
     try {
-      if (!rangesKnown) throw new Error("position ranges unknown");
       const pieces = spotPieces({
         legs: opened,
         activeBin: activeId,
@@ -407,7 +442,8 @@ async function openLive(plan, progress, d) {
       }
     } catch (err) {
       log.warn(`Open ${plan.pair}: lapisan Spot gagal: ${err.message}`);
-      warning = `Spot layer (30%) failed: ${err.message} — the BidAsk position is open`;
+      const reverted = await revertUnused(d, plan.baseMint, boughtUi, tokenBefore);
+      warning = `Spot layer (30%) failed: ${err.message} — the BidAsk position is open.${revertNote(reverted)}`;
     }
   }
 
