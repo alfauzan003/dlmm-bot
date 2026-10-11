@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { aggregateTradePnl, evaluateTradeExit } from "../src/exit/trade-exit.js";
+import { usdPnlFromEntry } from "../src/meteora/positions.js";
 
 const allOn = (extra = {}) => ({
   id: 1,
@@ -94,4 +95,41 @@ test("off switches ignored", () => {
   t.exit.trail.on = false;
   assert.equal(evaluateTradeExit(t, 500).reason, null);
   assert.equal(evaluateTradeExit(t, -90).reason, null);
+});
+
+test("aggregate unknown when one leg is known but has zero deposit", () => {
+  const map = new Map([
+    ["a", { pnlUsd: 2, depositUsd: 50, pnlKnown: true }],
+    ["b", { pnlUsd: 0, depositUsd: 0, pnlKnown: true }],
+  ]);
+  assert.equal(aggregateTradePnl(allOn(), map), null);
+});
+
+test("usdPnlFromEntry: real values are known", () => {
+  const r = usdPnlFromEntry({ pnlUsd: "-1.5", allTimeDeposits: { total: { usd: "50" } } });
+  assert.deepEqual(r, { pnlUsd: -1.5, depositUsd: 50, pnlKnown: true });
+  assert.equal(usdPnlFromEntry({ pnlUsd: 0, allTimeDeposits: { total: { usd: 50 } } }).pnlKnown, true);
+});
+
+test("usdPnlFromEntry: blank, missing or zero fields are not known", () => {
+  const dep = { total: { usd: 50 } };
+  assert.equal(usdPnlFromEntry({ pnlUsd: null, allTimeDeposits: dep }).pnlKnown, false);
+  assert.equal(usdPnlFromEntry({ pnlUsd: "", allTimeDeposits: dep }).pnlKnown, false);
+  assert.equal(usdPnlFromEntry({ allTimeDeposits: dep }).pnlKnown, false);
+  assert.equal(usdPnlFromEntry({ pnlUsd: 1, allTimeDeposits: { total: { usd: 0 } } }).pnlKnown, false);
+  assert.equal(usdPnlFromEntry({ pnlUsd: 1, allTimeDeposits: { total: { usd: "" } } }).pnlKnown, false);
+  assert.equal(usdPnlFromEntry({ pnlUsd: 1, allTimeDeposits: { total: { usd: null } } }).pnlKnown, false);
+  assert.equal(usdPnlFromEntry({ pnlUsd: 1 }).pnlKnown, false);
+  assert.equal(usdPnlFromEntry(null).pnlKnown, false);
+});
+
+test("sl wins over tp when both conditions hold", () => {
+  const t = allOn();
+  t.exit.sl.pct = -20; // kondisi artifisial: pnl 15 memenuhi sl (<= 20) dan tp (>= 15)
+  assert.equal(evaluateTradeExit(t, 15).reason, "sl");
+});
+
+test("non-finite previous peak is ignored", () => {
+  const r = evaluateTradeExit(allOn({ peakPnlPct: NaN }), 2);
+  assert.equal(r.peakPnlPct, 2);
 });

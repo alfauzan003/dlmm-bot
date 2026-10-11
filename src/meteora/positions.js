@@ -218,6 +218,20 @@ export function pnlFromEntry(entry) {
   return Number.isFinite(pnl) ? pnl : null;
 }
 
+// Angka nyata atau NaN: null/undefined/"" tidak boleh dianggap 0.
+function realNumber(v) {
+  if (v == null || (typeof v === "string" && v.trim() === "")) return NaN;
+  return Number(v);
+}
+
+// PnL USD dari satu entri. pnlKnown true hanya bila pnlUsd angka nyata DAN deposit > 0
+// (entri baru/belum ter-index sering berisi field kosong atau 0 -> jangan picu TP/SL/Trail).
+export function usdPnlFromEntry(entry) {
+  const pnlUsd = realNumber(entry?.pnlUsd);
+  const depositUsd = realNumber(entry?.allTimeDeposits?.total?.usd);
+  return { pnlUsd, depositUsd, pnlKnown: Number.isFinite(pnlUsd) && depositUsd > 0 };
+}
+
 // Baca satu entri posisi dari endpoint `status=closed` (paginate sederhana).
 // `wallet` bisa diisi eksplisit untuk pengujian; default ambil dari wallet bot.
 async function fetchClosedEntry(poolAddress, positionAddress, wallet) {
@@ -329,12 +343,11 @@ async function enrichPnl(positions) {
       const feeY = parseFloat(entry.unrealizedPnl?.unclaimedFeeTokenY?.amountSol || "0");
       p.unclaimedFee = Number.isFinite(feeX + feeY) ? feeX + feeY : 0;
 
-      // PnL dalam USD (dipakai TP/SL/Trail per trade). pnlKnown true hanya bila pnl & deposit valid.
-      const pnlUsd = Number(entry.pnlUsd);
-      const depositUsd = Number(entry.allTimeDeposits?.total?.usd);
-      p.pnlUsd = pnlUsd;
-      p.depositUsd = depositUsd;
-      p.pnlKnown = Number.isFinite(pnlUsd) && Number.isFinite(depositUsd);
+      // PnL dalam USD (dipakai TP/SL/Trail per trade).
+      const usd = usdPnlFromEntry(entry);
+      p.pnlUsd = usd.pnlUsd;
+      p.depositUsd = usd.depositUsd;
+      p.pnlKnown = usd.pnlKnown;
       // Fee belum diklaim dalam USD: hanya diisi bila field USD ada di respons.
       const feeUsdX = parseFloat(entry.unrealizedPnl?.unclaimedFeeTokenX?.amountUsd);
       const feeUsdY = parseFloat(entry.unrealizedPnl?.unclaimedFeeTokenY?.amountUsd);

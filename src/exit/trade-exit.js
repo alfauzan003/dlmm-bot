@@ -9,7 +9,7 @@ export function aggregateTradePnl(trade, positionsByAddr) {
   for (const addr of trade?.positions || []) {
     const p = positionsByAddr?.get(addr);
     if (!p || p.pnlKnown !== true) return null;
-    if (!Number.isFinite(p.pnlUsd) || !Number.isFinite(p.depositUsd)) return null;
+    if (!Number.isFinite(p.pnlUsd) || !(p.depositUsd > 0)) return null;
     pnlUsd += p.pnlUsd;
     depositUsd += p.depositUsd;
   }
@@ -20,7 +20,7 @@ export function aggregateTradePnl(trade, positionsByAddr) {
 // Urutan: SL, TP, Trail. Peak selalu dilacak saat PnL diketahui; trail aktif
 // (armed) begitu pnl >= startPct, lalu close bila pnl <= peak - distancePct.
 export function evaluateTradeExit(trade, pnlPct) {
-  const prevPeak = trade.peakPnlPct;
+  const prevPeak = Number.isFinite(trade.peakPnlPct) ? trade.peakPnlPct : null;
   const prevArmed = trade.trailArmed === true;
   if (pnlPct == null || !Number.isFinite(pnlPct)) {
     return { reason: null, peakPnlPct: prevPeak, trailArmed: trade.trailArmed };
