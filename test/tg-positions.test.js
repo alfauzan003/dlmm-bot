@@ -256,9 +256,9 @@ test("buildTradeDetail has the documented buttons", () => {
         ["💰 Claim+swap", "pos:claimswap:7"],
       ],
       [
-        ["🎯 TP", "pos:tp:7"],
-        ["🛑 SL", "pos:sl:7"],
-        ["📈 Trail", "pos:trail:7"],
+        ["🎯 TP 15%", "pos:tp:7"],
+        ["🛑 SL -25%", "pos:sl:7"],
+        ["📈 Trail 5/3", "pos:trail:7"],
       ],
       [["❌ Close", "pos:close:7"]],
       [
@@ -299,9 +299,9 @@ test("buildTradeDetail shows status, value, PnL, fees, range bar and exits", () 
   assert.equal(lines[0], "📂 Trade #7");
   assert.equal(lines[2], `🟢 IN · <a href="https://gmgn.ai/sol/token/${MINT}">A-SOL</a> · 2h · $98.88 (0.4712 SOL)`);
   assert.equal(lines[3], "PnL -$0.60 (-0.60%) · fees $0.52 (0.0025 SOL)");
-  assert.equal(lines[4], "spot · Range -45% / +10% · bins 100–155");
+  assert.equal(lines[4], "spot · Range -45% / +10%");
   assert.equal(lines[5], "[█████░░░░░░░] 40% from min");
-  assert.ok(text.includes("TP15 SL-25 T5/3 · Peak PnL +6.50%"), text);
+  assert.ok(text.includes("Peak PnL +6.50%"), text);
   assert.ok(text.includes("deposit 1 SOL"), text);
   assert.ok(text.includes("Origin manual"), text);
 
@@ -351,6 +351,37 @@ test("liveForTrade sums unclaimed fees only when every open leg reports them", (
     ).feesUsd,
     null
   );
+});
+
+test("liveForTrade converts SOL fees to USD when the API has no USD fee", () => {
+  // value $100 = 0.5 SOL → $200/SOL; fees 0.002 SOL → $0.40.
+  const trade = { positions: ["UA"] };
+  const live = liveForTrade(
+    trade,
+    new Map([
+      [
+        "UA",
+        {
+          activeBin: 5,
+          lowerBin: 0,
+          upperBin: 10,
+          pnlUsd: 0,
+          depositUsd: 100,
+          pnlKnown: true,
+          valueSol: 0.5,
+          unclaimedFee: 0.002,
+        },
+      ],
+    ])
+  );
+  assert.ok(Math.abs(live.feesUsd - 0.4) < 1e-9, String(live.feesUsd));
+});
+
+test("buildTradeDetail exit buttons show off when disabled", () => {
+  const exit = { tp: { on: false, pct: 15 }, sl: { on: false, pct: 25 }, trail: { on: false } };
+  const trade = { id: 8, pool: "Pool", pair: "A-SOL", shape: "spot", origin: "manual", exit };
+  const labels = buildTradeDetail(trade, null).keyboard.inline_keyboard[1].map((b) => b.text);
+  assert.deepEqual(labels, ["🎯 TP off", "🛑 SL off", "📈 Trail off"]);
 });
 
 test("/positions lists open trades", async () => {

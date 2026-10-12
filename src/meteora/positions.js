@@ -360,9 +360,11 @@ async function enrichPnl(positions) {
       const pnlSol = realNumber(entry.pnlSol);
       const depositSol = realNumber(entry.allTimeDeposits?.total?.sol);
       if (Number.isFinite(pnlSol) && Number.isFinite(depositSol)) p.valueSol = depositSol + pnlSol;
-      // Fee belum diklaim dalam USD: hanya diisi bila field USD ada di respons.
-      const feeUsdX = parseFloat(entry.unrealizedPnl?.unclaimedFeeTokenX?.amountUsd);
-      const feeUsdY = parseFloat(entry.unrealizedPnl?.unclaimedFeeTokenY?.amountUsd);
+      // Fee belum diklaim dalam USD: hanya diisi bila field USD ada di respons
+      // (`amountUsd` atau `usd`, seperti allTimeDeposits).
+      const feeUsd = (f) => parseFloat(f?.amountUsd ?? f?.usd);
+      const feeUsdX = feeUsd(entry.unrealizedPnl?.unclaimedFeeTokenX);
+      const feeUsdY = feeUsd(entry.unrealizedPnl?.unclaimedFeeTokenY);
       if (Number.isFinite(feeUsdX) || Number.isFinite(feeUsdY)) {
         p.unclaimedFeeUsd = (Number.isFinite(feeUsdX) ? feeUsdX : 0) + (Number.isFinite(feeUsdY) ? feeUsdY : 0);
       }

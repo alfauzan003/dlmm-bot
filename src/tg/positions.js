@@ -96,6 +96,10 @@ export function liveForTrade(trade, positionsByAddr) {
   if (openLegs > 0) {
     for (const key of Object.keys(sum)) if (known[key]) live[key] = sum[key];
   }
+  // Fee USD tidak ada di respons → konversi fee SOL dengan harga SOL tersirat dari nilai trade.
+  if (live.feesUsd == null && finite(live.feesSol) && finite(live.valueUsd) && live.valueSol > 0) {
+    live.feesUsd = live.feesSol * (live.valueUsd / live.valueSol);
+  }
   if (!missing && openLegs > 0) live.bins = { lower, upper, active, binStep, xIsSol };
   return live;
 }
@@ -133,11 +137,20 @@ export function buildPositionsList(trades, liveByTradeId) {
   return { text: [`📂 Open positions (${trades.length})`, "", ...lines].join("\n"), keyboard };
 }
 
-// "Range -45% / +10% · bins 100–155". Harga SOL tidak ditampilkan: binStep/desimal tidak disimpan di trade.
+// "Range -45% / +10%". Harga SOL tidak ditampilkan: binStep/desimal tidak disimpan di trade.
 function rangeLine(range) {
   if (!range || !finite(range.below) || !finite(range.above)) return "Range ?";
-  const bins = finite(range.lowerBin) && finite(range.upperBin) ? ` · bins ${range.lowerBin}–${range.upperBin}` : "";
-  return `Range -${range.below}% / +${range.above}%${bins}`;
+  return `Range -${range.below}% / +${range.above}%`;
+}
+
+// Label tombol exit berisi nilainya: "🎯 TP 15%", "🛑 SL -25%", "📈 Trail 5/3", atau "off".
+function exitButtons(exit) {
+  const { tp, sl, trail } = exit || {};
+  return {
+    tp: `🎯 TP ${tp?.on ? `${tp.pct}%` : "off"}`,
+    sl: `🛑 SL ${sl?.on ? `-${sl.pct}%` : "off"}`,
+    trail: `📈 Trail ${trail?.on ? `${trail.startPct}/${trail.distancePct}` : "off"}`,
+  };
 }
 
 const BAR_WIDTH = 12;
@@ -206,20 +219,21 @@ export function buildTradeDetail(trade, live, now = Date.now()) {
     [trade.shape, rangeLine(trade.range)].filter(Boolean).map(esc).join(" · "),
     rangeBar(live?.bins),
     "",
-    `${exitSummary(trade.exit)} · Peak PnL ${fmtPct(trade.peakPnlPct)}`,
+    `Peak PnL ${fmtPct(trade.peakPnlPct)}`,
     `Pool ${shortAddr(trade.pool)} · ${legs} position(s)${deposit}`,
     `Origin ${esc(trade.origin ?? "?")} · opened ${fmtWib(trade.openedAt)}`,
   ]
     .filter((line) => line != null)
     .join("\n");
   const id = trade.id;
+  const exitLabel = exitButtons(trade.exit);
   const keyboard = new InlineKeyboard()
     .text("💰 Claim", `pos:claim:${id}`)
     .text("💰 Claim+swap", `pos:claimswap:${id}`)
     .row()
-    .text("🎯 TP", `pos:tp:${id}`)
-    .text("🛑 SL", `pos:sl:${id}`)
-    .text("📈 Trail", `pos:trail:${id}`)
+    .text(exitLabel.tp, `pos:tp:${id}`)
+    .text(exitLabel.sl, `pos:sl:${id}`)
+    .text(exitLabel.trail, `pos:trail:${id}`)
     .row()
     .text("❌ Close", `pos:close:${id}`);
   if (canFlip(trade)) {
