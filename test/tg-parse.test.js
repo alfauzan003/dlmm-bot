@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseExitInput, parseSolAmount, extractAddress } from "../src/tg/parse.js";
+import { parseExitInput, parseSolAmount, extractAddress, parseAutoFlipInput } from "../src/tg/parse.js";
 
 const POOL = "BGm1tav58oGcsQJehL9WXBFXF7D27vZsKefj4xJKD5Y";
 
@@ -64,4 +64,12 @@ test("extractAddress returns null when there is none", () => {
   assert.equal(extractAddress(null), null);
   // Lebih panjang dari 44 (mis. private key / signature) bukan alamat.
   assert.equal(extractAddress(POOL + POOL), null);
+});
+
+test("parseAutoFlipInput", () => {
+  assert.deepEqual(parseAutoFlipInput("30"), { on: true, pct: 30 });
+  assert.deepEqual(parseAutoFlipInput(" 12,5% "), { on: true, pct: 12.5 });
+  assert.deepEqual(parseAutoFlipInput("100"), { on: true, pct: 100 });
+  assert.deepEqual(parseAutoFlipInput("OFF"), { on: false });
+  for (const bad of ["0", "101", "-5", "abc", "", "30 40", "1e2"]) assert.equal(parseAutoFlipInput(bad), null, bad);
 });

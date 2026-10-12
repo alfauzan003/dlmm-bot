@@ -7,10 +7,10 @@ import { claimTrade } from "../lp/claim.js";
 import { closeTrade } from "../lp/close-trade.js";
 import { canFlip, flipTrade, planFlip } from "../lp/flip-trade.js";
 import { getTrackedPosition } from "../state/positions.js";
-import { getTrade, listOpenTrades, setTradeExit } from "../state/trades.js";
+import { getTrade, listOpenTrades, setTradeAutoFlip, setTradeExit } from "../state/trades.js";
 import { registerConfirm, registerPrompt, withGuard } from "./bot.js";
 import { esc, exitSummary, fmtAge, fmtPct, fmtSol, fmtToken, fmtUsd, fmtWib, shortAddr } from "./format.js";
-import { parseExitInput } from "./parse.js";
+import { parseAutoFlipInput, parseExitInput } from "./parse.js";
 import * as session from "./session.js";
 
 const HTML = { parse_mode: "HTML" };
@@ -222,7 +222,10 @@ export function buildTradeDetail(trade, live, now = Date.now()) {
     .text("📈 Trail", `pos:trail:${id}`)
     .row()
     .text("❌ Close", `pos:close:${id}`);
-  if (canFlip(trade)) keyboard.text("🔁 Flip", `pos:flip:${id}`);
+  if (canFlip(trade)) {
+    const auto = trade.autoFlip?.pct > 0 ? `${trade.autoFlip.pct}%` : "off";
+    keyboard.text("🔁 Flip", `pos:flip:${id}`).text(`🤖 Auto flip ${auto}`, `pos:autoflip:${id}`);
+  }
   keyboard.row().text("🔄 Refresh", `pos:open:${id}`).text("◀ Back", "home:positions");
   return { text, keyboard };
 }
@@ -406,6 +409,31 @@ export function register(bot) {
       await ctx.reply(PROMPTS[field](id));
     })
   );
+
+  bot.callbackQuery(
+    /^pos:autoflip:(\d+)$/,
+    withGuard("Auto flip", async (ctx) => {
+      const id = Number(ctx.match[1]);
+      const trade = openTradeOrNull(id);
+      if (!trade) return notOpen(ctx, id);
+      if (!canFlip(trade)) return;
+      session.put("prompt", { kind: "pos-autoflip", id });
+      await ctx.reply(`Send the Auto flip % for trade #${id} (e.g. 30), or off.`);
+    })
+  );
+
+  registerPrompt("pos-autoflip", async (ctx, prompt) => {
+    const parsed = parseAutoFlipInput(ctx.message.text);
+    if (!parsed) {
+      await ctx.reply("Invalid value, try again");
+      return;
+    }
+    session.del("prompt");
+    const trade = openTradeOrNull(prompt.id);
+    if (!trade) return notOpen(ctx, prompt.id);
+    setTradeAutoFlip(trade.id, parsed.on ? { pct: parsed.pct } : null);
+    await showDetail(ctx, getTrade(trade.id), false);
+  });
 
   registerPrompt("pos-exit", async (ctx, prompt) => {
     const parsed = parseExitInput(prompt.field, ctx.message.text);

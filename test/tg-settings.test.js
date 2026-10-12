@@ -78,6 +78,7 @@ test("buildSettings labels", () => {
   assert.ok(labels.includes("📈 Trail 5 / 3"));
   assert.ok(labels.includes("✅ Auto Exit"));
   assert.ok(labels.includes("❌ DCA"));
+  assert.ok(labels.includes("🤖 Auto flip off"));
   assert.ok(text.includes("DRY_RUN: on (.env)"));
 });
 
@@ -94,6 +95,7 @@ test("buildSettings callback data", () => {
     "set:edit:trail",
     "set:rng",
     "set:dep",
+    "set:autoflip",
   ]);
 });
 
@@ -236,4 +238,20 @@ test("back returns to the main settings screen", async () => {
   const { bot, calls } = build();
   await bot.handleUpdate(cbUpdate("set:back"));
   assert.ok(lastText(calls).startsWith("⚙️ Settings"));
+});
+
+test("auto flip default: prompt sets, shows and clears it", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("set:autoflip"));
+  assert.deepEqual(session.get("prompt"), { kind: "settings-autoflip" });
+  assert.equal(lastText(calls), "Send the default Auto flip % for new bid_ask / mixed trades (e.g. 30), or off.");
+  await bot.handleUpdate(textUpdate("abc"));
+  assert.equal(lastText(calls), "Invalid value, try again");
+  await bot.handleUpdate(textUpdate("30"));
+  assert.equal(getSettings().autoFlipPct, 30);
+  assert.equal(session.get("prompt"), null);
+  assert.ok(lastKeyboard(calls).some((b) => b.text === "🤖 Auto flip 30%"));
+  await bot.handleUpdate(cbUpdate("set:autoflip"));
+  await bot.handleUpdate(textUpdate("off"));
+  assert.equal(getSettings().autoFlipPct, null);
 });

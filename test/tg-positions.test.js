@@ -585,8 +585,11 @@ test("buildTradeDetail shows Flip only for bid_ask and mixed", () => {
     assert.deepEqual(closeRow(shape), [
       ["❌ Close", "pos:close:7"],
       ["🔁 Flip", "pos:flip:7"],
+      ["🤖 Auto flip off", "pos:autoflip:7"],
     ]);
   }
+  const on = buildTradeDetail({ ...base, shape: "bid_ask", autoFlip: { pct: 30 } }, null);
+  assert.ok(on.keyboard.inline_keyboard[2].some((b) => b.text === "🤖 Auto flip 30%"));
   for (const shape of ["spot", "curve", null]) assert.deepEqual(closeRow(shape), [["❌ Close", "pos:close:7"]]);
 });
 
@@ -661,4 +664,31 @@ test("flip in dry run says so", async () => {
   const { flip } = await flipToken(bot, calls, trade.id);
   await bot.handleUpdate(cbUpdate(flip));
   assert.ok(edits(calls).some((t) => t.includes("🧪 DRY RUN — would flip 4 bins → new position over 4 bins.")));
+});
+
+test("auto flip prompt sets and clears the trade's auto flip", async () => {
+  const trade = newTrade({ shape: "bid_ask" });
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate(`pos:autoflip:${trade.id}`));
+  assert.deepEqual(session.get("prompt"), { kind: "pos-autoflip", id: trade.id });
+  assert.equal(sent(calls).at(-1), `Send the Auto flip % for trade #${trade.id} (e.g. 30), or off.`);
+
+  await bot.handleUpdate(textUpdate("150"));
+  assert.ok(sent(calls).at(-1).includes("Invalid"));
+  assert.equal("autoFlip" in getTrade(trade.id), false);
+
+  await bot.handleUpdate(textUpdate("30"));
+  assert.deepEqual(getTrade(trade.id).autoFlip, { pct: 30 });
+  assert.equal(session.get("prompt"), null);
+
+  await bot.handleUpdate(cbUpdate(`pos:autoflip:${trade.id}`));
+  await bot.handleUpdate(textUpdate("off"));
+  assert.equal("autoFlip" in getTrade(trade.id), false);
+});
+
+test("auto flip button on a spot trade is ignored", async () => {
+  const trade = newTrade();
+  const { bot } = build();
+  await bot.handleUpdate(cbUpdate(`pos:autoflip:${trade.id}`));
+  assert.equal(session.get("prompt"), null);
 });

@@ -41,3 +41,11 @@ export function parseExitInput(kind, text) {
   const pct = toNumber(body);
   return Number.isFinite(pct) && pct > 0 && pct <= 1000 ? { on: true, pct } : null;
 }
+
+// Auto flip: "30" / "30%" (1..100) -> { on:true, pct }; "off" -> { on:false }; tidak valid -> null.
+export function parseAutoFlipInput(text) {
+  const raw = String(text ?? "").trim();
+  if (raw.toLowerCase() === "off") return { on: false };
+  const pct = toNumber(raw.replace(/%$/, ""));
+  return Number.isFinite(pct) && pct >= 1 && pct <= 100 ? { on: true, pct } : null;
+}

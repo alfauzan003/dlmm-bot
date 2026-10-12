@@ -2,7 +2,7 @@
 import { InlineKeyboard } from "grammy";
 import config from "../config/index.js";
 import { registerPrompt, withGuard } from "./bot.js";
-import { parseExitInput, parseSolAmount } from "./parse.js";
+import { parseAutoFlipInput, parseExitInput, parseSolAmount } from "./parse.js";
 import * as session from "./session.js";
 import { parseCustomRange, presetLabel } from "../lp/range.js";
 import {
@@ -16,6 +16,7 @@ import {
   getDepositPresets,
   setDepositPresets,
   resetDepositPresets,
+  setAutoFlipDefault,
 } from "../state/settings.js";
 
 const TOGGLE_LABELS = {
@@ -46,12 +47,15 @@ export function buildSettings(settings, dryRun) {
     .text(`📈 Trail ${d.trailStartPct} / ${d.trailDistancePct}`, "set:edit:trail")
     .row()
     .text("📐 Range presets", "set:rng")
-    .text(`💰 Deposits ${settings.depositPresets.join(" / ")}`, "set:dep");
+    .text(`💰 Deposits ${settings.depositPresets.join(" / ")}`, "set:dep")
+    .row()
+    .text(`🤖 Auto flip ${settings.autoFlipPct != null ? `${settings.autoFlipPct}%` : "off"}`, "set:autoflip");
   const text = [
     "⚙️ Settings",
     "",
     "Tap a toggle to switch it. Tap TP / SL / Trail to change the Auto Exit defaults for new trades.",
     "Range presets and Deposits set the quick-pick buttons in /open.",
+    "Auto flip is the default for new bid_ask / mixed trades from /open.",
     "",
     `DRY_RUN: ${dryRun ? "on" : "off"} (.env)`,
   ].join("\n");
@@ -187,6 +191,25 @@ export function register(bot) {
       return editTo(ctx, buildDepositPresets());
     })
   );
+
+  bot.callbackQuery(
+    "set:autoflip",
+    withGuard("Auto flip default", async (ctx) => {
+      session.put("prompt", { kind: "settings-autoflip" });
+      await ctx.reply("Send the default Auto flip % for new bid_ask / mixed trades (e.g. 30), or off.");
+    })
+  );
+
+  registerPrompt("settings-autoflip", async (ctx) => {
+    const parsed = parseAutoFlipInput(ctx.message.text);
+    if (!parsed) {
+      await ctx.reply("Invalid value, try again");
+      return;
+    }
+    setAutoFlipDefault(parsed.on ? parsed.pct : null);
+    session.del("prompt");
+    await replySettings(ctx);
+  });
 
   registerPrompt("settings-range", async (ctx, prompt) => {
     const parsed = parsePresetRange(prompt.key, ctx.message.text);
