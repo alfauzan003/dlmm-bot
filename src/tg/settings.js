@@ -4,6 +4,7 @@ import config from "../config/index.js";
 import { registerPrompt, withGuard } from "./bot.js";
 import { parseAutoFlipInput, parseExitInput, parseSolAmount } from "./parse.js";
 import * as session from "./session.js";
+import { registerStrat } from "./strat-settings.js";
 import { parseCustomRange, presetLabel } from "../lp/range.js";
 import {
   getSettings,
@@ -48,7 +49,9 @@ export function buildSettings(settings, dryRun) {
     .text("📐 Range presets", "set:rng")
     .text(`💰 Deposits ${settings.depositPresets.join(" / ")}`, "set:dep")
     .row()
-    .text(`🤖 Auto flip ${settings.autoFlipPct != null ? `${settings.autoFlipPct}%` : "off"}`, "set:autoflip");
+    .text(`🤖 Auto flip ${settings.autoFlipPct != null ? `${settings.autoFlipPct}%` : "off"}`, "set:autoflip")
+    .row()
+    .text("🧩 Strategy", "st:home");
   const text = [
     "⚙️ Settings",
     "",
@@ -118,6 +121,7 @@ export async function replySettings(ctx) {
 
 export function register(bot) {
   bot.command("settings", withGuard("/settings", replySettings));
+  registerStrat(bot);
 
   bot.callbackQuery(
     /^set:toggle:(\w+)$/,

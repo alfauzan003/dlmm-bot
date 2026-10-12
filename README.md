@@ -146,7 +146,14 @@ Before any automatic close the bot re-checks the PnL once and closes only if the
 | Deterministic Exit | OFF | Apply the older rule-based exits to all positions, manual ones included |
 
 The toggles are saved in `settings.json`. They take effect without a restart and are the only on/off switch for
-these features; all other tuning stays in `strat.conf`.
+these features.
+
+**🧩 Strategy** (in `/settings`) shows every key of `strat.conf`, grouped by its `# ===== … =====` sections, with the
+comment above each key as help. Changing a value there saves it as an override in `settings.json`
+(`stratOverrides`); `strat.conf` stays the committed default and **↩ Reset to default** / **Reset all overrides**
+go back to it. Overrides apply right away, except keys marked ⟳ (loop intervals, log level/retention, rate
+limits), which apply after a restart. Precedence: `.env` < `strat.conf` < overrides. Secrets and `DRY_RUN` live
+only in `.env` and are never shown.
 
 ## Upgrading from the old bot
 

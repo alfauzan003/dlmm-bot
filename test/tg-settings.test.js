@@ -96,6 +96,7 @@ test("buildSettings callback data", () => {
     "set:rng",
     "set:dep",
     "set:autoflip",
+    "st:home",
   ]);
 });
 
