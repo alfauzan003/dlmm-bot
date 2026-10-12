@@ -77,7 +77,8 @@ test("buildSettings labels", () => {
   assert.ok(labels.includes("🛑 SL 25"));
   assert.ok(labels.includes("📈 Trail 5 / 3"));
   assert.ok(labels.includes("✅ Auto Exit"));
-  assert.ok(labels.includes("❌ DCA"));
+  assert.ok(labels.includes("❌ Deterministic Exit"));
+  assert.ok(!labels.some((l) => l.includes("DCA")));
   assert.ok(labels.includes("🤖 Auto flip off"));
   assert.ok(text.includes("DRY_RUN: on (.env)"));
 });
@@ -89,7 +90,6 @@ test("buildSettings callback data", () => {
     "set:toggle:autoExit",
     "set:toggle:autoEntry",
     "set:toggle:deterministicExit",
-    "set:toggle:dca",
     "set:edit:tp",
     "set:edit:sl",
     "set:edit:trail",
@@ -101,12 +101,12 @@ test("buildSettings callback data", () => {
 
 test("settings toggle button flips the setting", async () => {
   const { bot, calls } = build();
-  assert.equal(isOn("dca"), false);
-  await bot.handleUpdate(cbUpdate("set:toggle:dca"));
-  assert.equal(isOn("dca"), true);
+  assert.equal(isOn("autoEntry"), false);
+  await bot.handleUpdate(cbUpdate("set:toggle:autoEntry"));
+  assert.equal(isOn("autoEntry"), true);
   assert.ok(calls.some((c) => c.method === "editMessageText"));
-  await bot.handleUpdate(cbUpdate("set:toggle:dca"));
-  assert.equal(isOn("dca"), false);
+  await bot.handleUpdate(cbUpdate("set:toggle:autoEntry"));
+  assert.equal(isOn("autoEntry"), false);
 });
 
 test("set:edit stores a prompt and asks for a value", async () => {

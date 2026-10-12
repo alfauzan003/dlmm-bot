@@ -28,7 +28,7 @@ export async function checkPoolPriceDeviation({
     return { ok: true, unavailable: true, reason: "harga pool tidak tersedia" };
   }
 
-  // null/undefined/0 dianggap tidak tersedia (mis. DCA mengirim price: null).
+  // null/undefined/0 dianggap tidak tersedia (mis. pemanggil mengirim price: null).
   let t = Number(tokenUsd);
   let s = Number(solUsd);
   if (tokenUsd == null || !Number.isFinite(t) || t <= 0) t = NaN;

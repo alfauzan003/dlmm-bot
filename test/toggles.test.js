@@ -52,14 +52,13 @@ async function withFetchSpy(fn) {
 // strat.conf sementara = salinan strat.conf asli + pool list sementara, supaya
 // refreshCandidates punya satu pool tanpa menyentuh pool.txt produksi.
 const realStrat = fs.readFileSync(new URL("../strat.conf", import.meta.url), "utf8");
-fs.writeFileSync(STRAT, `${realStrat}\nPOOL_LIST_FILE=${POOLS}\nENTRY_ENABLED=true\nDCA_ENABLED=true\n`);
+fs.writeFileSync(STRAT, `${realStrat}\nPOOL_LIST_FILE=${POOLS}\nENTRY_ENABLED=true\n`);
 fs.writeFileSync(POOLS, `${POOL},0.1,3\n`);
 process.env.STRAT_FILE = STRAT;
 
 const { setToggle } = await import("../src/state/settings.js");
 const { trackPosition } = await import("../src/state/positions.js");
 const { refreshCandidates, watchAndEnter, _setCandidatesForTest } = await import("../src/entry/index.js");
-const { tickDca } = await import("../src/entry/dca.js");
 
 const POSITION = "PosToggle11111111111111111111111111111111111";
 
@@ -111,13 +110,4 @@ test("watchAndEnter skips the Jupiter price fetch when autoEntry off, does it wh
   } finally {
     _setCandidatesForTest([]);
   }
-});
-
-test("tickDca does nothing when dca off", async () => {
-  setToggle("dca", false);
-  const before = fs.readFileSync(STATE);
-  // Tanpa toggle, tickDca akan menarik PnL (fetch) untuk posisi eligible.
-  const urls = await withFetchSpy(() => tickDca());
-  assert.deepEqual(urls, [], "no PnL fetch when dca off");
-  assert.ok(before.equals(fs.readFileSync(STATE)), "state file must be byte-identical");
 });

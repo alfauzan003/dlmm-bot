@@ -34,7 +34,7 @@ test("lolos bila deviasi dalam ambang (kasus CkLA +8.5%)", async () => {
   assert.ok(Math.abs(r.deviationPct - 8.5) < 0.5);
 });
 
-test("harga token null memicu fetch (kasus DCA price:null)", async () => {
+test("harga token null memicu fetch (kasus price:null)", async () => {
   let called = false;
   const r = await checkPoolPriceDeviation({
     baseMint: "mintA",

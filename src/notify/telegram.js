@@ -62,13 +62,6 @@ export function notifyEntry({ pair, pool, feeMode, feeSol }) {
   send(lines.join("\n"));
 }
 
-export function notifyDca({ pair, pool, pnlPct, sizeSol }) {
-  const pnlStr = pnlPct != null ? `${pnlPct > 0 ? "+" : ""}${pnlPct.toFixed(2)}%` : "?";
-  send(
-    `📉 DCA ${pair || pool?.slice(0, 8) || ""}\nEntry baru: ${sizeSol} SOL\nPool: ${pool || "?"}\nTrigger PnL: ${pnlStr}`
-  );
-}
-
 // Fallback OOR kiri spot: beri tahu hasil konversi ke posisi token-only.
 export function notifyFallback({ pair, pool, success, amount, error }) {
   const label = pair || pool?.slice(0, 8) || "";

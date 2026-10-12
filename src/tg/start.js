@@ -18,7 +18,6 @@ const TOGGLE_LABELS = [
   ["autoExit", "Auto Exit"],
   ["autoEntry", "Auto Entry"],
   ["deterministicExit", "Deterministic Exit"],
-  ["dca", "DCA"],
 ];
 
 export function buildHome({ address, balanceSol, solUsd, openTrades, openPnlUsd, settings, dryRun }) {

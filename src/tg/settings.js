@@ -23,7 +23,6 @@ const TOGGLE_LABELS = {
   autoExit: "Auto Exit",
   autoEntry: "Auto Entry",
   deterministicExit: "Deterministic Exit",
-  dca: "DCA",
 };
 
 const PROMPTS = {
@@ -39,7 +38,7 @@ export function buildSettings(settings, dryRun) {
   const keyboard = new InlineKeyboard();
   TOGGLES.forEach((name, i) => {
     keyboard.text(`${settings[name] ? "✅" : "❌"} ${TOGGLE_LABELS[name]}`, `set:toggle:${name}`);
-    if (i % 2 === 1) keyboard.row();
+    if (i % 2 === 1 || i === TOGGLES.length - 1) keyboard.row();
   });
   keyboard
     .text(`🎯 TP ${d.tpPct}`, "set:edit:tp")

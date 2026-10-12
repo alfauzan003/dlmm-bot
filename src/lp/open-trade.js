@@ -250,7 +250,7 @@ export async function executeOpen(plan, { onProgress = () => {}, deps } = {}) {
     return { success: true, dryRun: true };
   }
 
-  // Token yang sedang dibeli tidak boleh disapu safety sweep; pool tidak boleh dipakai entry/DCA bersamaan.
+  // Token yang sedang dibeli tidak boleh disapu safety sweep; pool tidak boleh dipakai entry bersamaan.
   addEntryInProgressMint(plan.baseMint);
   addEntryInProgressPool(plan.poolAddress);
   try {

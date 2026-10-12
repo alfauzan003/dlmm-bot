@@ -33,7 +33,7 @@ test.after(() => {
   fs.rmSync(TMP, { recursive: true, force: true });
 });
 
-test("sweep is a no-op while autoEntry, deterministicExit and dca are all off", async () => {
+test("sweep is a no-op while autoEntry and deterministicExit are both off", async () => {
   reset();
   const { calls, sweepToSol } = fakeSweep();
   await runSafetySweep({ deps: { sweepToSol } });
@@ -41,7 +41,7 @@ test("sweep is a no-op while autoEntry, deterministicExit and dca are all off", 
 });
 
 test("sweep runs when a legacy toggle is on and skips mints the user kept", async () => {
-  for (const name of ["autoEntry", "deterministicExit", "dca"]) {
+  for (const name of ["autoEntry", "deterministicExit"]) {
     reset();
     setToggle(name, true);
     addKeepMint("KeptMint");
@@ -64,7 +64,7 @@ function fakeSwap() {
   return { calls, deps };
 }
 
-test("closed-position swap is a no-op while autoEntry, deterministicExit and dca are all off", async () => {
+test("closed-position swap is a no-op while autoEntry and deterministicExit are both off", async () => {
   reset();
   const { calls, deps } = fakeSwap();
   await sweepClosedPosition("GoneMint", "GONE-SOL", { deps });
@@ -72,7 +72,7 @@ test("closed-position swap is a no-op while autoEntry, deterministicExit and dca
 });
 
 test("closed-position swap runs when a legacy toggle is on, but never for kept mints", async () => {
-  for (const name of ["autoEntry", "deterministicExit", "dca"]) {
+  for (const name of ["autoEntry", "deterministicExit"]) {
     reset();
     setToggle(name, true);
     addKeepMint("KeptMint");

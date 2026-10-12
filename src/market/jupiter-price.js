@@ -41,7 +41,7 @@ export async function getPrices(mints = [], { force = false } = {}) {
   if (unique.length === 0) return out;
 
   const now = Date.now();
-  // force = lewati pacing antar-poll (untuk cek sesekali di jalur entry/DCA),
+  // force = lewati pacing antar-poll (untuk cek sesekali di jalur entry),
   // tetap menghormati backoff 429 dan kuota.
   if (now < blockedUntil || quotaExhausted(now)) return out;
   if (!force && now < nextAllowedAt) return out;

@@ -3,7 +3,7 @@ import { SETTINGS_FILE } from "../core/paths.js";
 import { RANGE_PRESETS } from "../lp/range.js";
 
 // Toggle yang bisa diubah dari Telegram; disimpan di settings.json.
-export const TOGGLES = ["autoExit", "autoEntry", "deterministicExit", "dca"];
+export const TOGGLES = ["autoExit", "autoEntry", "deterministicExit"];
 
 // Preset SOL-only = preset bawaan dengan above 0; tetap SOL-only walau diubah.
 const SOL_ONLY_KEYS = new Set(RANGE_PRESETS.filter((p) => p.above === 0).map((p) => p.key));
@@ -12,7 +12,6 @@ export const DEFAULT_SETTINGS = {
   autoExit: true,
   autoEntry: false,
   deterministicExit: false,
-  dca: false,
   exitDefaults: { tpPct: 15, slPct: 25, trailStartPct: 5, trailDistancePct: 3 },
   rangePresets: Object.fromEntries(RANGE_PRESETS.map((p) => [p.key, { below: p.below, above: p.above }])),
   depositPresets: [0.5, 0.7, 0.9, 1],

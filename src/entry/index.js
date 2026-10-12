@@ -46,7 +46,7 @@ const failureCounts = new Map();
 // Mode entry yang selalu dibuka bot (lihat execute.js) — dipakai untuk kuota
 // posisi serentak per mode.
 const ENTRY_MODE = "bidask:double";
-// Dibagi dengan DCA agar entry sinyal & DCA tidak bentrok di pool yang sama.
+// Dibagi dengan /open manual agar dua pembukaan tidak bentrok di pool yang sama.
 const inFlightPools = getEntryInProgressPools();
 const enteredPools = new Map(); // pool -> enteredAt (posisi baru dibuka / masih terbuka)
 

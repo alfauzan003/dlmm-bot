@@ -42,7 +42,6 @@ export function humanReason(reason) {
   if (r === "low_yield") return "yield rendah, PnL tidak minus";
   if (r.startsWith("bounce_recovery")) return "pemulihan gagal (turun dari pantulan)";
   if (r === "not_detected") return "posisi tidak terdeteksi (kemungkinan ditutup manual)";
-  if (r === "dca_close_safeguard") return "safeguard: DCA terakhir profit (trailing TP), posisi asli ikut ditutup";
   if (r === "rsi_macd") return "sinyal indikator RSI+MACD";
   if (r === "rsi_bb") return "sinyal indikator RSI+Bollinger";
   if (r === "rsi_bb_wick") return "sinyal indikator RSI+Bollinger (wick)";
@@ -70,21 +69,14 @@ function watchLine(w) {
 }
 
 // Bangun blok ringkasan multi-baris (satu string).
-export function buildSummaryBlock({
-  mode,
-  now = Date.now(),
-  watched = [],
-  positions = [],
-  dcaLines = [],
-  actionLines = [],
-}) {
+export function buildSummaryBlock({ mode, now = Date.now(), watched = [], positions = [], actionLines = [] }) {
   const bar = "═".repeat(60);
   const L = [];
   L.push(bar);
   L.push(`  Meteora Bot — RINGKASAN   ${clock(now)}`);
   L.push(bar);
   L.push(`Mode    : ${mode} | PnL dihitung dalam SOL`);
-  L.push("Kerja   : pantau tren → cari titik masuk → atur exit → DCA saat posisi turun lalu memantul");
+  L.push("Kerja   : pantau tren → cari titik masuk → atur exit");
   L.push("");
 
   L.push(`▸ SEDANG DIPANTAU (${watched.length} pool)`);
@@ -105,13 +97,8 @@ export function buildSummaryBlock({
   });
   L.push("");
 
-  L.push("▸ DCA");
-  if (dcaLines.length === 0) L.push("  belum ada posisi, jadi belum ada yang di-arm");
-  else dcaLines.forEach((line) => L.push(`  • ${line}`));
-  L.push("");
-
   L.push("▸ AKSI 5 MENIT TERAKHIR");
-  if (actionLines.length === 0) L.push("  tidak ada entry / DCA / close");
+  if (actionLines.length === 0) L.push("  tidak ada entry / close");
   else actionLines.forEach((line) => L.push(`  • ${line}`));
 
   return L.join("\n");

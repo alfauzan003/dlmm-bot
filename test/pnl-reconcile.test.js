@@ -98,7 +98,7 @@ test("posisi open: PnL dikoreksi dari nilai sekarang − modal on-chain", () => 
   assert.ok(Math.abs(rec.pnlSol - (currentValueSol - 0.50018)) < 1e-6);
 });
 
-test("DCA: menjumlahkan beberapa beli + setor", () => {
+test("beberapa beli + setor dijumlahkan", () => {
   const add2 = {
     signature: "add2",
     blockTime: 1500,

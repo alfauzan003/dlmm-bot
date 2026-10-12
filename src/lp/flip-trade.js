@@ -173,7 +173,7 @@ export async function flipTrade(trade, { deps } = {}) {
   if (!tryLockTrade(trade.id, "flip")) return { success: false, busy: true, binCount: 0 };
   const t = getTrade(trade.id) ?? trade;
   const label = `Flip trade #${t.id} ${t.pair}`;
-  // Open/DCA/close lain di pool ini mengubah saldo token yang sama -> selisih saldo tidak bisa dipercaya.
+  // Open/close lain di pool ini mengubah saldo token yang sama -> selisih saldo tidak bisa dipercaya.
   if (isEntryInProgressPool(t.pool) || isPoolClosing(t.pool)) {
     unlockTrade(trade.id);
     return {

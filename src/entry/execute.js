@@ -15,12 +15,11 @@ import { guardPoolPrice } from "./price-guard.js";
 import { trackPosition } from "../state/positions.js";
 import { createTrade, findTradeByPosition, updateTradeMeta } from "../state/trades.js";
 import { exitPresetForNewTrade } from "../state/settings.js";
-import { incrementEntryUsage, getEntryUsage, recordAction } from "./runtime.js";
+import { incrementEntryUsage, recordAction } from "./runtime.js";
 
 const STRATEGY_ENUM = { spot: "Spot", curve: "Curve", bid_ask: "BidAsk" };
 
-export async function executeEntry(poolAddress, signal, sizeSol, opts = {}) {
-  const { countUsage = true, isDca = false } = opts;
+export async function executeEntry(poolAddress, signal, sizeSol) {
   const { StrategyType } = await getDlmmSdk();
   const connection = getConnection();
   const wallet = getWallet();
@@ -210,7 +209,7 @@ export async function executeEntry(poolAddress, signal, sizeSol, opts = {}) {
   const positionAddress = newPosition.publicKey.toString();
   const pair = pairName || `${baseMint.slice(0, 4)}-SOL`;
 
-  trackPosition(positionAddress, poolAddress, pair, baseMint, collectFeeMode, "bidask:double", isDca);
+  trackPosition(positionAddress, poolAddress, pair, baseMint, collectFeeMode, "bidask:double");
   // Loop exit bisa sudah mengadopsi posisi ini (external) sebelum kita sampai sini.
   const adopted = findTradeByPosition(positionAddress);
   if (adopted) {
@@ -226,12 +225,9 @@ export async function executeEntry(poolAddress, signal, sizeSol, opts = {}) {
       exit: exitPresetForNewTrade(),
     });
   }
-  const uses = countUsage ? incrementEntryUsage(poolAddress) : getEntryUsage(poolAddress);
+  const uses = incrementEntryUsage(poolAddress);
 
-  if (isDca) {
-    // Naratif DCA ditangani pemanggil (entry/dca.js) agar tidak dobel.
-    log.debug(`[detail] DCA entry ${pair}: position ${positionAddress} tx ${txHash?.slice(0, 16)} (use ${uses})`);
-  } else if (recovered) {
+  if (recovered) {
     log.info(`📌 ENTRY ${pair} — posisi terbuka (dipulihkan dari tx yang konfirmasinya gagal) — ${sizeSol} SOL`);
     recordAction(`ENTRY ${pair} — ${sizeSol} SOL`);
     tg.notifyEntry({ pair, pool: poolAddress, feeMode: feePlan.mode, feeSol: feeCap.totalSol });

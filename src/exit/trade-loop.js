@@ -59,7 +59,7 @@ const warnedClosedLive = new Set();
 export function syncTrades(positions, { wasTracked = new Set(), bootedAt = PROCESS_BOOT_AT } = {}) {
   for (const pos of positions || []) {
     if (!pos?.position || findTradeByPosition(pos.position)) continue;
-    // Pool sedang dibuka (open/entry/DCA berjalan): pembuka mencatat trade-nya sendiri, jangan dipecah.
+    // Pool sedang dibuka (open/entry berjalan): pembuka mencatat trade-nya sendiri, jangan dipecah.
     if (isEntryInProgressPool(pos.pool)) continue;
     // Sudah ditandai closed di state (DRY_RUN close, RPC tertinggal, salah deteksi hilang): jangan
     // diadopsi lagi — trade baru akan langsung diselesaikan dan PnL terhitung dobel tiap tick.

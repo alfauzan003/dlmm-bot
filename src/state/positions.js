@@ -3,7 +3,7 @@ import { DECISION_LOG_FILE } from "../core/paths.js";
 import { LEGACY_MODE } from "../config/rules.js";
 import { readState, writeState, readJsonArray } from "./store.js";
 
-export function trackPosition(positionAddress, pool, pair, baseMint, collectFeeMode, mode, isDca = false) {
+export function trackPosition(positionAddress, pool, pair, baseMint, collectFeeMode, mode) {
   if (!positionAddress) return;
   const state = readState();
   if (!state.positions[positionAddress]) {
@@ -20,7 +20,6 @@ export function trackPosition(positionAddress, pool, pair, baseMint, collectFeeM
       lowerBin: null,
       upperBin: null,
       binSpan: null,
-      isDca: isDca === true,
       lastPnlPeak: null,
       lastPnlLowest: null,
       closed: false,
@@ -42,18 +41,6 @@ export function trackPosition(positionAddress, pool, pair, baseMint, collectFeeM
       confirmedTrailingExitUntil: null,
       bounceRecoveryState: null,
       bounceRecoveryActivePeak: null,
-      // --- DCA ---
-      dcaArmed: false,
-      dcaTrough: null,
-      dcaArmedAt: null,
-      dcaTriggered: false,
-      dcaTriggeredAt: null,
-      pendingDcaTrough: null,
-      pendingDcaCurrent: null,
-      pendingDcaStartedAt: null,
-      // Safeguard: posisi asli ditandai untuk ikut close setelah DCA terakhir
-      // exit karena trailing TP.
-      dcaCloseSafeguard: false,
       missedCycles: 0,
       // Berapa kali posisi ini adalah hasil re-entry spot OOR kanan (diwariskan
       // ke posisi berikutnya supaya rantai berhenti di SPOT_REENTRY_MAX).

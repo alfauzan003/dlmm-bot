@@ -30,12 +30,10 @@ class RefCountSet extends Set {
 // Used by the safety sweep so it never sells tokens mid-entry.
 const entryInProgressMints = new RefCountSet();
 const entryUsage = new Map();
-// Pool yang sedang diproses entry/DCA (cegah entry & DCA bentrok di pool sama).
+// Pool yang sedang diproses entry/open (cegah dua pembukaan bentrok di pool sama).
 const entryInProgressPools = new RefCountSet();
-// Pool yang sedang ditutup (cegah DCA bertabrakan dengan close/swap).
+// Pool yang sedang ditutup (cegah flip bertabrakan dengan close/swap).
 const closingPools = new Set();
-// Backoff per-pool setelah eksekusi DCA gagal.
-const dcaCooldownUntil = new Map();
 
 export function getEntryInProgressMints() {
   return entryInProgressMints;
@@ -81,14 +79,6 @@ export function removeClosingPool(pool) {
   if (pool) closingPools.delete(pool);
 }
 
-export function getDcaCooldownUntil(pool) {
-  return dcaCooldownUntil.get(pool) || 0;
-}
-
-export function setDcaCooldown(pool, ms) {
-  if (pool && ms > 0) dcaCooldownUntil.set(pool, Date.now() + ms);
-}
-
 export function getEntryUsage(pool) {
   return entryUsage.get(pool) || 0;
 }
@@ -99,7 +89,7 @@ export function incrementEntryUsage(pool) {
   return uses;
 }
 
-// Buffer aksi terakhir (entry/DCA/close) untuk baris "AKSI" di ringkasan log.
+// Buffer aksi terakhir (entry/close) untuk baris "AKSI" di ringkasan log.
 const recentActions = [];
 
 export function recordAction(text) {

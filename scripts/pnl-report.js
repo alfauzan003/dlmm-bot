@@ -234,12 +234,10 @@ function pad(text, width, align = "left") {
 
 function loadLocalMeta() {
   const pair = new Map();
-  const dca = new Map();
   const reason = new Map();
   const add = (p) => {
     if (!p) return;
     if (p.pool && p.pair) pair.set(p.pool, p.pair);
-    if (p.position && p.isDca != null) dca.set(p.position, p.isDca === true);
   };
   try {
     const st = JSON.parse(fs.readFileSync(new URL("state.json", ROOT), "utf8"));
@@ -255,7 +253,7 @@ function loadLocalMeta() {
       if (e.position && e.closeReason && !reason.has(e.position)) reason.set(e.position, e.closeReason);
     }
   } catch {}
-  return { pair, dca, reason };
+  return { pair, reason };
 }
 
 function seedPools(portfolioPools, meta) {
@@ -290,7 +288,6 @@ function toRow(pos, meta, fromMs, toMs) {
     pool: meta.pair.get(pos.pool) || `${shortAddr(pos.tokenX)}-${shortAddr(pos.tokenY)}`,
     poolAddr: pos.pool,
     pos: shortAddr(pos.positionAddress),
-    dca: meta.dca.get(pos.positionAddress) ? "DCA" : "",
     dep: pairCell(depos.sol, depos.usd),
     wd: pairCell(withd.sol, withd.usd),
     fee: pairCell(fees.sol, fees.usd),
@@ -339,7 +336,6 @@ const COLS = [
   { key: "status", header: "STATUS", align: "left" },
   { key: "pool", header: "POOL", align: "left" },
   { key: "pos", header: "POSISI", align: "left" },
-  { key: "dca", header: "DCA", align: "left" },
   { key: "dep", header: "DEPOSIT SOL ($)", align: "right" },
   { key: "wd", header: "WITHDRAW SOL ($)", align: "right" },
   { key: "fee", header: "FEE SOL ($)", align: "right" },
@@ -398,10 +394,9 @@ function printPerPool(rows) {
     console.log(`\n  ${label}  [${counts.join(", ")}]  ${addr}`);
     list.forEach((r, i) => {
       const tag = r.isOpen ? "OPEN" : "CLOSE";
-      const dca = r.dca ? " (DCA)" : "";
       const note = r.note && r.note !== "ok" ? `  [${r.note}]` : "";
       console.log(
-        `    ${i + 1}. ${r.open} → ${r.close}  ${tag}${dca}  ${r.pos}  PNL ${r.pnl}  ${r.pnlPct}  ${r.reason}${note}`
+        `    ${i + 1}. ${r.open} → ${r.close}  ${tag}  ${r.pos}  PNL ${r.pnl}  ${r.pnlPct}  ${r.reason}${note}`
       );
     });
     const parts = [];

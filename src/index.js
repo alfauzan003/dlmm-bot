@@ -10,7 +10,6 @@ import * as openWizard from "./tg/open-wizard.js";
 import * as pnl from "./tg/pnl.js";
 import * as wallet from "./tg/wallet.js";
 import { startEntryScanner } from "./entry/index.js";
-import { startDcaWatcher } from "./entry/dca.js";
 import { mainLoop } from "./exit/index.js";
 import { legacyAdoptionCount, tradeExitLoop } from "./exit/trade-loop.js";
 
@@ -38,9 +37,6 @@ startBot([start, help, settings, positions, openWizard, pnl, wallet])
 
 // Entry scanner (Supertrend touch) — own cadence
 startEntryScanner();
-
-// DCA watcher (arm/trail/confirm) — own cadence (DCA_POLL_INTERVAL_SEC)
-startDcaWatcher();
 
 // TP/SL/Trail per trade — own cadence (TRADE_EXIT_INTERVAL_SEC)
 tradeExitLoop(config.tradeExitIntervalSec).catch((err) => {

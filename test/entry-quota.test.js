@@ -19,9 +19,9 @@ function resetState() {
 }
 
 let seq = 0;
-function newPos(pool, mode, isDca = false) {
+function newPos(pool, mode) {
   const addr = `PosQuota000000000000000000000000000000000${seq++}`;
-  trackPosition(addr, pool, "TEST-SOL", "mint", 0, mode, isDca);
+  trackPosition(addr, pool, "TEST-SOL", "mint", 0, mode);
   return addr;
 }
 

@@ -90,8 +90,7 @@ test("entry/execute.js memanggil trackPosition dengan urutan argumen yang benar"
   assert.ok(match, "panggilan trackPosition tidak ditemukan di entry/execute.js");
 
   const args = match[1].split(",").map((a) => a.trim());
-  assert.equal(args.length, 7, `trackPosition harus 7 argumen, dapat ${args.length}: ${match[1]}`);
+  assert.equal(args.length, 6, `trackPosition harus 6 argumen, dapat ${args.length}: ${match[1]}`);
   assert.equal(args[4], "collectFeeMode", "argumen ke-5 harus collectFeeMode");
   assert.equal(args[5], '"bidask:double"', 'argumen ke-6 (mode) harus "bidask:double"');
-  assert.equal(args[6], "isDca", "argumen ke-7 harus isDca");
 });

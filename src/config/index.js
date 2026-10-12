@@ -92,7 +92,7 @@ const entry = {
   // Slippage aktif bin untuk add-liquidity, dalam PERSEN (SDK memakai persen,
   // bukan basis poin). Menghasilkan maxActiveBinSlippage = ceil(pct / binStep%).
   activeBinSlippagePct: Math.max(0, num(e.ENTRY_ACTIVE_BIN_SLIPPAGE_PCT, 10)),
-  // Rem harga: batalkan entry/DCA kalau harga aktif pool menyimpang dari harga
+  // Rem harga: batalkan entry kalau harga aktif pool menyimpang dari harga
   // pasar (Jupiter) melebihi ambang ini. Gagal ambil harga = lanjut (fail-open).
   poolPriceCheck: bool(e.ENTRY_POOL_PRICE_CHECK, true),
   maxPoolPriceDeviationPct: Math.max(0, num(e.ENTRY_MAX_POOL_PRICE_DEVIATION_PCT, 15)),
@@ -125,34 +125,6 @@ const entry = {
             .filter(Boolean)
         : [],
   },
-};
-
-// DCA (averaging-down) — trailing TP terbalik: arm saat PnL <= armPct, lacak
-// trough (titik terendah), lalu entry baru saat PnL rebound dari trough.
-const dca = {
-  enabled: bool(e.DCA_ENABLED, false),
-  armPct: num(e.DCA_ARM_PCT, -10),
-  // Ambang arm DCA#2 saat DCA#1 SUDAH close (acuan posisi utama). Saat DCA#1
-  // masih open, DCA#2 tetap memakai armPct dari posisi DCA#1.
-  armPct2: num(e.DCA_ARM_PCT_2, -30),
-  reboundPct: Math.max(0, num(e.DCA_REBOUND_PCT, 1)),
-  maxAdds: Math.max(0, Math.floor(num(e.DCA_MAX_ADDS, 1))),
-  // Safeguard: saat DCA terakhir (kuota sesi habis) exit karena trailing TP,
-  // posisi asli (non-DCA) di pool yang sama ikut ditutup.
-  closeSafeguard: bool(e.DCA_CLOSE_SAFEGUARD, false),
-  // Cadence watcher DCA (detik) — scan arm/trail + konfirmasi rebound dari
-  // satu request PnL yang sama.
-  pollIntervalSec: Math.max(1, num(e.DCA_POLL_INTERVAL_SEC, 5)),
-  // Ambang minimum sebelum pending rebound dikonfirmasi (efektif = tick watcher).
-  confirmDelaySec: Math.max(0, num(e.DCA_CONFIRM_DELAY_SEC, 5)),
-  cooldownSec: Math.max(0, num(e.DCA_COOLDOWN_SEC, 300)),
-  // Mode yang boleh di-DCA (dipisah koma). Default: hanya bidask:double.
-  eligibleModes:
-    e.DCA_ELIGIBLE_MODES != null && e.DCA_ELIGIBLE_MODES !== ""
-      ? e.DCA_ELIGIBLE_MODES.split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)
-      : ["bidask:double"],
 };
 
 // Entry execution is fixed by design: BidAsk, two-sided (token + SOL), bins ±34.
@@ -236,7 +208,6 @@ const config = {
 
   entry,
   swap,
-  dca,
   spotFallback,
   spotReentry,
 

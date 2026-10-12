@@ -40,9 +40,9 @@ test("first read creates defaults", () => {
 });
 
 test("toggle persists", () => {
-  setToggle("dca", true);
-  assert.equal(JSON.parse(fs.readFileSync(FILE, "utf8")).dca, true);
-  assert.equal(isOn("dca"), true);
+  setToggle("autoEntry", true);
+  assert.equal(JSON.parse(fs.readFileSync(FILE, "utf8")).autoEntry, true);
+  assert.equal(isOn("autoEntry"), true);
 });
 
 test("unknown toggle throws", () => {
@@ -71,9 +71,9 @@ test("corrupt file falls back to defaults", () => {
 });
 
 test("missing keys are filled from defaults", () => {
-  fs.writeFileSync(FILE, JSON.stringify({ dca: true, exitDefaults: { tpPct: 30 } }));
+  fs.writeFileSync(FILE, JSON.stringify({ autoEntry: true, exitDefaults: { tpPct: 30 } }));
   const s = getSettings();
-  assert.equal(s.dca, true);
+  assert.equal(s.autoEntry, true);
   assert.equal(s.autoExit, true);
   assert.equal(s.exitDefaults.tpPct, 30);
   assert.equal(s.exitDefaults.slPct, 25);

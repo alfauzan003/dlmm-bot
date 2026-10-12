@@ -8,7 +8,7 @@ import { listKeepMints } from "../state/keep-mints.js";
 
 const sweepFailedUntil = new Map();
 // Sweep hanya untuk otomasi lama; tanpa itu, token di wallet milik pengguna.
-const LEGACY_TOGGLES = ["autoEntry", "deterministicExit", "dca"];
+const LEGACY_TOGGLES = ["autoEntry", "deterministicExit"];
 const legacyAutomationOn = () => LEGACY_TOGGLES.some((name) => isOn(name));
 
 // Safety sweep: once per cycle, swap every token balance to SOL except the

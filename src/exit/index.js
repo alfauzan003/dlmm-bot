@@ -24,8 +24,7 @@ import { classifyMode, isCompositeMode } from "./classify.js";
 import { processTrailing, clearTrailingTimer } from "./trailing.js";
 import { processBounceRecovery } from "./bounce.js";
 import { clearBounceRecovery } from "../state/bounce.js";
-import { clearDcaState, resetStaleDcaPools, getPoolDcaCount, effectiveDcaArmPct } from "../state/dca.js";
-import { getEntryInProgressPools, getClosingPools, takeRecentActions } from "../entry/runtime.js";
+import { takeRecentActions } from "../entry/runtime.js";
 import { getWatchSnapshot, deactivatePool } from "../entry/index.js";
 import { buildSummaryBlock, humanReason, fmtPct } from "../core/report.js";
 import { runSafetySweep, sweepClosedPosition } from "./sweep.js";
@@ -70,7 +69,6 @@ function handleMissingPositions(seen) {
     clearTrailingTimer(p.position);
     clearTrailingState(p.position);
     clearBounceRecovery(p.position);
-    clearDcaState(p.position);
     log.warn(`${label}: position tidak terbaca ${count} cycle — dianggap ditutup manual`);
     tg.notifyPositionMissing(p.position, p.pair, count);
     sweepClosedPosition(p.baseMint, label);
@@ -104,40 +102,6 @@ function buildPositionLines(positions) {
   });
 }
 
-function buildDcaLines(positions) {
-  const byPool = new Map();
-  for (const pos of positions) {
-    const tracked = getTrackedPosition(pos.position);
-    if (!tracked) continue;
-    if (!byPool.has(pos.pool)) byPool.set(pos.pool, []);
-    byPool.get(pos.pool).push(tracked);
-  }
-
-  const lines = [];
-  for (const [pool, list] of byPool) {
-    const name = list[0].pair || `${pool.slice(0, 8)}…`;
-    const pending = list.find((t) => t.pendingDcaTrough != null);
-    const triggered = list.find((t) => t.dcaTriggered);
-    const armed = list.find((t) => t.dcaArmed && !t.dcaTriggered);
-    const count = getPoolDcaCount(pool);
-    const dcaOpen = list.some((t) => t.isDca === true);
-    const armPct = effectiveDcaArmPct(count, dcaOpen, config.dca);
-
-    if (triggered) {
-      lines.push(`${name} : sudah DCA (${count}/${config.dca.maxAdds} sesi ini)`);
-    } else if (pending) {
-      lines.push(`${name} : menunggu konfirmasi pantulan dari titik terendah ${fmtPct(pending.pendingDcaTrough)}`);
-    } else if (armed) {
-      lines.push(
-        `${name} : sudah di-arm, titik terendah ${fmtPct(armed.dcaTrough)}, menunggu pantulan +${config.dca.reboundPct}pt`
-      );
-    } else {
-      lines.push(`${name} : belum menyentuh ${armPct}%`);
-    }
-  }
-  return lines;
-}
-
 function emitSummary(positions) {
   const now = Date.now();
   const intervalMs = minutes(config.tgStatusInterval);
@@ -149,7 +113,6 @@ function emitSummary(positions) {
     now,
     watched: getWatchSnapshot(),
     positions: buildPositionLines(positions),
-    dcaLines: isOn("dca") ? buildDcaLines(positions) : ["fitur DCA nonaktif"],
     actionLines: takeRecentActions(intervalMs),
   });
   log.info("\n" + block);
@@ -184,13 +147,6 @@ export async function mainLoop() {
     const missing = handleMissingPositions(new Set(positions.map((p) => p.position).filter(Boolean)));
     // Trade yang semua leg-nya kini tertutup → selesai (closed_outside).
     settleTradesForPositions(missing);
-
-    // Sesi DCA per pool: reset counter untuk pool yang tidak lagi punya posisi
-    // aktif (termasuk in-flight & yang sedang closing).
-    const activePools = new Set(positions.map((p) => p.pool).filter(Boolean));
-    for (const pool of getEntryInProgressPools()) activePools.add(pool);
-    for (const pool of getClosingPools()) activePools.add(pool);
-    resetStaleDcaPools(activePools);
 
     if (positions.length === 0) {
       setLivePositions([]);
@@ -291,13 +247,6 @@ export async function mainLoop() {
       // Trade sedang diproses (lock) atau sudah ditangani TP/SL/Trail tick ini → lewati.
       const tradeId = tradeIdByAddr.get(pos.position);
       if (tradeId != null && (handledTradeIds.has(tradeId) || tradeLock(tradeId))) continue;
-
-      // Safeguard: posisi asli ditandai agar ikut close setelah DCA terakhir
-      // exit karena trailing TP (lihat exit/close.js).
-      if (isOn("dca") && tracked?.dcaCloseSafeguard) {
-        await handleClose(pos, "dca_close_safeguard");
-        continue;
-      }
 
       // Engine deterministik lama hanya saat toggle-nya ON.
       if (!deterministic) continue;
