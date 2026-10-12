@@ -319,6 +319,19 @@ test("buildConfirm shows rent and exits", () => {
   assert.ok(buildConfirm(PLAN, EXIT_OFF).includes("Auto Exit off"));
 });
 
+test("buildConfirm warns about non-refundable fees", () => {
+  const paid = buildConfirm({ ...PLAN, nonRefundableSol: 0.14287488, newBinArrays: 2 }, EXIT);
+  assert.ok(paid.includes("⚠️ Non-refundable fee: 0.1429 SOL (2 new bin arrays)"), paid);
+  const one = buildConfirm({ ...PLAN, nonRefundableSol: 0.07143744, newBinArrays: 1 }, EXIT);
+  assert.ok(one.includes("(1 new bin array)"), one);
+  const bitmapOnly = buildConfirm({ ...PLAN, nonRefundableSol: 0.01180416, newBinArrays: 0 }, EXIT);
+  assert.ok(bitmapOnly.includes("⚠️ Non-refundable fee: 0.0118 SOL\n"), bitmapOnly);
+  const unknown = buildConfirm({ ...PLAN, nonRefundableSol: null, newBinArrays: null }, EXIT);
+  assert.ok(unknown.includes("⚠️ Could not check for non-refundable fees"), unknown);
+  const free = buildConfirm({ ...PLAN, nonRefundableSol: 0, newBinArrays: 0 }, EXIT);
+  assert.ok(!free.includes("⚠️"), free);
+});
+
 async function toConfirm(bot, calls) {
   await bot.handleUpdate(textUpdate(POOL_ADDR));
   await bot.handleUpdate(cbUpdate("op:dep:0.5"));

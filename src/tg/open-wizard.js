@@ -60,6 +60,15 @@ export function buildPoolCard(info) {
   return lines.join("\n");
 }
 
+// Peringatan biaya hangus (sewa bin array / bitmap baru); null bila tidak ada biaya.
+function nonRefundableLine(plan) {
+  if (plan.nonRefundableSol === null) return "⚠️ Could not check for non-refundable fees";
+  if (!(plan.nonRefundableSol > 0)) return null;
+  const n = plan.newBinArrays;
+  const arrays = n > 0 ? ` (${n} new bin array${n === 1 ? "" : "s"})` : "";
+  return `⚠️ Non-refundable fee: ${fmtSol(plan.nonRefundableSol)}${arrays}`;
+}
+
 // Ringkasan rencana untuk kartu konfirmasi (teks HTML).
 export function buildConfirm(plan, exit) {
   const anyExit = exit && (exit.tp?.on || exit.sl?.on || exit.trail?.on);
@@ -71,8 +80,11 @@ export function buildConfirm(plan, exit) {
     `${plan.binCount} bins · ${plan.positionCount} position(s) · ${plan.shape}`,
     swap,
     `Rent (refundable): ${fmtSol(plan.rentSol)}`,
+    nonRefundableLine(plan),
     anyExit ? `Exits: ${exitSummary(exit)}` : "Auto Exit off",
-  ].join("\n");
+  ]
+    .filter((line) => line != null)
+    .join("\n");
 }
 
 const cancelRow = (kb) => kb.text("✖ Cancel", "op:cancel");

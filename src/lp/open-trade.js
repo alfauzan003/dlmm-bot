@@ -19,6 +19,7 @@ import {
 import { trackPosition } from "../state/positions.js";
 import { createTrade, updateTradeMeta } from "../state/trades.js";
 import { exitPresetForNewTrade, getSettings } from "../state/settings.js";
+import { nonRefundableCost } from "../exit/spot-reentry.js";
 import { pctToBinRange, binPriceBounds } from "./range.js";
 import { splitParts, parallelWidth, chunkRange, spotPieces, legMode } from "./open-split.js";
 
@@ -119,6 +120,18 @@ export async function planOpen({ poolAddress, depositSol, below, above, shape, d
   const balanceError = await checkBalance(d, depositSol, extraRentSol);
   if (balanceError) return { error: balanceError };
 
+  // Biaya NON-REFUNDABLE (sewa bin array / bitmap extension baru) untuk peringatan di konfirmasi.
+  // null = gagal dicek.
+  let nonRefundableSol = null;
+  let newBinArrays = null;
+  try {
+    const quote = await pool.quoteCreatePosition({ strategy: { minBinId: lowerBin, maxBinId: upperBin } });
+    nonRefundableSol = nonRefundableCost(quote);
+    newBinArrays = Number(quote?.binArraysCount) || 0;
+  } catch (err) {
+    log.warn(`planOpen ${poolAddress.slice(0, 8)}: cek biaya non-refundable gagal: ${err.message}`);
+  }
+
   const price = Number(activeBin.price);
   let parts = null;
   try {
@@ -167,6 +180,8 @@ export async function planOpen({ poolAddress, depositSol, below, above, shape, d
     swapSol: parts.reduce((s, p) => s + p.swapSol, 0),
     rentSol,
     extraRentSol,
+    nonRefundableSol,
+    newBinArrays,
     lowSol,
     highSol,
     priceGuard: guard

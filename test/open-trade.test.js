@@ -40,8 +40,9 @@ function fakeDeps({
   failSend = null,
   binStep = 100,
   held = 0,
+  quote = { binArraysCount: 0, binArrayCost: 0, bitmapExtensionCost: 0 },
 } = {}) {
-  const calls = { swap: [], swapToSol: [], send: [], init: [], multi: [], add: [], progress: [], keypairs: [] };
+  const calls = { quote: [], swap: [], swapToSol: [], send: [], init: [], multi: [], add: [], progress: [], keypairs: [] };
   let sendCount = 0;
   let tokenBalance = held;
   const sdk = {
@@ -57,6 +58,11 @@ function fakeDeps({
     lbPair: { binStep },
     getActiveBin: async () => ({ binId: 0, price: "1", pricePerToken: "1" }),
     refetchStates: async () => {},
+    quoteCreatePosition: async ({ strategy }) => {
+      calls.quote.push(strategy);
+      if (quote instanceof Error) throw quote;
+      return quote;
+    },
     initializePositionAndAddLiquidityByStrategy: async (args) => {
       calls.init.push(args);
       return { kind: "init" };
@@ -156,6 +162,23 @@ test("SOL-only plan has no swap", async () => {
   assert.equal(plan.solSideSol, 1);
   assert.ok(plan.lowerBin < plan.upperBin);
   assert.equal(plan.upperBin, 0);
+});
+
+test("plan quotes non-refundable fees for the planned range", async () => {
+  const none = fakeDeps();
+  const free = await planOpen({ ...base, deps: none.deps });
+  assert.equal(free.nonRefundableSol, 0);
+  assert.equal(free.newBinArrays, 0);
+  assert.deepEqual(none.calls.quote, [{ minBinId: free.lowerBin, maxBinId: free.upperBin }]);
+
+  const quote = { binArraysCount: 2, binArrayCost: 0.14287488, bitmapExtensionCost: 0.01180416 };
+  const paid = await planOpen({ ...base, deps: fakeDeps({ quote }).deps });
+  assert.ok(Math.abs(paid.nonRefundableSol - 0.15467904) < 1e-12);
+  assert.equal(paid.newBinArrays, 2);
+
+  const failed = await planOpen({ ...base, deps: fakeDeps({ quote: new Error("rpc down") }).deps });
+  assert.equal(failed.error, undefined);
+  assert.equal(failed.nonRefundableSol, null);
 });
 
 test("two-sided plan splits by SDK autofill", async () => {
