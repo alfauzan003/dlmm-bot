@@ -12,6 +12,7 @@ fs.writeFileSync(
   STRAT,
   [
     "SOL_MODE=false",
+    "SWEEP_EXCLUDE_MINTS=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "",
     "# ===== Entry =====",
     "# Share of the deposit kept as SOL",
@@ -201,4 +202,16 @@ test("every callback on every screen fits Telegram's 64-byte limit", async () =>
     session.del("prompt");
   }
   assert.ok(seen.size > 10);
+});
+
+test("list keys accept pasted mint addresses in the edit prompt", async () => {
+  const { bot } = build();
+  await bot.handleUpdate(cbUpdate("st:edit:SWEEP_EXCLUDE_MINTS"));
+  await bot.handleUpdate(
+    textUpdate("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v, So11111111111111111111111111111111111111112")
+  );
+  assert.deepEqual(getStratOverrides(), {
+    SWEEP_EXCLUDE_MINTS: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v,So11111111111111111111111111111111111111112",
+  });
+  assert.equal(session.get("prompt"), null);
 });

@@ -24,8 +24,41 @@ const OVERRIDES = {
   JUPITER_POLL_INTERVAL_SEC: { min: 1 },
   ENTRY_SCAN_INTERVAL_SEC: { min: 5 },
   ENTRY_TX_RESEND_INTERVAL_MS: { min: 200 },
-  ENTRY_TX_RETRY_ATTEMPTS: { min: 1 },
+  ENTRY_TX_RETRY_ATTEMPTS: { min: 1, int: true },
+  POLL_INTERVAL_HOLD: { gt: 0 },
+  POLL_INTERVAL_IDLE: { gt: 0 },
+  TG_STATUS_INTERVAL: { gt: 0 },
+  GAS_RESERVE: { min: 0 },
+  GMGN_MAX_STALE_MIN: { min: 1 },
+  ST_ATR_PERIOD: { min: 1, int: true },
+  ST_MULTIPLIER: { gt: 0 },
+  ENTRY_DEFAULT_SIZE_SOL: { gt: 0 },
+  SPOT_REENTRY_SIZE_SOL: { gt: 0 },
+  POOL_LIST_FILE: { type: "file" },
+  SUPERTREND_CACHE_FILE: { type: "file" },
 };
+
+// Aturan per pola nama (key mode exit: BIDASK_DOUBLE_*, SPOT_*, ...). OVERRIDES menang.
+const PATTERNS = [
+  [/_STOP_LOSS_PCT$/, { min: -100, max: 0 }],
+  [/_(RSI|BB)_PERIOD$/, { min: 1, int: true }],
+  [/_MACD_(FAST|SLOW|SIGNAL)$/, { min: 1, int: true }],
+  [/_BB_STDDEV$/, { gt: 0 }],
+  [/_TRAILING_DROP(_RATIO)?_PCT$/, { gt: 0 }],
+  [/_(ATTEMPTS|RETRY)$/, { int: true }],
+];
+
+// File yang ditulis/dibaca bot: tidak boleh diarahkan ke rahasia atau state lain.
+const PROTECTED_FILES = new Set([
+  ".env",
+  "wallet.key",
+  "state.json",
+  "settings.json",
+  "strat.conf",
+  "decision-log.json",
+  "pnl-history.json",
+  "package.json",
+]);
 
 // Angka tanpa batas eksplisit: durasi, hitungan, jumlah SOL, bps tidak boleh negatif.
 const NON_NEGATIVE_SUFFIXES = [
@@ -101,26 +134,32 @@ export function loadStratSchema(file = STRAT_FILE) {
 }
 
 export function typeOf(key, def) {
-  const o = OVERRIDES[key] || {};
+  const pattern = PATTERNS.find(([re]) => re.test(key))?.[1] || {};
+  const o = { ...pattern, ...(OVERRIDES[key] || {}) };
   if (o.type === "enum") return { type: "enum", options: o.options };
   if (o.type === "list") return { type: "list" };
+  if (o.type === "file") return { type: "file" };
   const d = String(def ?? "").trim();
   if (d === "true" || d === "false") return { type: "bool" };
   if (num(d, null) !== null) {
     const out = { type: "number" };
-    const min = o.min ?? (NON_NEGATIVE_SUFFIXES.some((s) => key.endsWith(s)) ? 0 : undefined);
+    const min = o.min ?? (o.gt === undefined && NON_NEGATIVE_SUFFIXES.some((s) => key.endsWith(s)) ? 0 : undefined);
     if (min !== undefined) out.min = min;
+    if (o.gt !== undefined) out.gt = o.gt;
     if (o.max !== undefined) out.max = o.max;
+    if (o.int) out.int = true;
     return out;
   }
   return { type: "string" };
 }
 
-function rangeText(t) {
-  if (t.min !== undefined && t.max !== undefined) return ` between ${t.min} and ${t.max}`;
-  if (t.min !== undefined) return ` >= ${t.min}`;
-  if (t.max !== undefined) return ` <= ${t.max}`;
-  return "";
+export function rangeText(t) {
+  const kind = t.int ? "whole number" : "number";
+  if (t.min !== undefined && t.max !== undefined) return `${kind} between ${t.min} and ${t.max}`;
+  if (t.gt !== undefined) return `${kind} > ${t.gt}`;
+  if (t.min !== undefined) return `${kind} >= ${t.min}`;
+  if (t.max !== undefined) return `${kind} <= ${t.max}`;
+  return kind;
 }
 
 export function validateValue(key, raw, schema) {
@@ -148,13 +187,22 @@ export function validateValue(key, raw, schema) {
       return { ok: true, value: parts.join(",") };
     }
     case "number": {
-      const error = `${key} must be a number${rangeText(t)}`;
+      const error = `${key} must be a ${rangeText(t)}`;
       if (!/^[+-]?\d+(\.\d+)?$/.test(v)) return { ok: false, error };
       const n = Number(v);
-      if (!Number.isFinite(n) || (t.min !== undefined && n < t.min) || (t.max !== undefined && n > t.max)) {
-        return { ok: false, error };
-      }
+      const outOfRange =
+        (t.min !== undefined && n < t.min) ||
+        (t.gt !== undefined && n <= t.gt) ||
+        (t.max !== undefined && n > t.max) ||
+        (t.int && !Number.isInteger(n));
+      if (!Number.isFinite(n) || outOfRange) return { ok: false, error };
       return { ok: true, value: String(n) };
+    }
+    case "file": {
+      const bad = !v || /[\\/]/.test(v) || v.includes("..") || PROTECTED_FILES.has(v.toLowerCase());
+      return bad
+        ? { ok: false, error: `${key} must be a plain file name in the bot folder (not a state or secret file)` }
+        : { ok: true, value: v };
     }
     default:
       return v ? { ok: true, value: v } : { ok: false, error: `${key} must not be empty` };

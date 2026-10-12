@@ -38,11 +38,20 @@ function readStratOverrides(settingsFile, stratKeys) {
   return out;
 }
 
+// .env (rahasia, DRY_RUN) dibaca sekali per proses: reload dari Telegram tidak boleh menerapkan
+// editan .env yang menunggu restart.
+let bootEnv = null;
+function readEnvFile(envFile) {
+  if (envFile !== ENV_FILE) return parseEnvFile(envFile);
+  if (!bootEnv) bootEnv = parseEnvFile(envFile);
+  return bootEnv;
+}
+
 // Prioritas: .env < strat.conf (default di-commit, otoritatif atas .env) < override Telegram.
 export function loadEnv(stratFile = STRAT_FILE, envFile = ENV_FILE, settingsFile = SETTINGS_FILE) {
   const strat = parseEnvFile(stratFile);
   const overrides = readStratOverrides(settingsFile, new Set(Object.keys(strat)));
-  return { ...parseEnvFile(envFile), ...strat, ...overrides };
+  return { ...readEnvFile(envFile), ...strat, ...overrides };
 }
 
 export const bool = (val, def = true) => (val == null ? def : val !== "false");

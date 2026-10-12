@@ -2,7 +2,7 @@
 // di settings.json (stratOverrides) dan langsung berlaku, kecuali key ⟳ (setelah restart).
 import { InlineKeyboard } from "grammy";
 import { loadEnv } from "../config/env.js";
-import { loadStratSchema, typeOf, RESTART_KEYS } from "../config/strat-schema.js";
+import { loadStratSchema, typeOf, rangeText, RESTART_KEYS } from "../config/strat-schema.js";
 import { getStratOverrides, setStratOverride, clearStratOverride, clearStratOverrides } from "../state/settings.js";
 import { registerPrompt, withGuard } from "./bot.js";
 import { esc } from "./format.js";
@@ -87,13 +87,8 @@ export function buildStratKey(schema, overrides, key) {
 }
 
 function promptText(key, t) {
-  if (t.type === "number") {
-    let range = "number";
-    if (t.min !== undefined && t.max !== undefined) range = `number between ${t.min} and ${t.max}`;
-    else if (t.min !== undefined) range = `number >= ${t.min}`;
-    else if (t.max !== undefined) range = `number <= ${t.max}`;
-    return `Send a new value for ${key} (${range})`;
-  }
+  if (t.type === "number") return `Send a new value for ${key} (${rangeText(t)})`;
+  if (t.type === "file") return `Send a file name for ${key} (in the bot folder, e.g. pool.txt)`;
   if (t.type === "list") return `Send comma-separated values for ${key}, or - for empty`;
   return `Send a new value for ${key}`;
 }
@@ -193,18 +188,22 @@ export function registerStrat(bot) {
     })
   );
 
-  registerPrompt("strat-edit", async (ctx, prompt) => {
-    const schema = loadStratSchema();
-    if (!(await knownKey(ctx, schema, prompt.key))) {
+  registerPrompt(
+    "strat-edit",
+    async (ctx, prompt) => {
+      const schema = loadStratSchema();
+      if (!(await knownKey(ctx, schema, prompt.key))) {
+        session.del("prompt");
+        return;
+      }
+      const res = setStratOverride(prompt.key, ctx.message.text);
+      if (!res.ok) {
+        await ctx.reply(res.error);
+        return;
+      }
       session.del("prompt");
-      return;
-    }
-    const res = setStratOverride(prompt.key, ctx.message.text);
-    if (!res.ok) {
-      await ctx.reply(res.error);
-      return;
-    }
-    session.del("prompt");
-    await reply(ctx, withNote(prompt.key, buildStratKey(schema, getStratOverrides(), prompt.key)));
-  });
+      await reply(ctx, withNote(prompt.key, buildStratKey(schema, getStratOverrides(), prompt.key)));
+    },
+    { acceptsAddress: true }
+  );
 }

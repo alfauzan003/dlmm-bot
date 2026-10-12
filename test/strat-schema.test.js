@@ -40,7 +40,8 @@ test("typeOf infers and applies the override table", () => {
   assert.equal(typeOf("ENTRY_SCAN_INTERVAL_SEC", "15").type, "number");
   assert.deepEqual(typeOf("ENTRY_FEE_MODE", "none"), { type: "enum", options: ["none", "priority", "jito", "both"] });
   assert.equal(typeOf("JITO_TIP_ACCOUNTS", "").type, "list");
-  assert.equal(typeOf("POOL_LIST_FILE", "pool.txt").type, "string");
+  assert.equal(typeOf("POOL_LIST_FILE", "pool.txt").type, "file");
+  assert.equal(typeOf("JITO_BLOCK_ENGINE_URL", "https://x").type, "string");
   assert.deepEqual([typeOf("ENTRY_SIZE_SPLIT", "0.5").min, typeOf("ENTRY_SIZE_SPLIT", "0.5").max], [0, 1]);
 });
 
@@ -77,4 +78,51 @@ test("committed strat.conf: every default validates and restart keys exist", () 
 
 test("loadStratSchema on a missing file is empty", () => {
   assert.deepEqual(loadStratSchema("does-not-exist.conf"), { sections: [], entries: {} });
+});
+
+test("safety-relevant numbers reject one-typo values from a phone", () => {
+  const schema = loadStratSchema(fileURLToPath(new URL("../strat.conf", import.meta.url)));
+  const bad = {
+    BIDASK_DOUBLE_STOP_LOSS_PCT: ["90", "-101"],
+    SPOT_STOP_LOSS_PCT: ["5"],
+    POLL_INTERVAL_HOLD: ["0", "-1"],
+    POLL_INTERVAL_IDLE: ["0"],
+    TG_STATUS_INTERVAL: ["0"],
+    GAS_RESERVE: ["-5"],
+    ST_ATR_PERIOD: ["0", "2.5"],
+    SPOT_RSI_PERIOD: ["0", "1.5"],
+    BIDASK_SOL_BB_PERIOD: ["0"],
+    BIDASK_TOKEN_MACD_FAST: ["0"],
+    SPOT_TRAILING_DROP_PCT: ["0", "-1"],
+    SPOT_TRAILING_DROP_RATIO_PCT: ["0"],
+    ENTRY_DEFAULT_SIZE_SOL: ["0"],
+    SPOT_REENTRY_SIZE_SOL: ["0"],
+    GMGN_MAX_STALE_MIN: ["0"],
+    ENTRY_TX_RETRY_ATTEMPTS: ["1.5"],
+  };
+  for (const [key, values] of Object.entries(bad)) {
+    for (const v of values) assert.equal(validateValue(key, v, schema).ok, false, `${key}=${v}`);
+  }
+  assert.equal(validateValue("SPOT_STOP_LOSS_PCT", "-25", schema).ok, true);
+  assert.equal(validateValue("POLL_INTERVAL_HOLD", "0.1", schema).ok, true);
+  assert.equal(validateValue("ST_ATR_PERIOD", "14", schema).ok, true);
+});
+
+test("file keys accept only a bare, non-protected filename", () => {
+  const schema = loadStratSchema(fileURLToPath(new URL("../strat.conf", import.meta.url)));
+  for (const key of ["POOL_LIST_FILE", "SUPERTREND_CACHE_FILE"]) {
+    for (const v of [
+      ".env",
+      "state.json",
+      "wallet.key",
+      "settings.json",
+      "strat.conf",
+      "../x.txt",
+      "a/b.txt",
+      "a\\b.txt",
+    ]) {
+      assert.equal(validateValue(key, v, schema).ok, false, `${key}=${v}`);
+    }
+    assert.equal(validateValue(key, "pools-2.txt", schema).ok, true, key);
+  }
 });
