@@ -327,6 +327,35 @@ async function toConfirm(bot, calls) {
   return lastMarkup(calls).find((b) => b.callback_data?.startsWith("ok:")).callback_data;
 }
 
+test("refresh re-plans the confirm card with a new token", async () => {
+  let plans = 0;
+  deps.planOpen = async (args) => ({ ...PLAN, ...args, lowSol: 0.000012 * ++plans });
+  const { bot, calls } = build();
+  const first = await toConfirm(bot, calls);
+  assert.ok(lastData(calls).includes("op:refresh"));
+  await bot.handleUpdate(cbUpdate("op:refresh"));
+  assert.equal(plans, 2);
+  const second = lastData(calls).find((d) => d.startsWith("ok:"));
+  assert.ok(second && second !== first);
+  assert.ok(texts(calls).at(-1).includes("0.000024"));
+  await bot.handleUpdate(cbUpdate(second));
+  assert.equal(executed.length, 1);
+  assert.equal(executed[0].lowSol, 0.000024);
+});
+
+test("refresh outside the confirm step does nothing", async () => {
+  let plans = 0;
+  deps.planOpen = async (args) => {
+    plans++;
+    return { ...PLAN, ...args };
+  };
+  const { bot } = build();
+  await bot.handleUpdate(textUpdate(POOL_ADDR));
+  await bot.handleUpdate(cbUpdate("op:refresh"));
+  assert.equal(plans, 0);
+  assert.equal(session.get("wizard").step, "deposit");
+});
+
 test("confirm token is one-shot", async () => {
   const { bot, calls } = build();
   const token = await toConfirm(bot, calls);

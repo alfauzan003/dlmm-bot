@@ -171,8 +171,10 @@ async function showPlan(ctx, wizard) {
   wizard.plan = plan;
   save(wizard);
   const token = session.issueToken({ action: "open", plan, wizardId: wizard.id });
+  // Refresh = rencana ulang dari harga pool terbaru (range, swap, rent ikut dihitung ulang).
   const kb = new InlineKeyboard()
     .text("✅ Confirm", `ok:${token}`)
+    .text("🔄 Refresh", "op:refresh")
     .row()
     .text("◀ Back", "op:back")
     .text("✖ Cancel", "op:cancel");
@@ -385,6 +387,13 @@ export function register(bot) {
       if (!(await ensureReady(ctx, wizard, "shape"))) return;
       wizard.shape = ctx.match[1];
       await showPlan(ctx, wizard);
+    })
+  );
+
+  bot.callbackQuery(
+    "op:refresh",
+    wizardCallback("Refresh", async (ctx, wizard) => {
+      if (wizard.step === "confirm") await showPlan(ctx, wizard);
     })
   );
 
