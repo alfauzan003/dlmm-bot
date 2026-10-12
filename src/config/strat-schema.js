@@ -18,6 +18,7 @@ const OVERRIDES = {
   ENTRY_TIMEFRAME: { type: "enum", options: TIMEFRAMES },
   ENTRY_TOUCH_MODE: { type: "enum", options: ["held_pullback", "first_touch"] },
   SWEEP_EXCLUDE_MINTS: { type: "list" },
+  SPOT_FALLBACK_MODES: { type: "list" },
   JITO_TIP_ACCOUNTS: { type: "list" },
   ENTRY_SIZE_SPLIT: { min: 0, max: 1 },
   TRADE_EXIT_INTERVAL_SEC: { min: 1 },

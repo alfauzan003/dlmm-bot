@@ -64,6 +64,13 @@ export function buildConfig(e) {
     binsBelow: Math.max(0, Math.floor(num(e.SPOT_FALLBACK_BINS_BELOW, 0))),
     retry: Math.max(1, Math.floor(num(e.SPOT_FALLBACK_RETRY, 3))),
     distribution: (e.SPOT_FALLBACK_DISTRIBUTION || "bid_ask").toLowerCase(),
+    // Mode yang dialihkan ke fallback saat OOR kiri (dipisah koma). Default: hanya spot.
+    modes:
+      e.SPOT_FALLBACK_MODES != null && e.SPOT_FALLBACK_MODES !== ""
+        ? e.SPOT_FALLBACK_MODES.split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : ["spot"],
   };
 
   // Re-entry spot saat OOR kanan: buka posisi spot SOL-only baru di harga aktif

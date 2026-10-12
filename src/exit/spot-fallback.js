@@ -10,6 +10,13 @@ import { handleClose } from "./close.js";
 // Guard per-posisi: cegah fallback jalan dobel untuk posisi yang sama.
 const fallbackInProgress = new Set();
 
+// Pure: apakah close OOR kiri posisi mode ini dialihkan ke fallback token-only.
+// bidask:token tidak pernah: posisi itu hasil fallback sendiri (cegah tutup-buka berulang).
+export function usesOorKiriFallback(mode, reason, cfg) {
+  if (!cfg?.enabled || reason !== "oor_kiri" || mode === "bidask:token") return false;
+  return (cfg.modes ?? ["spot"]).includes(mode);
+}
+
 // OOR kiri spot: tutup posisi tanpa swap, lalu pakai seluruh saldo token untuk
 // membuka posisi `bidask:token` satu-sisi di pool yang sama.
 // Return true bila alur fallback ditangani (termasuk kegagalan); false bila

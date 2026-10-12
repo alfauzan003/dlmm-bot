@@ -29,7 +29,7 @@ import { getWatchSnapshot, deactivatePool } from "../entry/index.js";
 import { buildSummaryBlock, humanReason, fmtPct } from "../core/report.js";
 import { runSafetySweep, sweepClosedPosition } from "./sweep.js";
 import { handleClose } from "./close.js";
-import { handleSpotOorKiri } from "./spot-fallback.js";
+import { handleSpotOorKiri, usesOorKiriFallback } from "./spot-fallback.js";
 import { handleSpotOorKananReentry, canSpotReenter } from "./spot-reentry.js";
 import { runAutoFlips } from "./auto-flip.js";
 import { getTrade, tradeLock, listOpenTrades } from "../state/trades.js";
@@ -285,9 +285,9 @@ export async function mainLoop() {
           log.error(`${pairLabel}: close trade #${trade.id} error: ${err.message}`);
         }
       } else if (exit.action === "close") {
-        // OOR kiri spot: fallback konversi ke posisi token-only (close tanpa swap).
+        // OOR kiri (mode di SPOT_FALLBACK_MODES): fallback konversi ke posisi token-only (close tanpa swap).
         let handled = false;
-        if (exit.reason === "oor_kiri" && pos.mode === "spot") {
+        if (usesOorKiriFallback(pos.mode, exit.reason, config.spotFallback)) {
           handled = await handleSpotOorKiri(pos);
         }
         // OOR kanan spot: rencanakan re-entry sebelum close supaya pool tidak
