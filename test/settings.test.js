@@ -8,6 +8,9 @@ import path from "path";
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "meteorabot-settings-"));
 const FILE = path.join(TMP, "settings.json");
 process.env.SETTINGS_FILE = FILE;
+const STRAT = path.join(TMP, "strat.conf");
+fs.writeFileSync(STRAT, "ENTRY_SIZE_SPLIT=0.5\nSOL_MODE=false\n");
+process.env.STRAT_FILE = STRAT;
 
 const {
   DEFAULT_SETTINGS,
@@ -23,7 +26,12 @@ const {
   setDepositPresets,
   resetDepositPresets,
   setAutoFlipDefault,
+  getStratOverrides,
+  setStratOverride,
+  clearStratOverride,
+  clearStratOverrides,
 } = await import("../src/state/settings.js");
+const { default: config } = await import("../src/config/index.js");
 
 test.beforeEach(() => {
   fs.rmSync(FILE, { force: true });
@@ -147,4 +155,42 @@ test("auto flip default rejects values outside 1..100", () => {
 test("invalid auto flip default in the file falls back to off", () => {
   fs.writeFileSync(FILE, JSON.stringify({ autoFlipPct: 250 }));
   assert.equal(getSettings().autoFlipPct, null);
+});
+
+test("setStratOverride validates, stores, and reloads config", () => {
+  assert.deepEqual(setStratOverride("ENTRY_SIZE_SPLIT", "2"), {
+    ok: false,
+    error: "ENTRY_SIZE_SPLIT must be a number between 0 and 1",
+  });
+  assert.deepEqual(getStratOverrides(), {});
+  assert.deepEqual(setStratOverride("ENTRY_SIZE_SPLIT", "0.3"), { ok: true, value: "0.3", previous: null });
+  assert.equal(config.entry.sizeSplit, 0.3);
+  assert.equal(JSON.parse(fs.readFileSync(FILE, "utf8")).stratOverrides.ENTRY_SIZE_SPLIT, "0.3");
+  assert.deepEqual(setStratOverride("ENTRY_SIZE_SPLIT", "0.4"), { ok: true, value: "0.4", previous: "0.3" });
+  clearStratOverride("ENTRY_SIZE_SPLIT");
+  assert.equal(config.entry.sizeSplit, 0.5);
+  assert.deepEqual(getStratOverrides(), {});
+});
+
+test("setStratOverride rejects keys that are not in strat.conf", () => {
+  assert.equal(setStratOverride("DRY_RUN", "false").ok, false);
+  assert.deepEqual(getStratOverrides(), {});
+});
+
+test("other settings writes keep stratOverrides", () => {
+  setStratOverride("SOL_MODE", "true");
+  setToggle("autoEntry", true);
+  setExitDefaults({ tpPct: 20 });
+  setDepositPresets([1, 2, 3, 4]);
+  assert.deepEqual(getStratOverrides(), { SOL_MODE: "true" });
+  clearStratOverrides();
+  assert.deepEqual(getStratOverrides(), {});
+  assert.equal(config.solMode, false);
+});
+
+test("withDefaults drops malformed stratOverrides", () => {
+  fs.writeFileSync(FILE, JSON.stringify({ stratOverrides: { A: "1", B: 2, C: null } }));
+  assert.deepEqual(getSettings().stratOverrides, { A: "1" });
+  fs.writeFileSync(FILE, JSON.stringify({ stratOverrides: ["x"] }));
+  assert.deepEqual(getSettings().stratOverrides, {});
 });

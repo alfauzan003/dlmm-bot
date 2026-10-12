@@ -1,6 +1,9 @@
 import fs from "fs";
 import { SETTINGS_FILE } from "../core/paths.js";
 import { RANGE_PRESETS } from "../lp/range.js";
+import log from "../core/logger.js";
+import { reloadConfig } from "../config/index.js";
+import { loadStratSchema, validateValue } from "../config/strat-schema.js";
 
 // Toggle yang bisa diubah dari Telegram; disimpan di settings.json.
 export const TOGGLES = ["autoExit", "autoEntry", "deterministicExit"];
@@ -17,6 +20,8 @@ export const DEFAULT_SETTINGS = {
   depositPresets: [0.5, 0.7, 0.9, 1],
   // Default auto flip (%) untuk trade bid_ask/mixed baru dari /open; null = mati.
   autoFlipPct: null,
+  // Override strat.conf dari Telegram: { KEY: "nilai" } (string, diparse seperti strat.conf).
+  stratOverrides: {},
 };
 
 // Batas sama dengan range custom: below (0, 99], above [0, 1000]; preset SOL harus above 0.
@@ -48,6 +53,10 @@ function withDefaults(raw) {
     ? [...src.depositPresets]
     : [...DEFAULT_SETTINGS.depositPresets];
   out.autoFlipPct = validAutoFlipPct(src.autoFlipPct) ? src.autoFlipPct : null;
+  const so = src.stratOverrides && typeof src.stratOverrides === "object" && !Array.isArray(src.stratOverrides);
+  out.stratOverrides = so
+    ? Object.fromEntries(Object.entries(src.stratOverrides).filter(([, v]) => typeof v === "string"))
+    : {};
   return out;
 }
 
@@ -148,4 +157,56 @@ export function exitPresetForNewTrade() {
     sl: { on: autoExit, pct: d.slPct },
     trail: { on: autoExit, startPct: d.trailStartPct, distancePct: d.trailDistancePct },
   };
+}
+
+export function getStratOverrides() {
+  return getSettings().stratOverrides;
+}
+
+// Tulis settings lalu bangun ulang config; build gagal = isi file dikembalikan (config lama tetap).
+function writeAndReload(settings) {
+  let before = null;
+  try {
+    before = fs.readFileSync(SETTINGS_FILE, "utf8");
+  } catch {
+    before = null;
+  }
+  write(settings);
+  try {
+    reloadConfig();
+  } catch (err) {
+    if (before == null) fs.rmSync(SETTINGS_FILE, { force: true });
+    else fs.writeFileSync(SETTINGS_FILE, before);
+    throw err;
+  }
+}
+
+export function setStratOverride(key, raw) {
+  const res = validateValue(key, raw, loadStratSchema());
+  if (!res.ok) return res;
+  const settings = getSettings();
+  const previous = settings.stratOverrides[key] ?? null;
+  settings.stratOverrides[key] = res.value;
+  try {
+    writeAndReload(settings);
+  } catch (err) {
+    return { ok: false, error: `could not apply ${key}: ${err.message}` };
+  }
+  log.info(`Strat override ${key}: ${previous ?? "(default)"} → ${res.value}`);
+  return { ok: true, value: res.value, previous };
+}
+
+export function clearStratOverride(key) {
+  const settings = getSettings();
+  if (!(key in settings.stratOverrides)) return;
+  delete settings.stratOverrides[key];
+  writeAndReload(settings);
+  log.info(`Strat override ${key} cleared (back to strat.conf)`);
+}
+
+export function clearStratOverrides() {
+  const settings = getSettings();
+  settings.stratOverrides = {};
+  writeAndReload(settings);
+  log.info("All strat overrides cleared (back to strat.conf)");
 }
