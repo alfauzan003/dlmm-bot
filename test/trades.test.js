@@ -27,6 +27,7 @@ const {
   unlockTrade,
   tradeLock,
   addTradeLeg,
+  setTradeAutoFlip,
 } = await import("../src/state/trades.js");
 
 const EXIT = {
@@ -261,4 +262,23 @@ test("addTradeLeg on a closed or missing trade returns null", () => {
   assert.equal(addTradeLeg(t.id, "F", { flip: true }), null);
   assert.deepEqual(getTrade(t.id).positions, ["A"]);
   assert.equal(addTradeLeg(999, "F"), null);
+});
+
+test("createTrade stores autoFlip only when given", () => {
+  reset();
+  const base = { pool: "P", pair: "A-SOL", baseMint: "M", origin: "manual", exit: EXIT };
+  const on = createTrade({ ...base, positions: ["A"], autoFlip: { pct: 30 } });
+  assert.deepEqual(getTrade(on.id).autoFlip, { pct: 30 });
+  const off = createTrade({ ...base, positions: ["B"] });
+  assert.equal("autoFlip" in getTrade(off.id), false);
+});
+
+test("setTradeAutoFlip sets and clears", () => {
+  reset();
+  const t = createTrade({ pool: "P", pair: "A-SOL", baseMint: "M", positions: ["A"], origin: "manual", exit: EXIT });
+  setTradeAutoFlip(t.id, { pct: 25 });
+  assert.deepEqual(getTrade(t.id).autoFlip, { pct: 25 });
+  setTradeAutoFlip(t.id, null);
+  assert.equal("autoFlip" in getTrade(t.id), false);
+  assert.equal(setTradeAutoFlip(999, { pct: 5 }), null);
 });

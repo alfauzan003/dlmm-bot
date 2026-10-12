@@ -176,7 +176,12 @@ export async function flipTrade(trade, { deps } = {}) {
   // Open/DCA/close lain di pool ini mengubah saldo token yang sama -> selisih saldo tidak bisa dipercaya.
   if (isEntryInProgressPool(t.pool) || isPoolClosing(t.pool)) {
     unlockTrade(trade.id);
-    return { success: false, error: "pool is busy (open/close running) — try again shortly", binCount: 0 };
+    return {
+      success: false,
+      poolBusy: true,
+      error: "pool is busy (open/close running) — try again shortly",
+      binCount: 0,
+    };
   }
   // Token ada di wallet di antara tarik & setor: lindungi dari sweep; pool ditandai supaya
   // posisi baru tidak diadopsi sebagai trade terpisah.

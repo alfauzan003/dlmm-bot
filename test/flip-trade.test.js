@@ -230,6 +230,7 @@ test("flipTrade refuses while another open/close runs in the pool", async () => 
       const res = await flipTrade(trade, { deps });
       assert.equal(res.success, false);
       assert.match(res.error, /pool is busy/);
+      assert.equal(res.poolBusy, true);
       assert.equal(calls.readLegs, 0);
       assert.equal(tradeLock(trade.id), null);
     } finally {

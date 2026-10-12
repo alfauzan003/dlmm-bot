@@ -77,6 +77,7 @@ const MODULES = [
   "../src/lp/open-trade.js",
   "../src/lp/pnl-stats.js",
   "../src/lp/flip-trade.js",
+  "../src/exit/auto-flip.js",
 ];
 
 test("every module loads without import errors", async () => {

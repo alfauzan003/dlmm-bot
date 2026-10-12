@@ -9,7 +9,7 @@ import { canFlip, flipTrade, planFlip } from "../lp/flip-trade.js";
 import { getTrackedPosition } from "../state/positions.js";
 import { getTrade, listOpenTrades, setTradeExit } from "../state/trades.js";
 import { registerConfirm, registerPrompt, withGuard } from "./bot.js";
-import { esc, exitSummary, fmtAge, fmtPct, fmtSol, fmtUsd, fmtWib, shortAddr } from "./format.js";
+import { esc, exitSummary, fmtAge, fmtPct, fmtSol, fmtToken, fmtUsd, fmtWib, shortAddr } from "./format.js";
 import { parseExitInput } from "./parse.js";
 import * as session from "./session.js";
 
@@ -348,7 +348,6 @@ function describeClose(res, id, swap) {
 }
 
 const NOTHING_TO_FLIP = "Nothing to flip — no token-only bins yet.";
-const fmtToken = (x) => Number(x).toLocaleString("en-US", { maximumFractionDigits: 4 });
 
 function describeFlip(res) {
   if (res.busy) return BUSY;

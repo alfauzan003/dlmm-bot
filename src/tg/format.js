@@ -21,6 +21,11 @@ export function fmtSol(n) {
   return `${Number(n.toFixed(4))} SOL`;
 }
 
+// Jumlah token: pemisah ribuan, maksimum 4 desimal ("1,234.5").
+export function fmtToken(n) {
+  return Number(n).toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+
 export function shortAddr(a) {
   const s = String(a ?? "");
   return s.length <= 9 ? s : `${s.slice(0, 4)}…${s.slice(-4)}`;

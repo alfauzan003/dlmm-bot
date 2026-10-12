@@ -179,6 +179,11 @@ export function notifyTradeClosed(trade, { swapInfo = null } = {}) {
   send(lines.join("\n"), { parse_mode: "HTML", reply_markup: METLEX_KEYBOARD });
 }
 
+// Hasil auto flip (teks dari exit/auto-flip.js).
+export function notifyAutoFlip(text) {
+  send(text);
+}
+
 export function notifyError(msg) {
   send(`❌ Error: ${msg}`);
 }

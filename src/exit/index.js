@@ -32,6 +32,7 @@ import { runSafetySweep, sweepClosedPosition } from "./sweep.js";
 import { handleClose } from "./close.js";
 import { handleSpotOorKiri } from "./spot-fallback.js";
 import { handleSpotOorKananReentry, canSpotReenter } from "./spot-reentry.js";
+import { runAutoFlips } from "./auto-flip.js";
 import { getTrade, tradeLock, listOpenTrades } from "../state/trades.js";
 import { closeTrade } from "../lp/close-trade.js";
 import {
@@ -254,6 +255,12 @@ export async function mainLoop() {
     // memakai snapshot posisi ini.
     syncTrades(positions, { wasTracked });
     setLivePositions(positions);
+    // Auto flip per trade (bin aktif dari snapshot ini; tanpa RPC tambahan sampai ambang tercapai).
+    try {
+      await runAutoFlips(positions);
+    } catch (err) {
+      log.error(`Auto flip error: ${err.message}`);
+    }
     const tradeIdByAddr = new Map();
     for (const t of listOpenTrades()) for (const addr of t.positions) tradeIdByAddr.set(addr, t.id);
     const handledTradeIds = new Set();

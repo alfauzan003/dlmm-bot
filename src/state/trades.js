@@ -24,6 +24,7 @@ export function createTrade({
   depositSol = null,
   origin,
   exit,
+  autoFlip = null,
 }) {
   const state = readState();
   const trades = ensureTrades(state);
@@ -56,6 +57,8 @@ export function createTrade({
     closePnlPct: null,
     closeTx: null,
   };
+  // Auto flip { pct }: flip otomatis saat harga melewati pct% sisi SOL range (sekali, lalu mati).
+  if (autoFlip) trade.autoFlip = { ...autoFlip };
   trades[String(id)] = trade;
   writeState(state);
   return trade;
@@ -114,6 +117,17 @@ export function updateTradeMeta(id, { origin, exit, depositSol } = {}) {
     t.trailArmed = false;
     t.peakPnlPct = null;
   }
+  writeState(state);
+  return t;
+}
+
+// Set auto flip trade ({ pct }) atau matikan (null).
+export function setTradeAutoFlip(id, autoFlip) {
+  const state = readState();
+  const t = state.trades?.[String(id)];
+  if (!t) return null;
+  if (autoFlip) t.autoFlip = { ...autoFlip };
+  else delete t.autoFlip;
   writeState(state);
   return t;
 }
