@@ -5,6 +5,7 @@ const MODULES = [
   "../src/config/index.js",
   "../src/config/env.js",
   "../src/config/rules.js",
+  "../src/config/strat-schema.js",
   "../src/core/constants.js",
   "../src/core/logger.js",
   "../src/core/paths.js",
