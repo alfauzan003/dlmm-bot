@@ -39,7 +39,7 @@ Parser + skema, murni (tanpa efek samping selain baca file):
 
 - `parseStratFile(text)` → `{ sections: [{ title, keys: [KEY…] }], entries: { KEY: { key, default, help,
   section } } }`.
-  - Bagian = baris `# ===== Judul =====`. Key sebelum header pertama masuk bagian "Umum".
+  - Bagian = baris `# ===== Judul =====`. Key sebelum header pertama masuk bagian "General" (UI Telegram berbahasa Inggris).
   - `help` = blok komentar `#` tepat di atas key (baris kosong memutus blok).
   - `default` = nilai di `strat.conf` (string).
 - Tipe per key: `bool` bila default `true`/`false`; `number` bila default angka; selain itu `string`.
