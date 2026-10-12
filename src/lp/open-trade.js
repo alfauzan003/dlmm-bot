@@ -392,8 +392,8 @@ async function openLive(plan, progress, d) {
   // Catat posisi lalu trade tanpa await di antaranya (loop exit tidak sempat mengadopsi sebagai external).
   const positions = opened.map((l) => l.keypair.publicKey.toString());
   const exit = exitPresetForNewTrade();
-  // Mode dari lebar seluruh range (bukan per leg): manual bidask:double bisa ikut DCA bila salah.
-  const mode = legMode(plan.binCount, plan.solOnly, config.spotMinBins);
+  // Mode dari shape pilihan pengguna (satu mode untuk semua leg).
+  const mode = legMode(plan.shape, plan.solOnly);
   for (const addr of positions) {
     trackPosition(addr, plan.poolAddress, plan.pair, plan.baseMint, info.collectFeeMode, mode);
   }

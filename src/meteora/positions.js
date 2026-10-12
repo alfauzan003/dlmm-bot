@@ -4,6 +4,7 @@ import { WSOL_MINT } from "../core/constants.js";
 import { getConnection } from "../solana/connection.js";
 import { getWallet } from "../solana/wallet.js";
 import { getDlmmSdk } from "./sdk.js";
+import { isSpotDistribution } from "../exit/classify.js";
 
 const poolMetaCache = new Map();
 const POOL_META_TTL = 15 * 60 * 1000;
@@ -110,6 +111,7 @@ export async function getOpenPositions() {
             hasX,
             hasY,
             binSpan,
+            spotDistribution: isSpotDistribution(binData),
           });
         } catch (err) {
           log.warn(`Skip position in pool ${lbPairKey.slice(0, 8)}: ${err.message}`);

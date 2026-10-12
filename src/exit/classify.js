@@ -1,5 +1,3 @@
-import config from "../config/index.js";
-
 // Ambang dust untuk deposit awal (UI units).
 const ENTRY_DUST_SOL = 1e-4;
 const ENTRY_DUST_BASE = 1e-6;
@@ -12,15 +10,32 @@ export function isCompositeMode(mode) {
   return typeof mode === "string" && COMPOSITE_MODES.has(mode);
 }
 
+// Spot = likuiditas rata per bin (SDK: base tanpa delta di kedua sisi), berapa pun jumlah bin-nya.
+// BidAsk/Curve/mixed menanjak atau menurun dari bin aktif. Likuiditas bin DLMM (P·x + y) tidak
+// berubah oleh swap, jadi pola ini tetap terbaca setelah harga bergerak.
+const SPOT_MIN_DETECT_BINS = 3;
+const SPOT_TOLERANCE = 0.1;
+const SPOT_MIN_SHARE = 0.8;
+
+export function isSpotDistribution(binData) {
+  const liq = (binData || []).map((b) => Number(b?.positionLiquidity ?? 0)).filter((v) => v > 0);
+  if (liq.length < SPOT_MIN_DETECT_BINS) return false;
+  const sorted = [...liq].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  // Toleransi untuk bin aktif (isi sebagian) dan pembulatan.
+  const near = liq.filter((v) => Math.abs(v - median) <= median * SPOT_TOLERANCE).length;
+  return near / liq.length >= SPOT_MIN_SHARE;
+}
+
 // Mode composite `<strategi>:<komposisi>`.
-// Spot-quote: span >= SPOT_MIN_BINS, satu mode tanpa komposisi.
+// Spot: distribusi likuiditas rata (pos.spotDistribution), satu mode tanpa komposisi.
 // Selain itu: bidask, komposisi dari deposit awal (allTimeDeposits) bila ada,
 // fallback ke isi bin saat ini.
 export function classifyMode(pos) {
-  const { hasX, hasY, binSpan, xIsSol } = pos;
+  const { hasX, hasY, xIsSol } = pos;
   const baseIsX = !xIsSol;
 
-  if (Number.isFinite(binSpan) && binSpan >= config.spotMinBins) {
+  if (pos.spotDistribution === true) {
     return "spot";
   }
 

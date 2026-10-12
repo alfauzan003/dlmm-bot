@@ -83,8 +83,8 @@ export function spotPieces({ legs, activeBin, lowerBin, upperBin, totalX, totalY
   return pieces;
 }
 
-// Mode exit per leg, sejalan dengan classifyMode: span >= SPOT_MIN_BINS -> spot.
-export function legMode(span, solOnly, spotMinBins) {
-  if (span >= spotMinBins) return "spot";
+// Mode exit dari shape yang dipilih: spot tetap spot berapa pun lebarnya; shape lain -> bidask.
+export function legMode(shape, solOnly) {
+  if (shape === "spot") return "spot";
   return solOnly ? "bidask:sol" : "bidask:double";
 }

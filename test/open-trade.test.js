@@ -284,7 +284,8 @@ test("single position opens, tracks and creates a manual trade", async () => {
   });
   assert.equal("autoFlip" in trade, false);
   assert.deepEqual(trade.positions, res.positions);
-  assert.equal(getTrackedPosition(res.positions[0]).mode, "bidask:double");
+  // Shape spot tetap spot walau range sempit.
+  assert.equal(getTrackedPosition(res.positions[0]).mode, "spot");
 });
 
 test("failed open with nothing landed reverts swap", async () => {
@@ -356,21 +357,28 @@ test("wide range opens several positions under one trade", async () => {
   // Tiap tx ditandatangani wallet + keypair posisinya.
   assert.equal(calls.send[0].signers[1].publicKey.toString(), res.positions[0]);
   assert.equal(calls.send[3].signers[1].publicKey.toString(), res.positions[1]);
-  // Mode dari lebar seluruh range (406 >= 200), juga untuk leg terakhir yang hanya 63 bin.
+  // Mode dari shape (satu mode untuk semua leg), juga untuk leg terakhir yang hanya 63 bin.
   assert.equal(getTrackedPosition(res.positions[0]).mode, "spot");
   assert.equal(getTrackedPosition(res.positions[1]).mode, "spot");
   assert.equal(calls.multi[0].strategy.minBinId, plan.lowerBin);
   assert.equal(calls.multi[0].strategy.maxBinId, plan.upperBin);
 });
 
-test("SOL-only narrow trade is tracked as bidask:sol", async () => {
+test("SOL-only bid_ask trade is tracked as bidask:sol, SOL-only spot as spot", async () => {
   reset();
   const { deps, calls } = fakeDeps();
-  const plan = await planOpen({ ...base, below: 20, above: 0, deps });
+  const plan = await planOpen({ ...base, shape: "bid_ask", below: 20, above: 0, deps });
   const res = await withLive(() => executeOpen(plan, { deps }));
   assert.equal(res.success, true);
   assert.equal(calls.swap.length, 0);
   assert.equal(getTrackedPosition(res.positions[0]).mode, "bidask:sol");
+
+  reset();
+  const spot = fakeDeps();
+  const spotPlan = await planOpen({ ...base, below: 20, above: 0, deps: spot.deps });
+  const spotRes = await withLive(() => executeOpen(spotPlan, { deps: spot.deps }));
+  assert.equal(spotRes.success, true);
+  assert.equal(getTrackedPosition(spotRes.positions[0]).mode, "spot");
 });
 
 test("partial multi-position open keeps landed legs and reverts unused tokens", async () => {

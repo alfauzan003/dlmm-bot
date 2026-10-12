@@ -9,7 +9,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "meteorabot-mode-"));
 process.env.STATE_FILE = path.join(TMP, "state.json");
 
 const { trackPosition, getTrackedPosition, updateTrackedMode } = await import("../src/state/positions.js");
-const { classifyMode, isCompositeMode } = await import("../src/exit/classify.js");
+const { classifyMode, isCompositeMode, isSpotDistribution } = await import("../src/exit/classify.js");
 
 const POOL = "PoolPaid111111111111111111111111111111111";
 const POS = "PosPaid1111111111111111111111111111111111";
@@ -38,50 +38,31 @@ test("updateTrackedMode mereparasi mode numerik menjadi composite", () => {
   assert.equal(isCompositeMode(getTrackedPosition(POS).mode), true);
 });
 
-test("classifyMode mengembalikan mode composite dari data posisi", () => {
-  const bidask = classifyMode({
-    hasX: true,
-    hasY: true,
-    binSpan: 34,
-    xIsSol: false,
-    entryBaseAmount: 1,
-    entrySolAmount: 1,
-  });
-  assert.equal(bidask, "bidask:double");
-  assert.equal(isCompositeMode(bidask), true);
+const flat = (n, v = "1000") => Array.from({ length: n }, () => ({ positionLiquidity: v }));
+const ramp = (n) => Array.from({ length: n }, (_, i) => ({ positionLiquidity: String(1000 + i * 500) }));
 
-  const spot = classifyMode({
-    hasX: true,
-    hasY: true,
-    binSpan: 200,
-    xIsSol: false,
-    entryBaseAmount: 1,
-    entrySolAmount: 1,
-  });
-  assert.equal(spot, "spot");
-  assert.equal(isCompositeMode(spot), true);
+test("isSpotDistribution: likuiditas rata = spot berapa pun jumlah bin", () => {
+  assert.equal(isSpotDistribution(flat(10)), true);
+  assert.equal(isSpotDistribution(flat(250)), true);
+  // Bin aktif terisi sebagian tetap spot.
+  assert.equal(isSpotDistribution([...flat(9), { positionLiquidity: "400" }]), true);
+  // BidAsk/Curve menanjak dari bin aktif.
+  assert.equal(isSpotDistribution(ramp(10)), false);
+  assert.equal(isSpotDistribution(ramp(250)), false);
+  // Terlalu sedikit bin berisi untuk dinilai.
+  assert.equal(isSpotDistribution(flat(2)), false);
+  assert.equal(isSpotDistribution([]), false);
+  assert.equal(isSpotDistribution(undefined), false);
 });
 
-test("classifyMode: span >= 200 selalu spot, di bawahnya bidask", () => {
-  const spotSol = classifyMode({
-    hasX: false,
-    hasY: true,
-    binSpan: 231,
-    xIsSol: false,
-    entryBaseAmount: 0,
-    entrySolAmount: 1,
-  });
-  assert.equal(spotSol, "spot");
-
-  const bidaskEdge = classifyMode({
-    hasX: true,
-    hasY: true,
-    binSpan: 199,
-    xIsSol: false,
-    entryBaseAmount: 1,
-    entrySolAmount: 1,
-  });
-  assert.equal(bidaskEdge, "bidask:double");
+test("classifyMode: spot dari distribusi, bukan lebar range", () => {
+  const base = { hasX: true, hasY: true, xIsSol: false, entryBaseAmount: 1, entrySolAmount: 1 };
+  assert.equal(classifyMode({ ...base, binSpan: 9, spotDistribution: true }), "spot");
+  assert.equal(classifyMode({ ...base, binSpan: 250, spotDistribution: false }), "bidask:double");
+  assert.equal(classifyMode({ ...base, binSpan: 250 }), "bidask:double");
+  const sol = classifyMode({ ...base, hasX: false, entryBaseAmount: 0, binSpan: 231, spotDistribution: false });
+  assert.equal(sol, "bidask:sol");
+  assert.equal(isCompositeMode(sol), true);
 });
 
 test("entry/execute.js memanggil trackPosition dengan urutan argumen yang benar", () => {

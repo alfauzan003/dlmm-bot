@@ -13,7 +13,7 @@ function normalizeFeeMode(raw) {
 
 // Mode = "<strategi>:<komposisi>".
 //   bidask : bidask:double | bidask:token | bidask:sol
-//   spot   : spot (satu mode, tanpa komposisi; span >= SPOT_MIN_BINS)
+//   spot   : spot (satu mode, tanpa komposisi; likuiditas rata per bin)
 const bidaskDouble = modeRules(e, "BIDASK_DOUBLE", {
   enableIndicators: true,
   trailingTakeProfit: true,
@@ -31,7 +31,7 @@ const bidaskSol = modeRules(e, "BIDASK_SOL", {
   trailingTakeProfit: true,
 });
 
-// Spot-quote (satu mode, isi SOL-only, span >= SPOT_MIN_BINS): indikator sama
+// Spot (satu mode, likuiditas rata per bin, berapa pun jumlah bin): indikator sama
 // seperti bidask:double, trailing TP trigger +20%, OOR kanan ber-timer 5 menit.
 // OOR kiri = tutup langsung (0 menit), lalu token dikonversi ke posisi
 // bidask:token oleh fallback (lihat spotFallback).
@@ -191,8 +191,6 @@ const config = {
 
   logRetentionDays: num(e.LOG_RETENTION_DAYS, 7),
 
-  // Ambang span bin minimum untuk mengenali posisi spot-quote.
-  spotMinBins: Math.max(1, Math.floor(num(e.SPOT_MIN_BINS, 200))),
   pollIntervalHold: num(e.POLL_INTERVAL_HOLD, 0.2),
   pollIntervalIdle: num(e.POLL_INTERVAL_IDLE, 5),
   // Interval loop TP/SL/Trail per trade (detik), terpisah dari loop exit utama.
