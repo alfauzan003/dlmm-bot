@@ -1,4 +1,4 @@
-import { PublicKey, sendAndConfirmTransaction } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import config from "../config/index.js";
 import log from "../core/logger.js";
@@ -6,12 +6,29 @@ import { WSOL_MINT } from "../core/constants.js";
 import { getConnection } from "../solana/connection.js";
 import { getWallet } from "../solana/wallet.js";
 import { getTokenBalance } from "../solana/balances.js";
+import { buildFeePlan, checkFeeCap } from "../solana/fees.js";
+import { sendAndConfirmRobust } from "../solana/send.js";
 import { getDlmmSdk } from "./sdk.js";
 
-export async function closePosition(positionAddress) {
-  const connection = getConnection();
-  const wallet = getWallet();
-  const { DLMM } = await getDlmmSdk();
+function withDeps(deps = {}) {
+  return {
+    getConnection,
+    getWallet,
+    getDlmmSdk,
+    getTokenBalance,
+    buildFeePlan,
+    checkFeeCap,
+    sendAndConfirmRobust,
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    ...deps,
+  };
+}
+
+export async function closePosition(positionAddress, { deps } = {}) {
+  const d = withDeps(deps);
+  const connection = d.getConnection();
+  const wallet = d.getWallet();
+  const { DLMM } = await d.getDlmmSdk();
 
   if (!positionAddress) {
     return { success: false, error: "no position address" };
@@ -23,6 +40,19 @@ export async function closePosition(positionAddress) {
   }
 
   const positionPubKey = new PublicKey(positionAddress);
+
+  // Close (TP/SL/Trail) tidak pernah dibatalkan karena cap biaya: hanya diperingatkan.
+  const feeCap = d.checkFeeCap(d.buildFeePlan());
+  if (!feeCap.ok) {
+    log.warn(
+      `Close ${positionAddress.slice(0, 8)}: fee estimate ${feeCap.totalSol.toFixed(6)} SOL > cap ${feeCap.cap} SOL — tetap dikirim`
+    );
+  }
+  // Rencana fee baru per tx (tip Jito hanya dipasang sekali per objek rencana). Tx SDK sudah membawa
+  // setComputeUnitLimit sendiri, jadi limit dari config tidak ditambahkan (hindari instruksi ganda).
+  const txFeePlan = () => ({ ...d.buildFeePlan(), computeUnitLimit: 0 });
+  const send = async (tx) =>
+    (await d.sendAndConfirmRobust({ connection, tx, signers: [wallet], feePlan: txFeePlan(), wallet })).signature;
 
   try {
     // Find the pool that owns this position
@@ -55,7 +85,7 @@ export async function closePosition(positionAddress) {
         const claimTxs = await pool.claimSwapFee({ owner: wallet.publicKey, position: userPos });
         const txs = Array.isArray(claimTxs) ? claimTxs : [claimTxs];
         for (const tx of txs) {
-          claimTx = await sendAndConfirmTransaction(connection, tx, [wallet]);
+          claimTx = await send(tx);
         }
         if (claimTx) log.info(`Claimed fees: ${claimTx.slice(0, 16)}`);
       }
@@ -97,7 +127,7 @@ export async function closePosition(positionAddress) {
 
         const txs = Array.isArray(closeTx) ? closeTx : [closeTx];
         for (const tx of txs) {
-          const hash = await sendAndConfirmTransaction(connection, tx, [wallet]);
+          const hash = await send(tx);
           closeTxHashes.push(hash);
         }
       } else {
@@ -105,7 +135,7 @@ export async function closePosition(positionAddress) {
           owner: wallet.publicKey,
           position: { publicKey: positionPubKey },
         });
-        const hash = await sendAndConfirmTransaction(connection, closeTx, [wallet]);
+        const hash = await send(closeTx);
         closeTxHashes.push(hash);
       }
     };
@@ -121,12 +151,12 @@ export async function closePosition(positionAddress) {
         lastErr = err;
         const brief = String(err.message || err).split("\n")[0];
         log.warn(`Close attempt ${attempt}/${maxAttempts} failed for ${positionAddress.slice(0, 8)}: ${brief}`);
-        if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, 2000));
+        if (attempt < maxAttempts) await d.sleep(2000);
       }
     }
     if (lastErr) throw lastErr;
 
-    await new Promise((r) => setTimeout(r, 5000));
+    await d.sleep(5000);
 
     // Verify position is actually closed
     let closedConfirmed = false;
@@ -149,7 +179,7 @@ export async function closePosition(positionAddress) {
       } catch (e) {
         log.warn(`Close verification failed (attempt ${attempt + 1}/4): ${e.message}`);
       }
-      if (attempt < 3) await new Promise((r) => setTimeout(r, 3000));
+      if (attempt < 3) await d.sleep(3000);
     }
 
     if (!closedConfirmed) {
@@ -164,7 +194,7 @@ export async function closePosition(positionAddress) {
       const nonSolMint = xMint === WSOL_MINT ? yMint : xMint;
       if (nonSolMint && nonSolMint !== WSOL_MINT) {
         baseMint = nonSolMint;
-        baseAmount = await getTokenBalance(nonSolMint);
+        baseAmount = await d.getTokenBalance(nonSolMint);
       }
     }
 
