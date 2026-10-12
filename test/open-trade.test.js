@@ -18,6 +18,7 @@ const { default: config } = await import("../src/config/index.js");
 const { planOpen, executeOpen, SHAPES, SOL_BUFFER, MAX_TRADE_POSITIONS } = await import("../src/lp/open-trade.js");
 const { getTrade, listOpenTrades } = await import("../src/state/trades.js");
 const { getTrackedPosition } = await import("../src/state/positions.js");
+const { setAutoFlipDefault } = await import("../src/state/settings.js");
 
 const STRATEGY = { Spot: 0, Curve: 1, BidAsk: 2 };
 
@@ -274,7 +275,14 @@ test("single position opens, tracks and creates a manual trade", async () => {
   assert.equal(trade.origin, "manual");
   assert.equal(trade.shape, "spot");
   assert.equal(trade.depositSol, 1);
-  assert.deepEqual(trade.range, { below: 20, above: 20, lowerBin: plan.lowerBin, upperBin: plan.upperBin });
+  assert.deepEqual(trade.range, {
+    below: 20,
+    above: 20,
+    lowerBin: plan.lowerBin,
+    upperBin: plan.upperBin,
+    activeBin: plan.activeBin,
+  });
+  assert.equal("autoFlip" in trade, false);
   assert.deepEqual(trade.positions, res.positions);
   assert.equal(getTrackedPosition(res.positions[0]).mode, "bidask:double");
 });
@@ -418,4 +426,28 @@ test("mixed Spot layer failure keeps the trade with a warning", async () => {
   assert.match(res.warning, /swapped back to SOL/);
   assert.equal(calls.swapToSol.length, 1);
   assert.equal(getTrade(res.trade.id).closed, false);
+});
+
+test("bid_ask and mixed opens take the auto flip default; spot does not", async () => {
+  for (const [shape, expected] of [
+    ["bid_ask", { pct: 30 }],
+    ["mixed", { pct: 30 }],
+    ["spot", undefined],
+  ]) {
+    reset();
+    setAutoFlipDefault(30);
+    const { deps } = fakeDeps();
+    const plan = await planOpen({ ...base, shape, deps });
+    const res = await withLive(() => executeOpen(plan, { deps }));
+    assert.equal(res.success, true, shape);
+    assert.deepEqual(getTrade(res.trade.id).autoFlip, expected, shape);
+  }
+});
+
+test("bid_ask open without an auto flip default has no autoFlip", async () => {
+  reset();
+  const { deps } = fakeDeps();
+  const plan = await planOpen({ ...base, shape: "bid_ask", deps });
+  const res = await withLive(() => executeOpen(plan, { deps }));
+  assert.equal("autoFlip" in getTrade(res.trade.id), false);
 });

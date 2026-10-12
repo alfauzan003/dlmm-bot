@@ -22,6 +22,7 @@ const {
   getDepositPresets,
   setDepositPresets,
   resetDepositPresets,
+  setAutoFlipDefault,
 } = await import("../src/state/settings.js");
 
 test.beforeEach(() => {
@@ -129,4 +130,21 @@ test("invalid stored presets fall back to defaults", () => {
   assert.deepEqual(getRangePresets()[0], { key: "narrow", label: "Narrow", below: 20, above: 20 });
   assert.deepEqual(getRangePresets()[3], { key: "narrow_sol", label: "Narrow SOL", below: 20, above: 0 });
   assert.deepEqual(getDepositPresets(), [0.5, 0.7, 0.9, 1]);
+});
+
+test("auto flip default is off and can be set or cleared", () => {
+  assert.equal(getSettings().autoFlipPct, null);
+  assert.equal(setAutoFlipDefault(30).autoFlipPct, 30);
+  assert.equal(getSettings().autoFlipPct, 30);
+  assert.equal(setAutoFlipDefault(null).autoFlipPct, null);
+  assert.equal(getSettings().autoFlipPct, null);
+});
+
+test("auto flip default rejects values outside 1..100", () => {
+  for (const bad of [0, 101, Number.NaN, -5]) assert.throws(() => setAutoFlipDefault(bad));
+});
+
+test("invalid auto flip default in the file falls back to off", () => {
+  fs.writeFileSync(FILE, JSON.stringify({ autoFlipPct: 250 }));
+  assert.equal(getSettings().autoFlipPct, null);
 });

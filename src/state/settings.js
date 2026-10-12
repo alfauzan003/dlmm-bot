@@ -16,6 +16,8 @@ export const DEFAULT_SETTINGS = {
   exitDefaults: { tpPct: 15, slPct: 25, trailStartPct: 5, trailDistancePct: 3 },
   rangePresets: Object.fromEntries(RANGE_PRESETS.map((p) => [p.key, { below: p.below, above: p.above }])),
   depositPresets: [0.5, 0.7, 0.9, 1],
+  // Default auto flip (%) untuk trade bid_ask/mixed baru dari /open; null = mati.
+  autoFlipPct: null,
 };
 
 // Batas sama dengan range custom: below (0, 99], above [0, 1000]; preset SOL harus above 0.
@@ -24,6 +26,8 @@ function validRange(key, r) {
   if (!(r.below > 0 && r.below <= 99) || !(r.above >= 0 && r.above <= 1000)) return false;
   return SOL_ONLY_KEYS.has(key) ? r.above === 0 : true;
 }
+
+const validAutoFlipPct = (n) => Number.isFinite(n) && n >= 1 && n <= 100;
 
 const validDeposits = (list) =>
   Array.isArray(list) && list.length === 4 && list.every((n) => Number.isFinite(n) && n > 0);
@@ -44,6 +48,7 @@ function withDefaults(raw) {
   out.depositPresets = validDeposits(src.depositPresets)
     ? [...src.depositPresets]
     : [...DEFAULT_SETTINGS.depositPresets];
+  out.autoFlipPct = validAutoFlipPct(src.autoFlipPct) ? src.autoFlipPct : null;
   return out;
 }
 
@@ -123,6 +128,15 @@ export function setDepositPresets(list) {
 export function resetDepositPresets() {
   const settings = getSettings();
   settings.depositPresets = [...DEFAULT_SETTINGS.depositPresets];
+  write(settings);
+  return settings;
+}
+
+// Default auto flip: 1..100 (%) atau null (mati).
+export function setAutoFlipDefault(pct) {
+  if (pct !== null && !validAutoFlipPct(pct)) throw new Error("Auto flip % must be 1-100 or off");
+  const settings = getSettings();
+  settings.autoFlipPct = pct;
   write(settings);
   return settings;
 }

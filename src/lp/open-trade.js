@@ -18,13 +18,21 @@ import {
 } from "../entry/runtime.js";
 import { trackPosition } from "../state/positions.js";
 import { createTrade, updateTradeMeta } from "../state/trades.js";
-import { exitPresetForNewTrade } from "../state/settings.js";
+import { exitPresetForNewTrade, getSettings } from "../state/settings.js";
 import { pctToBinRange, binPriceBounds } from "./range.js";
 import { splitParts, parallelWidth, chunkRange, spotPieces, legMode } from "./open-split.js";
 
 export const SHAPES = ["spot", "curve", "bid_ask", "mixed"];
 export const SOL_BUFFER = 0.08;
 export const MAX_TRADE_POSITIONS = 10;
+
+// Auto flip awal trade baru: default /settings, hanya untuk shape yang bisa di-flip.
+// (FLIP_SHAPES tidak di-import: flip-trade.js sudah meng-import modul ini.)
+const AUTO_FLIP_SHAPES = ["bid_ask", "mixed"];
+function autoFlipForNewTrade(shape) {
+  const pct = getSettings().autoFlipPct;
+  return pct != null && AUTO_FLIP_SHAPES.includes(shape) ? { pct } : null;
+}
 
 const fmt = (n) => Number(n).toFixed(4);
 
@@ -395,10 +403,12 @@ async function openLive(plan, progress, d) {
     baseMint: plan.baseMint,
     positions,
     shape: plan.shape,
-    range: { below: plan.below, above: plan.above, lowerBin, upperBin },
+    // activeBin = bin aktif saat buka (dasar % sisi SOL yang dilewati untuk auto flip).
+    range: { below: plan.below, above: plan.above, lowerBin, upperBin, activeBin: activeId },
     depositSol: plan.depositSol,
     origin: "manual",
     exit,
+    autoFlip: autoFlipForNewTrade(plan.shape),
   });
   if (trade.origin !== "manual") {
     trade = updateTradeMeta(trade.id, { origin: "manual", exit, depositSol: plan.depositSol }) ?? trade;
