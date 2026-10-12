@@ -1,5 +1,5 @@
 import fs from "fs";
-import { ENV_FILE, STRAT_FILE } from "../core/paths.js";
+import { ENV_FILE, SETTINGS_FILE, STRAT_FILE } from "../core/paths.js";
 
 function parseEnvFile(file) {
   if (!fs.existsSync(file)) return {};
@@ -20,10 +20,29 @@ function parseEnvFile(file) {
   return env;
 }
 
-// strat.conf = default strategi (di-commit) MENANG atas .env (rahasia/instance)
-// bila key-nya sama, supaya default yang di-commit otoritatif.
-export function loadEnv(stratFile = STRAT_FILE, envFile = ENV_FILE) {
-  return { ...parseEnvFile(envFile), ...parseEnvFile(stratFile) };
+// Override strat dari Telegram (settings.json.stratOverrides): hanya key yang ada di strat.conf,
+// nilai string. File rusak / tidak ada = tanpa override. Dibaca langsung (bukan lewat
+// state/settings.js) agar config tidak meng-import state.
+function readStratOverrides(settingsFile, stratKeys) {
+  let raw;
+  try {
+    raw = JSON.parse(fs.readFileSync(settingsFile, "utf8"))?.stratOverrides;
+  } catch {
+    return {};
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (stratKeys.has(key) && typeof value === "string") out[key] = value;
+  }
+  return out;
+}
+
+// Prioritas: .env < strat.conf (default di-commit, otoritatif atas .env) < override Telegram.
+export function loadEnv(stratFile = STRAT_FILE, envFile = ENV_FILE, settingsFile = SETTINGS_FILE) {
+  const strat = parseEnvFile(stratFile);
+  const overrides = readStratOverrides(settingsFile, new Set(Object.keys(strat)));
+  return { ...parseEnvFile(envFile), ...strat, ...overrides };
 }
 
 export const bool = (val, def = true) => (val == null ? def : val !== "false");
