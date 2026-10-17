@@ -48,6 +48,7 @@ const MODULES = [
   "../src/exit/close.js",
   "../src/exit/trade-exit.js",
   "../src/exit/trade-loop.js",
+  "../src/exit/evil-panda.js",
   "../src/tg/bot.js",
   "../src/tg/session.js",
   "../src/tg/format.js",

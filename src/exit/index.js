@@ -22,6 +22,7 @@ import { getWatchSnapshot, deactivatePool } from "../entry/index.js";
 import { buildSummaryBlock } from "../core/report.js";
 import { runSafetySweep, sweepClosedPosition } from "./sweep.js";
 import { runAutoFlips } from "./auto-flip.js";
+import { runEvilPanda } from "./evil-panda.js";
 import { syncTrades, setLivePositions, settleTradesForPositions, settleOpenTrades } from "./trade-loop.js";
 
 let cycleCount = 0;
@@ -184,6 +185,12 @@ export async function mainLoop() {
       await runAutoFlips(positions);
     } catch (err) {
       log.error(`Auto flip error: ${err.message}`);
+    }
+    // Evil Panda per trade (bar 15m yang baru tutup; fetch candle hanya saat ada bar baru).
+    try {
+      await runEvilPanda(positions);
+    } catch (err) {
+      log.error(`Evil Panda error: ${err.message}`);
     }
 
     for (const pos of positions) {

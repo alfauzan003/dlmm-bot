@@ -128,7 +128,7 @@ export function settleTradesForPositions(addresses) {
 const isLegClosed = (addr) => getTrackedPosition(addr)?.closed === true;
 
 // Baca ulang PnL pool secara paksa; null bila gagal atau ada leg terbuka yang tidak terbaca.
-async function rereadTrade(trade, live, fetchPnl) {
+export async function rereadTrade(trade, live, fetchPnl) {
   const fresh = await fetchPnl(trade.pool, { force: true, strict: true });
   if (!(fresh instanceof Map)) return null;
   const map = new Map();
