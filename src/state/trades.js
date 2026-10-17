@@ -157,11 +157,11 @@ export function setTradePanda(id, on) {
   return t;
 }
 
-// Progress Evil Panda: { seenAbove, armed, lastBar }.
+// Progress Evil Panda: { seenAbove, armed, lastBar }. Tidak ditulis bila Panda mati / trade tertutup.
 export function updateTradePanda(id, progress) {
   const state = readState();
   const t = state.trades?.[String(id)];
-  if (!t) return null;
+  if (!t || t.closed === true || t.exit?.panda?.on !== true) return null;
   t.panda = { ...progress };
   writeState(state);
   return t;

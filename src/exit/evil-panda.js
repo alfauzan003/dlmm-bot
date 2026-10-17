@@ -7,7 +7,7 @@ import { fetchCandles } from "../market/candles.js";
 import { bollinger, macd, rsi } from "../market/indicators.js";
 import { supertrendSeries } from "../market/supertrend.js";
 import { fetchPoolPnl } from "../meteora/positions.js";
-import { listOpenTrades, tradeLock, updateTradePanda } from "../state/trades.js";
+import { getTrade, listOpenTrades, tradeLock, updateTradePanda } from "../state/trades.js";
 import { closeTrade } from "../lp/close-trade.js";
 import { rereadTrade } from "./trade-loop.js";
 
@@ -49,11 +49,14 @@ function signalOf(row, params) {
   return null;
 }
 
-// Proses bar setelah progress.lastBar (pertama kali: mulai bar saat trade dibuka). Saat terpicu,
-// lastBar tetap di bar sebelumnya supaya close yang gagal dicoba lagi tick berikutnya.
+// Proses bar setelah progress.lastBar (pertama kali: mulai bar saat trade dibuka). Hanya bar terakhir
+// (bar tutup terbaru) yang boleh memicu close; spike di bar lama (replay setelah restart / Panda baru
+// dinyalakan) hanya memperbarui arming. Saat terpicu, lastBar tetap di bar sebelumnya supaya close yang
+// gagal dicoba lagi tick berikutnya.
 export function stepPanda(progress, rows, params, { openedAtSec = 0 } = {}) {
   const next = { seenAbove: false, armed: false, lastBar: null, ...(progress || {}) };
   const from = next.lastBar == null ? barStart(openedAtSec) : next.lastBar + 1;
+  const newest = rows.length ? rows[rows.length - 1].time : null;
   for (const row of rows) {
     if (row.time < from) continue;
     if (row.direction === "bullish") {
@@ -61,7 +64,7 @@ export function stepPanda(progress, rows, params, { openedAtSec = 0 } = {}) {
       next.armed = false;
     } else if (row.direction === "bearish" && next.seenAbove) {
       next.armed = true;
-      const signal = signalOf(row, params);
+      const signal = row.time === newest ? signalOf(row, params) : null;
       if (signal) return { progress: next, fire: { signal, time: row.time } };
     }
     next.lastBar = row.time;
@@ -71,8 +74,30 @@ export function stepPanda(progress, rows, params, { openedAtSec = 0 } = {}) {
 
 let warnedMacd = false;
 
-const sameProgress = (a, b) =>
-  (a?.seenAbove ?? false) === b.seenAbove && (a?.armed ?? false) === b.armed && (a?.lastBar ?? null) === b.lastBar;
+const norm = (p) => [p?.seenAbove ?? false, p?.armed ?? false, p?.lastBar ?? null].join("|");
+const sameProgress = (a, b) => norm(a) === norm(b);
+const pandaStillOn = (id) => {
+  const t = getTrade(id);
+  return t && t.closed !== true && t.exit?.panda?.on === true ? t : null;
+};
+
+// Candle tidak lengkap (GMGN telat / token sepi): coba lagi paling cepat tiap 60 dtk, maks 3x per bar,
+// supaya kuota GMGN (dipakai bersama Auto Entry) tidak habis tiap tick.
+const RETRY_GAP_MS = 60_000;
+const MAX_TRIES_PER_BAR = 3;
+const retries = new Map(); // mint -> { bar, tries, lastAt }
+export const __resetPandaThrottle = () => retries.clear();
+
+function throttled(mint, bar, now) {
+  const r = retries.get(mint);
+  if (!r || r.bar !== bar) return false;
+  return r.tries >= MAX_TRIES_PER_BAR || now - r.lastAt < RETRY_GAP_MS;
+}
+
+function noteIncomplete(mint, bar, now) {
+  const r = retries.get(mint);
+  retries.set(mint, { bar, tries: r?.bar === bar ? r.tries + 1 : 1, lastAt: now });
+}
 
 // Satu tick dari loop monitor posisi: evaluasi bar 15m yang baru tutup untuk tiap trade dengan Panda ON,
 // lalu close trade yang terpicu. Mengembalikan id trade yang dicoba ditutup.
@@ -98,10 +123,12 @@ export async function runEvilPanda(positions, { deps = {}, now = Date.now() } = 
     if (trade.panda?.lastBar != null && trade.panda.lastBar >= latestClosed) continue;
 
     const label = `${trade.pair || trade.pool?.slice(0, 8)} #${trade.id}`;
-    if (!rowsByMint.has(trade.baseMint)) {
+    const mint = trade.baseMint;
+    if (!rowsByMint.has(mint)) {
+      if (throttled(mint, latestClosed, now)) continue;
       rowsByMint.set(
-        trade.baseMint,
-        fetchCandlesFn(trade.baseMint, trade.pool, { resolution: "15m", limit: 90, allowStale: false })
+        mint,
+        fetchCandlesFn(mint, trade.pool, { resolution: "15m", limit: 90, allowStale: false })
           .then((candles) => {
             const closed = closedBars(candles, now);
             return closed ? pandaRows(closed, params) : null;
@@ -110,10 +137,19 @@ export async function runEvilPanda(positions, { deps = {}, now = Date.now() } = 
             log.warn(`${label}: Evil Panda candle 15m gagal: ${err.message}`);
             return null;
           })
+          .then((rows) => {
+            if (rows) retries.delete(mint);
+            else noteIncomplete(mint, latestClosed, now);
+            return rows;
+          })
       );
     }
-    const rows = await rowsByMint.get(trade.baseMint);
+    const rows = await rowsByMint.get(mint);
     if (!rows) continue;
+
+    // Trade dibaca ulang setelah await: Panda bisa dimatikan / di-reset selama candle dimuat.
+    const fresh = pandaStillOn(trade.id);
+    if (!fresh || !sameProgress(trade.panda, fresh.panda)) continue;
 
     const { progress, fire } = stepPanda(trade.panda, rows, params, { openedAtSec: (trade.openedAt || 0) / 1000 });
     if (!sameProgress(trade.panda, progress)) {
@@ -130,6 +166,7 @@ export async function runEvilPanda(positions, { deps = {}, now = Date.now() } = 
       log.warn(`${label}: Evil Panda (${fire.signal}) terpicu tapi baca ulang PnL gagal — tunda`);
       continue;
     }
+    if (!pandaStillOn(trade.id)) continue;
     log.info(`${label}: Evil Panda ${fire.signal} spike → close trade`);
     try {
       await close(trade, { reason: `evil_panda_${fire.signal}`, swap: true, positionsByAddr });
@@ -138,4 +175,17 @@ export async function runEvilPanda(positions, { deps = {}, now = Date.now() } = 
     }
   }
   return handled;
+}
+
+// Jalankan runEvilPanda di latar belakang (fetch GMGN bisa antre lama; loop monitor tidak ikut menunggu).
+// Satu run sekaligus: null bila run sebelumnya masih berjalan.
+let running = null;
+export function kickEvilPanda(positions, opts) {
+  if (running) return null;
+  running = runEvilPanda(positions, opts)
+    .catch((err) => log.error(`Evil Panda error: ${err.message}`))
+    .finally(() => {
+      running = null;
+    });
+  return running;
 }

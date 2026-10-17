@@ -84,7 +84,7 @@ order:
 1. Supertrend direction for that bar unknown (warm-up) → skip bar.
 2. **Bullish** → `seenAbove = true`, `armed = false`.
 3. **Bearish** and `seenAbove` → `armed = true`.
-4. **Armed** and an enabled signal fires on that bar → `fire = { signal: "rsi" | "macd" | "bb", bar }`, stop.
+4. **Armed**, the bar is the **latest closed bar**, and an enabled signal fires on it → `fire = { signal: "rsi" | "macd" | "bb", bar }`, stop.
    - RSI: `rsi[i] > level`.
    - MACD: `hist[i] > 0 && hist[i - 1] <= 0`.
    - BB: `close[i] > upper[i]`.
@@ -92,11 +92,15 @@ order:
 5. `lastBar = bar.time` (not done for the firing bar — see Runner).
 
 Step 2 before step 4 means a bar that closes back above the Supertrend never closes the trade (the
-"don't close, keep chopping" case). Replaying all unprocessed bars covers bot restarts and missed ticks.
+"don't close, keep chopping" case). Replaying all unprocessed bars rebuilds the armed state after restarts, missed ticks or turning Panda on;
+a spike on an older bar never closes the trade (it would sell after the spike is gone).
 
 ### Runner — in the position monitor (`src/exit/index.js`)
 
-Once per tick of the existing monitor loop, `runEvilPanda(positions)`:
+Once per tick of the existing monitor loop, `kickEvilPanda(positions)` starts `runEvilPanda` in the background
+(never two at once, so a slow GMGN queue does not hold the monitor loop). Incomplete candles are retried at most
+every 60 s and 3 times per bar per mint. The trade is re-read after each await and skipped if Panda was turned
+off or reset meanwhile.
 
 - For each open trade with `exit.panda.on`, not locked, with at least one live leg.
 - Skip unless a new 15m bar has closed since `trade.panda.lastBar` (no fetch otherwise).

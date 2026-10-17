@@ -142,3 +142,14 @@ test("the breaking bar itself can fire (arm, then check signals)", () => {
   assert.deepEqual(r.fire, { signal: "rsi", time: 2 * BAR });
   assert.equal(r.progress.lastBar, 1 * BAR);
 });
+
+test("a spike on an older bar does not fire (only the latest closed bar can)", () => {
+  const r = step([
+    row(1, "bullish"),
+    row(2, "bearish"),
+    row(3, "bearish", { rsi: 95 }),
+    row(4, "bearish", { rsi: 50 }),
+  ]);
+  assert.equal(r.fire, null);
+  assert.deepEqual(r.progress, { seenAbove: true, armed: true, lastBar: 4 * BAR });
+});

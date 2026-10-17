@@ -12,9 +12,10 @@ process.env.PNL_HISTORY_FILE = path.join(TMP, "pnl-history.json");
 process.env.SETTINGS_FILE = path.join(TMP, "settings.json");
 
 const { trackPosition } = await import("../src/state/positions.js");
-const { createTrade, getTrade, tryLockTrade, unlockTrade, updateTradePanda } = await import("../src/state/trades.js");
+const { createTrade, getTrade, tryLockTrade, unlockTrade, updateTradePanda, setTradePanda } =
+  await import("../src/state/trades.js");
 const { readState, writeState } = await import("../src/state/store.js");
-const { runEvilPanda } = await import("../src/exit/evil-panda.js");
+const { runEvilPanda, kickEvilPanda, __resetPandaThrottle } = await import("../src/exit/evil-panda.js");
 
 const BAR = 900;
 const NOW = (1_000_000 * BAR + 30) * 1000; // 30 detik setelah bar 1_000_000 mulai
@@ -24,6 +25,7 @@ test.after(() => fs.rmSync(TMP, { recursive: true, force: true }));
 
 function reset() {
   fs.rmSync(process.env.STATE_FILE, { force: true });
+  __resetPandaThrottle();
 }
 
 const candle = (time, close) => ({ time, open: close, high: close + 1, low: close - 1, close, volume: 1 });
@@ -161,4 +163,70 @@ test("one candle fetch per mint per tick", async () => {
   const { deps, calls } = fakeDeps();
   await runEvilPanda([live("PosA"), live("PosC")], { deps, now: NOW });
   assert.equal(calls.fetchCandles.length, 1);
+});
+
+test("Panda turned off while candles load does not close", async () => {
+  reset();
+  const t = newTrade();
+  const { deps, calls } = fakeDeps();
+  const fetch = deps.fetchCandles;
+  deps.fetchCandles = async (...args) => {
+    setTradePanda(t.id, false);
+    return fetch(...args);
+  };
+  await runEvilPanda([live("PosA")], { deps, now: NOW });
+  assert.equal(calls.closeTrade.length, 0);
+  assert.equal(getTrade(t.id).panda, undefined);
+});
+
+test("Panda reset (off then on) while candles load keeps the reset progress", async () => {
+  reset();
+  const t = newTrade();
+  updateTradePanda(t.id, { seenAbove: true, armed: true, lastBar: LATEST - 3 * BAR });
+  const { deps, calls } = fakeDeps();
+  const fetch = deps.fetchCandles;
+  deps.fetchCandles = async (...args) => {
+    setTradePanda(t.id, false);
+    setTradePanda(t.id, true);
+    return fetch(...args);
+  };
+  await runEvilPanda([live("PosA")], { deps, now: NOW });
+  assert.equal(calls.closeTrade.length, 0);
+  assert.equal(getTrade(t.id).panda, undefined);
+});
+
+test("updateTradePanda does nothing while Panda is off", () => {
+  reset();
+  const t = newTrade({ panda: false });
+  assert.equal(updateTradePanda(t.id, { seenAbove: true, armed: true, lastBar: 900 }), null);
+  assert.equal(getTrade(t.id).panda, undefined);
+});
+
+test("incomplete candles are retried at most every 60 s and 3 times per bar", async () => {
+  reset();
+  newTrade();
+  const late = spikeCandles({ lastClosed: LATEST - BAR }).slice(0, -1);
+  const { deps, calls } = fakeDeps({ candles: late });
+  for (const dt of [0, 10, 59, 61, 125, 190, 260]) await runEvilPanda([live("PosA")], { deps, now: NOW + dt * 1000 });
+  assert.equal(calls.fetchCandles.length, 3);
+});
+
+test("kickEvilPanda runs in the background and never overlaps", async () => {
+  reset();
+  newTrade();
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const { deps, calls } = fakeDeps();
+  const fetch = deps.fetchCandles;
+  deps.fetchCandles = async (...args) => {
+    await gate;
+    return fetch(...args);
+  };
+  const first = kickEvilPanda([live("PosA")], { deps, now: NOW });
+  assert.ok(first);
+  assert.equal(kickEvilPanda([live("PosA")], { deps, now: NOW }), null);
+  release();
+  await first;
+  assert.equal(calls.fetchCandles.length, 1);
+  assert.ok(kickEvilPanda([live("PosA")], { deps, now: NOW }));
 });

@@ -288,6 +288,7 @@ test("setTradeAutoFlip sets and clears", () => {
 test("setTradePanda toggles exit.panda and resets progress", () => {
   reset();
   const t = newTrade(["PP1"]);
+  setTradePanda(t.id, true);
   updateTradePanda(t.id, { seenAbove: true, armed: true, lastBar: 900 });
   assert.deepEqual(getTrade(t.id).panda, { seenAbove: true, armed: true, lastBar: 900 });
   setTradePanda(t.id, false);
