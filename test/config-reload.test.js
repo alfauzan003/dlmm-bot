@@ -40,6 +40,25 @@ test("reloadConfig applies overrides in place and keeps nested identity", () => 
   assert.equal(config.entry.fees.mode, baselineMode);
 });
 
+test("reloadConfig updates config.evilPanda in place", () => {
+  const panda = config.evilPanda;
+  assert.equal(panda.rsi.level, 90);
+  fs.writeFileSync(SETTINGS, JSON.stringify({ stratOverrides: { EVIL_PANDA_RSI_LEVEL: "85" } }));
+  reloadConfig();
+  assert.equal(config.evilPanda, panda);
+  assert.equal(config.evilPanda.rsi.level, 85);
+  fs.writeFileSync(SETTINGS, "{}");
+  reloadConfig();
+  assert.deepEqual(config.evilPanda, {
+    defaultOn: false,
+    stAtrPeriod: 10,
+    stMultiplier: 3,
+    rsi: { on: true, length: 2, level: 90 },
+    macd: { on: false, fast: 12, slow: 26, signal: 9 },
+    bb: { on: false, length: 20, stdDev: 2 },
+  });
+});
+
 test("reloadConfig restores dryRun from .env even after a test mutated it", () => {
   const before = config.dryRun;
   config.dryRun = !before;

@@ -2,7 +2,7 @@ import fs from "fs";
 import { SETTINGS_FILE } from "../core/paths.js";
 import { RANGE_PRESETS } from "../lp/range.js";
 import log from "../core/logger.js";
-import { reloadConfig } from "../config/index.js";
+import config, { reloadConfig } from "../config/index.js";
 import { loadStratSchema, validateValue } from "../config/strat-schema.js";
 
 // Toggle yang bisa diubah dari Telegram; disimpan di settings.json.
@@ -148,13 +148,14 @@ export function setAutoFlipDefault(pct) {
   return settings;
 }
 
-// Exit awal untuk trade baru: Auto Exit ON → pakai default; OFF → semua mati.
+// Exit awal untuk trade baru: Auto Exit ON → pakai default (Evil Panda ikut EVIL_PANDA_DEFAULT_ON); OFF → semua mati.
 export function exitPresetForNewTrade() {
   const { autoExit, exitDefaults: d } = getSettings();
   return {
     tp: { on: autoExit, pct: d.tpPct },
     sl: { on: autoExit, pct: d.slPct },
     trail: { on: autoExit, startPct: d.trailStartPct, distancePct: d.trailDistancePct },
+    panda: { on: autoExit && config.evilPanda.defaultOn === true },
   };
 }
 

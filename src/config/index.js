@@ -136,6 +136,29 @@ export function buildConfig(e) {
     telegramChatId: e.TELEGRAM_CHAT_ID || "",
     tgStatusInterval: num(e.TG_STATUS_INTERVAL, 5),
 
+    // Exit Evil Panda per trade (lihat src/exit/evil-panda.js).
+    evilPanda: {
+      defaultOn: bool(e.EVIL_PANDA_DEFAULT_ON, false),
+      stAtrPeriod: Math.max(1, Math.floor(num(e.EVIL_PANDA_ST_ATR_PERIOD, 10))),
+      stMultiplier: num(e.EVIL_PANDA_ST_MULTIPLIER, 3),
+      rsi: {
+        on: bool(e.EVIL_PANDA_RSI, true),
+        length: Math.max(1, Math.floor(num(e.EVIL_PANDA_RSI_LENGTH, 2))),
+        level: num(e.EVIL_PANDA_RSI_LEVEL, 90),
+      },
+      macd: {
+        on: bool(e.EVIL_PANDA_MACD, false),
+        fast: Math.max(1, Math.floor(num(e.EVIL_PANDA_MACD_FAST, 12))),
+        slow: Math.max(1, Math.floor(num(e.EVIL_PANDA_MACD_SLOW, 26))),
+        signal: Math.max(1, Math.floor(num(e.EVIL_PANDA_MACD_SIGNAL, 9))),
+      },
+      bb: {
+        on: bool(e.EVIL_PANDA_BB, false),
+        length: Math.max(2, Math.floor(num(e.EVIL_PANDA_BB_LENGTH, 20))),
+        stdDev: num(e.EVIL_PANDA_BB_STDDEV, 2),
+      },
+    },
+
     entry,
     swap,
   };

@@ -94,6 +94,9 @@ export function exitLabel(reason) {
   if (r === "tp") return "Take Profit";
   if (r === "sl") return "Stop Loss";
   if (r === "trail") return "Trailing";
+  if (r === "evil_panda_rsi") return "Evil Panda (RSI)";
+  if (r === "evil_panda_macd") return "Evil Panda (MACD)";
+  if (r === "evil_panda_bb") return "Evil Panda (BB)";
   if (r === "manual") return "Manual close";
   if (r === "closed_outside") return "Closed outside bot";
   return r;

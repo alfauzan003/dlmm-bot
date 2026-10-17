@@ -28,6 +28,8 @@ const {
   tradeLock,
   addTradeLeg,
   setTradeAutoFlip,
+  setTradePanda,
+  updateTradePanda,
 } = await import("../src/state/trades.js");
 
 const EXIT = {
@@ -281,4 +283,20 @@ test("setTradeAutoFlip sets and clears", () => {
   setTradeAutoFlip(t.id, null);
   assert.equal("autoFlip" in getTrade(t.id), false);
   assert.equal(setTradeAutoFlip(999, { pct: 5 }), null);
+});
+
+test("setTradePanda toggles exit.panda and resets progress", () => {
+  reset();
+  const t = newTrade(["PP1"]);
+  updateTradePanda(t.id, { seenAbove: true, armed: true, lastBar: 900 });
+  assert.deepEqual(getTrade(t.id).panda, { seenAbove: true, armed: true, lastBar: 900 });
+  setTradePanda(t.id, false);
+  assert.deepEqual(getTrade(t.id).exit.panda, { on: false });
+  setTradePanda(t.id, true);
+  const after = getTrade(t.id);
+  assert.deepEqual(after.exit.panda, { on: true });
+  assert.equal(after.panda, undefined);
+  assert.deepEqual(after.exit.tp, EXIT.tp);
+  assert.equal(setTradePanda(999, true), null);
+  assert.equal(updateTradePanda(999, { armed: true }), null);
 });

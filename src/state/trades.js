@@ -146,6 +146,27 @@ export function addTradeLeg(id, address, { flip = false } = {}) {
   return t;
 }
 
+// Evil Panda per trade: on/off di exit.panda; progress lama dibuang supaya `armed` lama tidak langsung memicu close.
+export function setTradePanda(id, on) {
+  const state = readState();
+  const t = state.trades?.[String(id)];
+  if (!t) return null;
+  t.exit = { ...(t.exit || {}), panda: { on: Boolean(on) } };
+  delete t.panda;
+  writeState(state);
+  return t;
+}
+
+// Progress Evil Panda: { seenAbove, armed, lastBar }.
+export function updateTradePanda(id, progress) {
+  const state = readState();
+  const t = state.trades?.[String(id)];
+  if (!t) return null;
+  t.panda = { ...progress };
+  writeState(state);
+  return t;
+}
+
 export function updateTradeProgress(id, { peakPnlPct, trailArmed }) {
   const state = readState();
   const t = state.trades?.[String(id)];

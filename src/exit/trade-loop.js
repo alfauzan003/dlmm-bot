@@ -32,6 +32,7 @@ function exitAllOff() {
     tp: { ...preset.tp, on: false },
     sl: { ...preset.sl, on: false },
     trail: { ...preset.trail, on: false },
+    panda: { on: false },
   };
 }
 

@@ -73,6 +73,19 @@ test("preset follows autoExit", () => {
   assert.equal(p.trail.on, false);
 });
 
+test("exitPresetForNewTrade: Evil Panda follows its default only while Auto Exit is ON", () => {
+  const before = config.evilPanda.defaultOn;
+  try {
+    assert.deepEqual(exitPresetForNewTrade().panda, { on: false });
+    config.evilPanda.defaultOn = true;
+    assert.deepEqual(exitPresetForNewTrade().panda, { on: true });
+    setToggle("autoExit", false);
+    assert.deepEqual(exitPresetForNewTrade().panda, { on: false });
+  } finally {
+    config.evilPanda.defaultOn = before;
+  }
+});
+
 test("corrupt file falls back to defaults", () => {
   fs.writeFileSync(FILE, "{oops");
   assert.equal(getSettings().autoExit, true);

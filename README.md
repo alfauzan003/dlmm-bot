@@ -137,6 +137,22 @@ New trades get these defaults while the Auto Exit toggle is ON (edit them in `/s
 
 Before any automatic close the bot re-checks the PnL once and closes only if the trigger still holds.
 
+### Exit strategy · Evil Panda
+
+An optional per-trade exit that runs next to TP / SL / Trail (whichever fires first closes the trade). It reads the
+token's 15m candles and only looks at closed bars:
+
+1. While price is above the 15m Supertrend, the trade is kept.
+2. When a closed bar breaks below the Supertrend (after the trade has seen price above it), Evil Panda **arms**.
+3. While armed, the next spike closes the trade: RSI(2) closes above 90, the first green MACD histogram bar, or a
+   close above the upper Bollinger Band — each signal can be switched on or off (default: RSI only).
+4. If a bar closes back above the Supertrend first, it disarms and the trade keeps earning fees.
+
+A trade opened while price is already below the Supertrend waits for a real break before it can arm. Turn it on or
+off per trade with **🐼 Panda** in `/positions` (the card shows `🐼 Evil Panda armed` while armed). New trades start
+with it on when Auto Exit is ON and `EVIL_PANDA_DEFAULT_ON=true`. Tune it in **/settings → 🐼 Exit strategy → Evil
+Panda**. The close alert shows which signal fired, e.g. `Evil Panda (RSI)`.
+
 ## Settings and toggles
 
 | Toggle | First-start value | Effect |
@@ -148,7 +164,7 @@ The toggles are saved in `settings.json`. They take effect without a restart and
 these features.
 
 **🧩 Strategy** (in `/settings`) shows every key of `strat.conf`, grouped by its `# ===== … =====` sections (General, Auto
-Entry · Pools & sizing / Signal / Safety, Transactions, Swap & sweep, Monitoring, Market data & rate limits, Logs).
+Entry · Pools & sizing / Signal / Safety, Exit strategy · Evil Panda, Transactions, Swap & sweep, Monitoring, Market data & rate limits, Logs).
 The comment block right under a section header is shown as that section's description, and the comment above each
 key as its help. Changing a value there saves it as an override in `settings.json`
 (`stratOverrides`); `strat.conf` stays the committed default and **↩ Reset to default** / **Reset all overrides**

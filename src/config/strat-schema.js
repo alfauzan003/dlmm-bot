@@ -32,6 +32,15 @@ const OVERRIDES = {
   ENTRY_DEFAULT_SIZE_SOL: { gt: 0 },
   POOL_LIST_FILE: { type: "file" },
   SUPERTREND_CACHE_FILE: { type: "file" },
+  EVIL_PANDA_ST_ATR_PERIOD: { min: 1, int: true },
+  EVIL_PANDA_ST_MULTIPLIER: { gt: 0 },
+  EVIL_PANDA_RSI_LENGTH: { min: 1, int: true },
+  EVIL_PANDA_RSI_LEVEL: { min: 0, max: 100 },
+  EVIL_PANDA_MACD_FAST: { min: 1, int: true },
+  EVIL_PANDA_MACD_SLOW: { min: 1, int: true },
+  EVIL_PANDA_MACD_SIGNAL: { min: 1, int: true },
+  EVIL_PANDA_BB_LENGTH: { min: 2, int: true },
+  EVIL_PANDA_BB_STDDEV: { gt: 0 },
 };
 
 // Aturan per pola nama. OVERRIDES menang.

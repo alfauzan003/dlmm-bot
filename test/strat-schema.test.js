@@ -104,6 +104,27 @@ test("committed strat.conf: every default validates and restart keys exist", () 
   for (const key of RESTART_KEYS) assert.ok(schema.entries[key], `${key} missing from strat.conf`);
 });
 
+test("Evil Panda keys live in their own section and reject bad values", () => {
+  const schema = loadStratSchema(fileURLToPath(new URL("../strat.conf", import.meta.url)));
+  const section = schema.sections.find((s) => s.title === "Exit strategy · Evil Panda");
+  assert.ok(section, "Evil Panda section missing");
+  assert.ok(section.keys.includes("EVIL_PANDA_RSI_LEVEL"));
+  assert.equal(schema.entries.EVIL_PANDA_DEFAULT_ON.default, "false");
+  const bad = {
+    EVIL_PANDA_RSI_LEVEL: ["101", "-1"],
+    EVIL_PANDA_RSI_LENGTH: ["1.5", "0"],
+    EVIL_PANDA_BB_STDDEV: ["0"],
+    EVIL_PANDA_BB_LENGTH: ["1"],
+    EVIL_PANDA_ST_MULTIPLIER: ["0"],
+    EVIL_PANDA_MACD_SLOW: ["0"],
+  };
+  for (const [key, values] of Object.entries(bad)) {
+    for (const v of values) assert.equal(validateValue(key, v, schema).ok, false, `${key}=${v}`);
+  }
+  assert.equal(validateValue("EVIL_PANDA_RSI_LEVEL", "85", schema).ok, true);
+  for (const key of section.keys) assert.equal(RESTART_KEYS.has(key), false, key);
+});
+
 test("loadStratSchema on a missing file is empty", () => {
   assert.deepEqual(loadStratSchema("does-not-exist.conf"), { sections: [], entries: {} });
 });

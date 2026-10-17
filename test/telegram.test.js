@@ -77,6 +77,12 @@ test("close: drawdown null tidak menampilkan baris Drawdown", () => {
   assert.doesNotMatch(msg, /Drawdown/);
 });
 
+test("exitLabel names the Evil Panda signal", () => {
+  assert.equal(exitLabel("evil_panda_rsi"), "Evil Panda (RSI)");
+  assert.equal(exitLabel("evil_panda_macd"), "Evil Panda (MACD)");
+  assert.equal(exitLabel("evil_panda_bb"), "Evil Panda (BB)");
+});
+
 test("exitLabel menerjemahkan alasan exit ke label pendek", () => {
   assert.equal(exitLabel("trailing_tp: peak 1 -> 2"), "Trailing TP");
   assert.equal(exitLabel("indicator_trailing(rsi_bb): peak 1 -> 2"), "Trailing Indikator");
