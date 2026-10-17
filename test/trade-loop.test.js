@@ -119,7 +119,7 @@ test("adopts bot-tracked position as auto with preset", () => {
   syncTrades([live("PosY", 1)], { wasTracked: new Set(["PosY"]), bootedAt });
   const t = findTradeByPosition("PosY");
   assert.equal(t.origin, "auto");
-  assert.deepEqual(t.exit, EXIT);
+  assert.deepEqual(t.exit, { ...EXIT, panda: { on: false } });
   // Tidak dobel pada tick berikutnya.
   syncTrades([live("PosY", 1)], { wasTracked: new Set(["PosY"]), bootedAt });
   assert.equal(listOpenTrades().length, 1);
@@ -135,6 +135,7 @@ test("position tracked before this boot is adopted as auto with all exits off (l
   assert.equal(t.exit.tp.on, false);
   assert.equal(t.exit.sl.on, false);
   assert.equal(t.exit.trail.on, false);
+  assert.equal(t.exit.panda.on, false);
   assert.equal(t.exit.tp.pct, 15);
 });
 
