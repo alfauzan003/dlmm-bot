@@ -26,10 +26,16 @@ function computeATR(candles, period) {
 
 // Returns { direction: "bullish"|"bearish", line } for the last candle, or null.
 export function computeSupertrend(candles, period, multiplier) {
-  if (!candles || candles.length < period + 1) return null;
+  return supertrendSeries(candles, period, multiplier).at(-1) ?? null;
+}
+
+// Same math as computeSupertrend, one { direction, line } per candle (null before index `period`).
+export function supertrendSeries(candles, period, multiplier) {
+  const series = Array((candles || []).length).fill(null);
+  if (!candles || candles.length < period + 1) return series;
 
   const atrValues = computeATR(candles, period);
-  if (atrValues.length === 0) return null;
+  if (atrValues.length === 0) return series;
 
   let direction = "bullish";
   let line = 0;
@@ -67,9 +73,10 @@ export function computeSupertrend(candles, period, multiplier) {
 
     line = newLine;
     direction = newDirection;
+    series[i] = { direction, line };
   }
 
-  return { direction, line };
+  return series;
 }
 
 // Whether the (possibly still-forming) last candle touches the Supertrend line
