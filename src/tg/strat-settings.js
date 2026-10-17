@@ -51,7 +51,9 @@ export function buildStratSection(schema, overrides, sectionIndex, page) {
   }
   if (p > 0) keyboard.text("◀ Prev", `st:s:${sectionIndex}:${p - 1}`);
   if (p < pages - 1) keyboard.text("Next ▶", `st:s:${sectionIndex}:${p + 1}`);
-  keyboard.row().text("⬅ Sections", "st:home");
+  // Bagian exit strategy dibuka dari /settings → 🐼 Exit strategy, jadi kembali ke sana.
+  if (section.title.startsWith("Exit strategy")) keyboard.row().text("⬅ Exit strategy", "set:exit");
+  else keyboard.row().text("⬅ Sections", "st:home");
   let text = `🧩 <b>${esc(section.title)}</b>${pages > 1 ? ` — page ${p + 1}/${pages}` : ""}`;
   if (section.description) text += `\n\n${esc(section.description)}`;
   return { text, keyboard };

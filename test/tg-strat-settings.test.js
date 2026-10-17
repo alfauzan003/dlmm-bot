@@ -31,6 +31,8 @@ const { createBot } = await import("../src/tg/bot.js");
 const settingsModule = await import("../src/tg/settings.js");
 const session = await import("../src/tg/session.js");
 const { getStratOverrides, setStratOverride } = await import("../src/state/settings.js");
+const { parseStratText } = await import("../src/config/strat-schema.js");
+const { buildStratSection } = await import("../src/tg/strat-settings.js");
 
 const OWNER = 123;
 const BOT_INFO = {
@@ -214,4 +216,13 @@ test("list keys accept pasted mint addresses in the edit prompt", async () => {
     SWEEP_EXCLUDE_MINTS: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v,So11111111111111111111111111111111111111112",
   });
   assert.equal(session.get("prompt"), null);
+});
+
+test("Exit strategy sections go back to the Exit strategy screen", () => {
+  const schema = parseStratText(
+    ["# ===== Entry =====", "A_SEC=1", "", "# ===== Exit strategy · Evil Panda =====", "EVIL_PANDA_RSI=true"].join("\n")
+  );
+  const back = (i) => buildStratSection(schema, {}, i, 0).keyboard.inline_keyboard.flat().at(-1);
+  assert.deepEqual([back(0).text, back(0).callback_data], ["⬅ Sections", "st:home"]);
+  assert.deepEqual([back(1).text, back(1).callback_data], ["⬅ Exit strategy", "set:exit"]);
 });

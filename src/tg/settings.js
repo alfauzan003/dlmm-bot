@@ -5,6 +5,7 @@ import { registerPrompt, withGuard } from "./bot.js";
 import { parseAutoFlipInput, parseExitInput, parseSolAmount } from "./parse.js";
 import * as session from "./session.js";
 import { registerStrat } from "./strat-settings.js";
+import { loadStratSchema } from "../config/strat-schema.js";
 import { parseCustomRange, presetLabel } from "../lp/range.js";
 import {
   getSettings,
@@ -50,6 +51,8 @@ export function buildSettings(settings, dryRun) {
     .row()
     .text(`🤖 Auto flip ${settings.autoFlipPct != null ? `${settings.autoFlipPct}%` : "off"}`, "set:autoflip")
     .row()
+    .text("🐼 Exit strategy", "set:exit")
+    .row()
     .text("🧩 Strategy", "st:home");
   const text = [
     "⚙️ Settings",
@@ -59,6 +62,27 @@ export function buildSettings(settings, dryRun) {
     "Auto flip is the default for new bid_ask / mixed trades from /open.",
     "",
     `DRY_RUN: ${dryRun ? "on" : "off"} (.env)`,
+  ].join("\n");
+  return { text, keyboard };
+}
+
+const EVIL_PANDA_SECTION = "Exit strategy · Evil Panda";
+
+// Daftar exit strategy; tiap strategi membuka bagian strat.conf-nya di editor Strategy.
+export function buildExitStrategies(schema, { pandaDefaultOn }) {
+  const keyboard = new InlineKeyboard();
+  const panda = schema.sections.findIndex((s) => s.title === EVIL_PANDA_SECTION);
+  if (panda >= 0) {
+    keyboard.text(`🐼 Evil Panda (new trades: ${pandaDefaultOn ? "on" : "off"})`, `st:s:${panda}:0`).row();
+  }
+  keyboard.text("◀ Back", "set:back");
+  const text = [
+    "🐼 Exit strategy",
+    "",
+    "Exit strategies run per trade next to TP / SL / Trail; whichever fires first closes the trade.",
+    "Switch one on or off per trade in /positions.",
+    "",
+    "Evil Panda: hold while price is above the 15m Supertrend. After a closed bar breaks below it, close on the next spike (RSI / MACD / Bollinger Bands). A close back above the Supertrend keeps the trade.",
   ].join("\n");
   return { text, keyboard };
 }
@@ -145,6 +169,13 @@ export function register(bot) {
   bot.callbackQuery(
     "set:back",
     withGuard("Settings", (ctx) => editTo(ctx, buildSettings(getSettings(), config.dryRun)))
+  );
+
+  bot.callbackQuery(
+    "set:exit",
+    withGuard("Exit strategy", (ctx) =>
+      editTo(ctx, buildExitStrategies(loadStratSchema(), { pandaDefaultOn: config.evilPanda.defaultOn }))
+    )
   );
 
   bot.callbackQuery(

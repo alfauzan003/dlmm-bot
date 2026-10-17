@@ -38,6 +38,11 @@ test("exitSummary", () => {
   assert.equal(exitSummary({ ...all, sl: { on: false, pct: 25 }, trail: { on: false } }), "TP15");
   assert.equal(exitSummary({ tp: { on: false }, sl: { on: false }, trail: { on: false } }), "no exits");
   assert.equal(exitSummary(null), "no exits");
+  assert.equal(exitSummary({ ...all, panda: { on: true } }), "TP15 SL-25 T5/3 Panda");
+  assert.equal(
+    exitSummary({ tp: { on: false }, sl: { on: false }, trail: { on: false }, panda: { on: true } }),
+    "Panda"
+  );
 });
 
 test("esc", () => {

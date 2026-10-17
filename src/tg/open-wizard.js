@@ -71,7 +71,7 @@ function nonRefundableLine(plan) {
 
 // Ringkasan rencana untuk kartu konfirmasi (teks HTML).
 export function buildConfirm(plan, exit) {
-  const anyExit = exit && (exit.tp?.on || exit.sl?.on || exit.trail?.on);
+  const anyExit = exit && (exit.tp?.on || exit.sl?.on || exit.trail?.on || exit.panda?.on);
   const swap = plan.solOnly || !(plan.swapSol > 0) ? "SOL only" : `Swap: ${fmtSol(plan.swapSol)} → token`;
   return [
     `📋 <b>Open ${esc(plan.pair)}</b>`,

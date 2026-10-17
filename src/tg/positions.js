@@ -7,7 +7,7 @@ import { claimTrade } from "../lp/claim.js";
 import { closeTrade } from "../lp/close-trade.js";
 import { canFlip, flipTrade, planFlip } from "../lp/flip-trade.js";
 import { getTrackedPosition } from "../state/positions.js";
-import { getTrade, listOpenTrades, setTradeAutoFlip, setTradeExit } from "../state/trades.js";
+import { getTrade, listOpenTrades, setTradeAutoFlip, setTradeExit, setTradePanda } from "../state/trades.js";
 import { registerConfirm, registerPrompt, withGuard } from "./bot.js";
 import { esc, exitSummary, fmtAge, fmtPct, fmtSol, fmtToken, fmtUsd, fmtWib, shortAddr } from "./format.js";
 import { parseAutoFlipInput, parseExitInput } from "./parse.js";
@@ -220,6 +220,7 @@ export function buildTradeDetail(trade, live, now = Date.now()) {
     rangeBar(live?.bins),
     "",
     `Peak PnL ${fmtPct(trade.peakPnlPct)}`,
+    trade.exit?.panda?.on && trade.panda?.armed ? "🐼 Evil Panda armed — waiting for a spike" : null,
     `Pool ${shortAddr(trade.pool)} · ${legs} position(s)${deposit}`,
     `Origin ${esc(trade.origin ?? "?")} · opened ${fmtWib(trade.openedAt)}`,
   ]
@@ -234,6 +235,8 @@ export function buildTradeDetail(trade, live, now = Date.now()) {
     .text(exitLabel.tp, `pos:tp:${id}`)
     .text(exitLabel.sl, `pos:sl:${id}`)
     .text(exitLabel.trail, `pos:trail:${id}`)
+    .row()
+    .text(`🐼 Panda ${trade.exit?.panda?.on ? "on" : "off"}`, `pos:panda:${id}`)
     .row()
     .text("❌ Close", `pos:close:${id}`);
   if (canFlip(trade)) {
@@ -421,6 +424,17 @@ export function register(bot) {
       if (!openTradeOrNull(id)) return notOpen(ctx, id);
       session.put("prompt", { kind: "pos-exit", id, field });
       await ctx.reply(PROMPTS[field](id));
+    })
+  );
+
+  bot.callbackQuery(
+    /^pos:panda:(\d+)$/,
+    withGuard("Evil Panda", async (ctx) => {
+      const id = Number(ctx.match[1]);
+      const trade = openTradeOrNull(id);
+      if (!trade) return notOpen(ctx, id);
+      setTradePanda(id, trade.exit?.panda?.on !== true);
+      await showDetail(ctx, getTrade(id), true);
     })
   );
 

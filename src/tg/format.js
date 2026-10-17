@@ -53,6 +53,7 @@ export function exitSummary(exit) {
   if (exit?.tp?.on) parts.push(`TP${exit.tp.pct}`);
   if (exit?.sl?.on) parts.push(`SL-${exit.sl.pct}`);
   if (exit?.trail?.on) parts.push(`T${exit.trail.startPct}/${exit.trail.distancePct}`);
+  if (exit?.panda?.on) parts.push("Panda");
   return parts.length ? parts.join(" ") : "no exits";
 }
 

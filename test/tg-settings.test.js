@@ -11,6 +11,7 @@ process.env.SETTINGS_FILE = path.join(TMP, "settings.json");
 const { createBot } = await import("../src/tg/bot.js");
 const settingsModule = await import("../src/tg/settings.js");
 const session = await import("../src/tg/session.js");
+const { parseStratText } = await import("../src/config/strat-schema.js");
 const { getSettings, isOn, DEFAULT_SETTINGS, getRangePresets, getDepositPresets } =
   await import("../src/state/settings.js");
 
@@ -96,6 +97,7 @@ test("buildSettings callback data", () => {
     "set:rng",
     "set:dep",
     "set:autoflip",
+    "set:exit",
     "st:home",
   ]);
 });
@@ -255,4 +257,39 @@ test("auto flip default: prompt sets, shows and clears it", async () => {
   await bot.handleUpdate(cbUpdate("set:autoflip"));
   await bot.handleUpdate(textUpdate("off"));
   assert.equal(getSettings().autoFlipPct, null);
+});
+
+test("Exit strategy screen links Evil Panda to its strat.conf section", () => {
+  const schema = parseStratText(
+    [
+      "SOL_MODE=false",
+      "",
+      "# ===== Exit strategy · Evil Panda =====",
+      "# about",
+      "",
+      "EVIL_PANDA_DEFAULT_ON=false",
+    ].join("\n")
+  );
+  const { text, keyboard } = settingsModule.buildExitStrategies(schema, { pandaDefaultOn: true });
+  const kb = keyboard.inline_keyboard.flat();
+  assert.deepEqual(
+    kb.map((b) => [b.text, b.callback_data]),
+    [
+      ["🐼 Evil Panda (new trades: on)", "st:s:1:0"],
+      ["◀ Back", "set:back"],
+    ]
+  );
+  assert.match(text, /Exit strategy/);
+  const none = settingsModule.buildExitStrategies(parseStratText("SOL_MODE=false"), { pandaDefaultOn: false });
+  assert.deepEqual(
+    none.keyboard.inline_keyboard.flat().map((b) => b.callback_data),
+    ["set:back"]
+  );
+});
+
+test("set:exit opens the Exit strategy screen", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("set:exit"));
+  const edit = calls.filter((c) => c.method === "editMessageText").at(-1);
+  assert.match(edit.payload.text, /Exit strategy/);
 });

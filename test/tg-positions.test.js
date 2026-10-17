@@ -260,6 +260,7 @@ test("buildTradeDetail has the documented buttons", () => {
         ["🛑 SL -25%", "pos:sl:7"],
         ["📈 Trail 5/3", "pos:trail:7"],
       ],
+      [["🐼 Panda off", "pos:panda:7"]],
       [["❌ Close", "pos:close:7"]],
       [
         ["🔄 Refresh", "pos:open:7"],
@@ -382,6 +383,33 @@ test("buildTradeDetail exit buttons show off when disabled", () => {
   const trade = { id: 8, pool: "Pool", pair: "A-SOL", shape: "spot", origin: "manual", exit };
   const labels = buildTradeDetail(trade, null).keyboard.inline_keyboard[1].map((b) => b.text);
   assert.deepEqual(labels, ["🎯 TP off", "🛑 SL off", "📈 Trail off"]);
+});
+
+test("buildTradeDetail shows Panda on and the armed line only while armed", () => {
+  const base = { id: 9, pool: "Pool", pair: "A-SOL", shape: "spot", origin: "manual" };
+  const on = { ...base, exit: { ...EXIT(), panda: { on: true } } };
+  const pandaButton = (t) =>
+    buildTradeDetail(t, null)
+      .keyboard.inline_keyboard.flat()
+      .find((b) => b.callback_data === "pos:panda:9");
+  assert.equal(pandaButton(on).text, "🐼 Panda on");
+  assert.ok(!buildTradeDetail(on, null).text.includes("armed"));
+  const armed = { ...on, panda: { seenAbove: true, armed: true, lastBar: 900 } };
+  assert.ok(buildTradeDetail(armed, null).text.includes("🐼 Evil Panda armed — waiting for a spike"));
+  const off = { ...armed, exit: { ...EXIT(), panda: { on: false } } };
+  assert.ok(!buildTradeDetail(off, null).text.includes("armed"));
+});
+
+test("pos:panda toggles Evil Panda for the trade and re-renders the card", async () => {
+  const trade = newTrade();
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate(`pos:panda:${trade.id}`));
+  assert.deepEqual(getTrade(trade.id).exit.panda, { on: true });
+  assert.ok(edits(calls).at(-1).includes(`Trade #${trade.id}`));
+  const last = calls.filter((c) => c.method === "editMessageText").at(-1);
+  assert.ok(buttons(last.payload).some((b) => b.text === "🐼 Panda on"));
+  await bot.handleUpdate(cbUpdate(`pos:panda:${trade.id}`));
+  assert.deepEqual(getTrade(trade.id).exit.panda, { on: false });
 });
 
 test("/positions lists open trades", async () => {
@@ -611,7 +639,7 @@ test("summarizeOpenTrades sums only known trade PnL", async () => {
 test("buildTradeDetail shows Flip only for bid_ask and mixed", () => {
   const base = { id: 7, pool: "Pool", pair: "A-SOL", origin: "manual", depositSol: 1, exit: EXIT() };
   const closeRow = (shape) =>
-    buildTradeDetail({ ...base, shape }, null).keyboard.inline_keyboard[2].map((b) => [b.text, b.callback_data]);
+    buildTradeDetail({ ...base, shape }, null).keyboard.inline_keyboard[3].map((b) => [b.text, b.callback_data]);
   for (const shape of ["bid_ask", "mixed"]) {
     assert.deepEqual(closeRow(shape), [
       ["❌ Close", "pos:close:7"],
@@ -620,7 +648,7 @@ test("buildTradeDetail shows Flip only for bid_ask and mixed", () => {
     ]);
   }
   const on = buildTradeDetail({ ...base, shape: "bid_ask", autoFlip: { pct: 30 } }, null);
-  assert.ok(on.keyboard.inline_keyboard[2].some((b) => b.text === "🤖 Auto flip 30%"));
+  assert.ok(on.keyboard.inline_keyboard[3].some((b) => b.text === "🤖 Auto flip 30%"));
   for (const shape of ["spot", "curve", null]) assert.deepEqual(closeRow(shape), [["❌ Close", "pos:close:7"]]);
 });
 
