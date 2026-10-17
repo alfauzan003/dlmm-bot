@@ -77,7 +77,8 @@ test("buildSettings labels", () => {
   assert.ok(labels.includes("🛑 SL 25"));
   assert.ok(labels.includes("📈 Trail 5 / 3"));
   assert.ok(labels.includes("✅ Auto Exit"));
-  assert.ok(labels.includes("❌ Deterministic Exit"));
+  assert.ok(labels.includes("❌ Auto Entry"));
+  assert.ok(!labels.some((l) => l.includes("Deterministic")));
   assert.ok(!labels.some((l) => l.includes("DCA")));
   assert.ok(labels.includes("🤖 Auto flip off"));
   assert.ok(text.includes("DRY_RUN: on (.env)"));
@@ -89,7 +90,6 @@ test("buildSettings callback data", () => {
   assert.deepEqual(data, [
     "set:toggle:autoExit",
     "set:toggle:autoEntry",
-    "set:toggle:deterministicExit",
     "set:edit:tp",
     "set:edit:sl",
     "set:edit:trail",

@@ -1,9 +1,6 @@
 import https from "https";
 import config from "../config/index.js";
 import log from "../core/logger.js";
-import { getOORState, getTrackedPosition } from "../state/positions.js";
-import { resolveTrailingReference } from "../exit/trailing.js";
-import { trailingDropThreshold } from "../state/trailing.js";
 import { esc, fmtPct, fmtUsd } from "../tg/format.js";
 
 const TOKEN = config.telegramBotToken;
@@ -60,33 +57,6 @@ export function notifyEntry({ pair, pool, feeMode, feeSol }) {
     lines.push(`Fee: ${mode}${feeSol > 0 ? ` (~${feeSol.toFixed(6)} SOL)` : ""}`);
   }
   send(lines.join("\n"));
-}
-
-// Fallback OOR kiri spot: beri tahu hasil konversi ke posisi token-only.
-export function notifyFallback({ pair, pool, success, amount, error }) {
-  const label = pair || pool?.slice(0, 8) || "";
-  if (success) {
-    send(`↩️ FALLBACK ${label}\nOOR kiri → posisi token-only dibuka\nToken: ${amount}\nPool: ${pool || "?"}`);
-  } else {
-    send(
-      `⚠️ FALLBACK ${label} GAGAL\nPosisi token-only tidak jadi dibuka${error ? `: ${error}` : ""}\nToken dibiarkan di wallet.\nPool: ${pool || "?"}`
-    );
-  }
-}
-
-// Re-entry spot OOR kanan: beri tahu hasil membuka posisi spot baru.
-export function notifySpotReentry({ pair, pool, sizeSol, attempt, max, bins, success, error, reason }) {
-  const label = pair || pool?.slice(0, 8) || "";
-  if (success) {
-    send(
-      `🔁 RE-ENTRY ${label}\nOOR kanan → posisi spot dibuka lagi (${attempt}/${max})\nSize: ${sizeSol} SOL | Range: ${bins} bin ke bawah\nPool: ${pool || "?"}`
-    );
-  } else {
-    const detail = reason || error;
-    send(
-      `⚠️ RE-ENTRY ${label} TIDAK dibuka (${attempt}/${max})\n${detail ? `${detail}\n` : ""}Rantai re-entry dihentikan.\nPool: ${pool || "?"}`
-    );
-  }
 }
 
 function signedPct(v) {
@@ -246,24 +216,8 @@ function emoji(v) {
 // OOR hanya dikembalikan saat posisi benar-benar keluar rentang.
 function oorMarker(p) {
   if (p.activeBin == null || p.lowerBin == null || p.upperBin == null) return null;
-  const state = getOORState(p.position);
-  if (state) return state.arah === "kanan" ? "OOR 🟢" : "OOR 🔴";
   if (p.activeBin > p.upperBin) return "OOR 🟢";
   if (p.activeBin < p.lowerBin) return "OOR 🔴";
-  return null;
-}
-
-// Level PnL yang akan memicu exit saat ini (trailing aktif, atau stop loss).
-function computeExitAt(p, tracked) {
-  const rules = config.rulesFor(p.mode || "bidask:double");
-  if (tracked && p.pnlPct != null) {
-    const resolved = resolveTrailingReference(tracked, p.pnlPct, rules);
-    if (resolved) {
-      const threshold = trailingDropThreshold(resolved.reference, rules.trailingDropRatioPct, rules.trailingDropPct);
-      return resolved.reference - threshold;
-    }
-  }
-  if (rules.enableStopLoss) return rules.stopLossPct;
   return null;
 }
 
@@ -273,8 +227,6 @@ export function buildStatusMessage(positions) {
   for (const p of positions) {
     const label = p.pair || p.position?.slice(0, 8) || "?";
     const age = p.ageMinutes != null ? `${p.ageMinutes}m` : "?m";
-    const tracked = getTrackedPosition(p.position);
-
     msg += `\n${label}\n`;
     msg += `Age : ${age}\n`;
 
@@ -286,13 +238,6 @@ export function buildStatusMessage(positions) {
     const yieldPct = p.feePct24h != null && p.feePct24h > 0 ? `${p.feePct24h.toFixed(2)}%` : null;
     const yieldLine = [yieldPct, oorMarker(p)].filter(Boolean).join(" | ");
     if (yieldLine) msg += `Yield: ${yieldLine}\n`;
-
-    if (tracked?.trailingActive) {
-      msg += `Trailing: 🔁\n`;
-      if (tracked.lastPnlPeak != null) msg += `Peak: ${signedPct(tracked.lastPnlPeak)}\n`;
-    }
-    const exitAt = computeExitAt(p, tracked);
-    if (exitAt != null) msg += `Exit at : ${signedPct(exitAt)}\n`;
   }
   return msg.trim();
 }

@@ -4,8 +4,8 @@ A single-user Telegram assistant for providing liquidity on [Meteora DLMM](https
 You drive it from a chat with your own bot: open liquidity with SOL, claim fees, set take-profit / stop-loss /
 trailing, close, and track profit in USD. It runs as one Node.js process on your own server and uses one wallet.
 
-The older automation (auto-entry from a Supertrend signal, rule-based "deterministic" exit) is still in the
-code. It is off by default and can be switched on and off from Telegram.
+The older auto-entry (open on a Supertrend signal) is still in the code. It is off by default and can be switched
+on and off from Telegram. Exits are always per trade (TP / SL / Trail).
 
 **This bot sends real Solana transactions.** Always start with `DRY_RUN=true`.
 
@@ -119,8 +119,8 @@ When the range reaches above the current price, part of the deposit is swapped t
 Trade PnL % is total PnL in USD divided by total USD deposited, with unclaimed fees included. If some positions of
 a trade are already closed, TP / SL / Trail use the PnL of the positions still open.
 
-**Tokens left in the wallet.** With Auto Entry and Deterministic Exit both OFF the bot never sells tokens on its
-own. While any of them is ON, a safety sweep swaps stray tokens to SOL every cycle, except the excluded mints (USDC by
+**Tokens left in the wallet.** With Auto Entry OFF the bot never sells tokens on its own. While it is ON, a safety
+sweep swaps stray tokens to SOL every cycle, except the excluded mints (USDC by
 default), tokens being bought for an open, and tokens you kept with **Close only** or plain **Claim**. A kept token
 is swept again only after you close or claim that token with swap.
 
@@ -143,13 +143,14 @@ Before any automatic close the bot re-checks the PnL once and closes only if the
 |---|---|---|
 | Auto Exit | ON | Attach TP / SL / Trail defaults to new trades |
 | Auto Entry | OFF | Scan `pool.txt` and open positions on the Supertrend signal |
-| Deterministic Exit | OFF | Apply the older rule-based exits to all positions, manual ones included |
 
 The toggles are saved in `settings.json`. They take effect without a restart and are the only on/off switch for
 these features.
 
-**🧩 Strategy** (in `/settings`) shows every key of `strat.conf`, grouped by its `# ===== … =====` sections, with the
-comment above each key as help. Changing a value there saves it as an override in `settings.json`
+**🧩 Strategy** (in `/settings`) shows every key of `strat.conf`, grouped by its `# ===== … =====` sections (General, Auto
+Entry · Pools & sizing / Signal / Safety, Transactions, Swap & sweep, Monitoring, Market data & rate limits, Logs).
+The comment block right under a section header is shown as that section's description, and the comment above each
+key as its help. Changing a value there saves it as an override in `settings.json`
 (`stratOverrides`); `strat.conf` stays the committed default and **↩ Reset to default** / **Reset all overrides**
 go back to it. Overrides apply right away, except keys marked ⟳ (loop intervals, log level/retention, rate
 limits), which apply after a restart. Precedence: `.env` < `strat.conf` < overrides. Secrets and `DRY_RUN` live
@@ -159,7 +160,10 @@ only in `.env` and are never shown.
 
 - Positions the old bot already tracked (in `state.json`) are adopted as trades **without TP / SL / Trail**, so
   nothing is sold on the first start. The online message says how many; set exits per trade in `/positions`.
-- Deterministic Exit and Auto Entry start OFF. Turn them on in `/settings` to keep the old behavior.
+- Auto Entry starts OFF. Turn it on in `/settings` to keep the old entry behavior.
+- The old rule-based "deterministic" exit (per-mode stop loss, OOR, indicators, trailing, low yield, OOR fallback
+  and spot re-entry) has been removed, along with its `BIDASK_*` / `SPOT_*` / `TIMEFRAME` / `TRAILING_*` keys.
+  Use TP / SL / Trail per trade instead. Leftover overrides for removed keys in `settings.json` are ignored.
 
 ## PnL and Metlex
 

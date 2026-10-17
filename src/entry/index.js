@@ -352,7 +352,7 @@ export function startEntryScanner() {
   const slowSec = Math.max(5, Number(config.entry.scanIntervalSec) || 30);
 
   log.info(
-    `Entry monitor started — kandidat refresh ${slowSec}s | Jupiter poll ${fastSec}s (signal: GMGN ${config.entry.timeframe} Supertrend bullish + Jupiter price <= line)`
+    `Entry monitor started — kandidat refresh ${slowSec}s | Jupiter poll ${fastSec}s (signal: GMGN 15m Supertrend bullish + Jupiter price <= line)`
   );
 
   refreshCandidates().catch((e) => log.error(`initial candidate refresh failed: ${e.message}`));

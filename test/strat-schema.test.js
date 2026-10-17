@@ -21,6 +21,26 @@ const TEXT = [
   "POOL_LIST_FILE=pool.txt",
 ].join("\n");
 
+test("parseStratText: comment block right under a header is the section description", () => {
+  const s = parseStratText(
+    [
+      "# ===== Swap =====",
+      "# Turning tokens into SOL.",
+      "",
+      "# Swap after close.",
+      "AUTO_SWAP_AFTER_CLOSE=true",
+      "",
+      "# ===== Logs =====",
+      "# Level help",
+      "LOG_LEVEL=info",
+    ].join("\n")
+  );
+  assert.equal(s.sections[0].description, "Turning tokens into SOL.");
+  assert.equal(s.entries.AUTO_SWAP_AFTER_CLOSE.help, "Swap after close.");
+  assert.equal(s.sections[1].description, "");
+  assert.equal(s.entries.LOG_LEVEL.help, "Level help");
+});
+
 test("parseStratText: sections, help, defaults", () => {
   const s = parseStratText(TEXT);
   assert.deepEqual(
@@ -68,7 +88,15 @@ test("validateValue rejects bad input with a reason", () => {
 test("committed strat.conf: every default validates and restart keys exist", () => {
   const schema = loadStratSchema(fileURLToPath(new URL("../strat.conf", import.meta.url)));
   const keys = Object.keys(schema.entries);
-  assert.ok(keys.length >= 120, `only ${keys.length} keys`);
+  assert.ok(keys.length >= 50, `only ${keys.length} keys`);
+  for (const removed of ["TIMEFRAME", "TRAILING_CONFIRM_DELAY_SEC", "SPOT_FALLBACK_ENABLED", "SPOT_REENTRY_ENABLED"]) {
+    assert.equal(schema.entries[removed], undefined, removed);
+  }
+  assert.equal(
+    keys.some((k) => /^(BIDASK|SPOT)_/.test(k)),
+    false
+  );
+  for (const section of schema.sections) assert.ok(section.description, `${section.title} has no description`);
   for (const key of keys) {
     const res = validateValue(key, schema.entries[key].default, schema);
     assert.equal(res.ok, true, `${key}: ${res.error}`);
@@ -83,27 +111,19 @@ test("loadStratSchema on a missing file is empty", () => {
 test("safety-relevant numbers reject one-typo values from a phone", () => {
   const schema = loadStratSchema(fileURLToPath(new URL("../strat.conf", import.meta.url)));
   const bad = {
-    BIDASK_DOUBLE_STOP_LOSS_PCT: ["90", "-101"],
-    SPOT_STOP_LOSS_PCT: ["5"],
     POLL_INTERVAL_HOLD: ["0", "-1"],
     POLL_INTERVAL_IDLE: ["0"],
     TG_STATUS_INTERVAL: ["0"],
     GAS_RESERVE: ["-5"],
     ST_ATR_PERIOD: ["0", "2.5"],
-    SPOT_RSI_PERIOD: ["0", "1.5"],
-    BIDASK_SOL_BB_PERIOD: ["0"],
-    BIDASK_TOKEN_MACD_FAST: ["0"],
-    SPOT_TRAILING_DROP_PCT: ["0", "-1"],
-    SPOT_TRAILING_DROP_RATIO_PCT: ["0"],
     ENTRY_DEFAULT_SIZE_SOL: ["0"],
-    SPOT_REENTRY_SIZE_SOL: ["0"],
+    ENTRY_SIZE_SPLIT: ["1.5", "-0.1"],
     GMGN_MAX_STALE_MIN: ["0"],
     ENTRY_TX_RETRY_ATTEMPTS: ["1.5"],
   };
   for (const [key, values] of Object.entries(bad)) {
     for (const v of values) assert.equal(validateValue(key, v, schema).ok, false, `${key}=${v}`);
   }
-  assert.equal(validateValue("SPOT_STOP_LOSS_PCT", "-25", schema).ok, true);
   assert.equal(validateValue("POLL_INTERVAL_HOLD", "0.1", schema).ok, true);
   assert.equal(validateValue("ST_ATR_PERIOD", "14", schema).ok, true);
 });

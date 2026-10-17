@@ -13,12 +13,8 @@ const OVERRIDES = {
   ENTRY_FEE_MODE: { type: "enum", options: ["none", "priority", "jito", "both"] },
   LOG_LEVEL: { type: "enum", options: ["info", "debug"] },
   CANDLE_15M_SOURCE: { type: "enum", options: ["gmgn", "meteora"] },
-  TIMEFRAME: { type: "enum", options: TIMEFRAMES },
   VOLUME_TIMEFRAME: { type: "enum", options: TIMEFRAMES },
-  ENTRY_TIMEFRAME: { type: "enum", options: TIMEFRAMES },
-  ENTRY_TOUCH_MODE: { type: "enum", options: ["held_pullback", "first_touch"] },
   SWEEP_EXCLUDE_MINTS: { type: "list" },
-  SPOT_FALLBACK_MODES: { type: "list" },
   JITO_TIP_ACCOUNTS: { type: "list" },
   ENTRY_SIZE_SPLIT: { min: 0, max: 1 },
   TRADE_EXIT_INTERVAL_SEC: { min: 1 },
@@ -34,20 +30,12 @@ const OVERRIDES = {
   ST_ATR_PERIOD: { min: 1, int: true },
   ST_MULTIPLIER: { gt: 0 },
   ENTRY_DEFAULT_SIZE_SOL: { gt: 0 },
-  SPOT_REENTRY_SIZE_SOL: { gt: 0 },
   POOL_LIST_FILE: { type: "file" },
   SUPERTREND_CACHE_FILE: { type: "file" },
 };
 
-// Aturan per pola nama (key mode exit: BIDASK_DOUBLE_*, SPOT_*, ...). OVERRIDES menang.
-const PATTERNS = [
-  [/_STOP_LOSS_PCT$/, { min: -100, max: 0 }],
-  [/_(RSI|BB)_PERIOD$/, { min: 1, int: true }],
-  [/_MACD_(FAST|SLOW|SIGNAL)$/, { min: 1, int: true }],
-  [/_BB_STDDEV$/, { gt: 0 }],
-  [/_TRAILING_DROP(_RATIO)?_PCT$/, { gt: 0 }],
-  [/_(ATTEMPTS|RETRY)$/, { int: true }],
-];
+// Aturan per pola nama. OVERRIDES menang.
+const PATTERNS = [[/_(ATTEMPTS|RETRY)$/, { int: true }]];
 
 // File yang ditulis/dibaca bot: tidak boleh diarahkan ke rahasia atau state lain.
 const PROTECTED_FILES = new Set([
@@ -89,19 +77,24 @@ export const RESTART_KEYS = new Set([
   "GMGN_MIN_GAP_SEC",
 ]);
 
+// Komentar tepat di bawah header bagian (diakhiri baris kosong, sebelum key pertama) = deskripsi bagian.
 export function parseStratText(text) {
-  const sections = [{ title: "General", keys: [] }];
+  const sections = [{ title: "General", keys: [], description: "" }];
   const entries = {};
   let help = [];
+  let afterHeader = false;
   for (const rawLine of String(text ?? "").split(/\r?\n/)) {
     const line = rawLine.trim();
     const header = line.match(HEADER_RE);
     if (header) {
-      sections.push({ title: header[1], keys: [] });
+      sections.push({ title: header[1], keys: [], description: "" });
       help = [];
+      afterHeader = true;
       continue;
     }
     if (!line) {
+      if (afterHeader && help.length > 0) sections[sections.length - 1].description = help.join("\n");
+      afterHeader = false;
       help = [];
       continue;
     }
@@ -116,6 +109,7 @@ export function parseStratText(text) {
       sections[section].keys.push(key);
       entries[key] = { key, default: value.trim(), help: help.join("\n"), section };
     }
+    afterHeader = false;
     help = [];
   }
   if (sections[0].keys.length === 0) sections.shift();

@@ -23,7 +23,6 @@ import {
 const TOGGLE_LABELS = {
   autoExit: "Auto Exit",
   autoEntry: "Auto Entry",
-  deterministicExit: "Deterministic Exit",
 };
 
 const PROMPTS = {

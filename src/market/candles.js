@@ -124,7 +124,7 @@ export async function fetchVolume(mint, pool, { resolution, limit = 5 } = {}) {
 // - 15m (tidak native di Meteora) -> GMGN native, cache bar-aligned per mint.
 // - TF native (5m/1h/4h/24h)      -> Meteora (fallback GMGN bila kurang).
 export async function fetchCandles(mint, pool, { resolution, limit = 100, allowStale = true } = {}) {
-  const res = resolution || config.timeframe || "15m";
+  const res = resolution || "15m";
   if (!mint && !pool) {
     log.warn("fetchCandles: no mint/pool");
     return null;
@@ -195,7 +195,7 @@ async function fetchCandlesGmgn15m(mint, pool, { limit = 100, allowStale = true 
 }
 
 async function fetchCandlesMeteora(pool, { resolution, limit = 100 } = {}) {
-  const res = resolution || config.timeframe || "15m";
+  const res = resolution || "15m";
   const meta = METEORA_MAP[res];
 
   if (!meta || !meta.mul) {
@@ -264,7 +264,7 @@ async function fetchCandlesMeteora(pool, { resolution, limit = 100 } = {}) {
 }
 
 async function fetchCandlesGMGN(mint, { resolution, limit = 100 } = {}) {
-  const res = resolution || config.timeframe || "15m";
+  const res = resolution || "15m";
   const minNeeded = Math.min(30, Math.max(2, limit));
 
   try {

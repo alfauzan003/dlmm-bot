@@ -17,7 +17,6 @@ const GATHER_TIMEOUT_MS = 8000;
 const TOGGLE_LABELS = [
   ["autoExit", "Auto Exit"],
   ["autoEntry", "Auto Entry"],
-  ["deterministicExit", "Deterministic Exit"],
 ];
 
 export function buildHome({ address, balanceSol, solUsd, openTrades, openPnlUsd, settings, dryRun }) {

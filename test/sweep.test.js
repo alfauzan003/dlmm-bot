@@ -33,23 +33,29 @@ test.after(() => {
   fs.rmSync(TMP, { recursive: true, force: true });
 });
 
-test("sweep is a no-op while autoEntry and deterministicExit are both off", async () => {
+test("sweep is a no-op while autoEntry is off", async () => {
   reset();
   const { calls, sweepToSol } = fakeSweep();
   await runSafetySweep({ deps: { sweepToSol } });
   assert.equal(calls.length, 0);
 });
 
-test("sweep runs when a legacy toggle is on and skips mints the user kept", async () => {
-  for (const name of ["autoEntry", "deterministicExit"]) {
-    reset();
-    setToggle(name, true);
-    addKeepMint("KeptMint");
-    const { calls, sweepToSol } = fakeSweep();
-    await runSafetySweep({ deps: { sweepToSol } });
-    assert.equal(calls.length, 1, name);
-    assert.ok(calls[0].excludeMints.includes("KeptMint"), name);
-  }
+test("sweep runs when autoEntry is on and skips mints the user kept", async () => {
+  reset();
+  setToggle("autoEntry", true);
+  addKeepMint("KeptMint");
+  const { calls, sweepToSol } = fakeSweep();
+  await runSafetySweep({ deps: { sweepToSol } });
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].excludeMints.includes("KeptMint"));
+});
+
+test("autoExit alone does not turn the sweep on", async () => {
+  reset();
+  setToggle("autoExit", true);
+  const { calls, sweepToSol } = fakeSweep();
+  await runSafetySweep({ deps: { sweepToSol } });
+  assert.equal(calls.length, 0);
 });
 
 function fakeSwap() {
@@ -64,22 +70,20 @@ function fakeSwap() {
   return { calls, deps };
 }
 
-test("closed-position swap is a no-op while autoEntry and deterministicExit are both off", async () => {
+test("closed-position swap is a no-op while autoEntry is off", async () => {
   reset();
   const { calls, deps } = fakeSwap();
   await sweepClosedPosition("GoneMint", "GONE-SOL", { deps });
   assert.equal(calls.length, 0);
 });
 
-test("closed-position swap runs when a legacy toggle is on, but never for kept mints", async () => {
-  for (const name of ["autoEntry", "deterministicExit"]) {
-    reset();
-    setToggle(name, true);
-    addKeepMint("KeptMint");
-    const { calls, deps } = fakeSwap();
-    await sweepClosedPosition("KeptMint", "KEPT-SOL", { deps });
-    assert.equal(calls.length, 0, name);
-    await sweepClosedPosition("GoneMint", "GONE-SOL", { deps });
-    assert.deepEqual(calls, [{ mint: "GoneMint", amount: 42 }], name);
-  }
+test("closed-position swap runs when autoEntry is on, but never for kept mints", async () => {
+  reset();
+  setToggle("autoEntry", true);
+  addKeepMint("KeptMint");
+  const { calls, deps } = fakeSwap();
+  await sweepClosedPosition("KeptMint", "KEPT-SOL", { deps });
+  assert.equal(calls.length, 0);
+  await sweepClosedPosition("GoneMint", "GONE-SOL", { deps });
+  assert.deepEqual(calls, [{ mint: "GoneMint", amount: 42 }]);
 });

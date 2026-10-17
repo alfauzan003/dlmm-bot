@@ -22,18 +22,18 @@ test.after(() => {
 test("reloadConfig applies overrides in place and keeps nested identity", () => {
   const baselineMode = buildConfig(loadEnv()).entry.fees.mode;
   const fees = config.entry.fees;
-  const spot = config.spot;
+  const swap = config.swap;
   fs.writeFileSync(
     SETTINGS,
     JSON.stringify({
-      stratOverrides: { ENTRY_FEE_MODE: "both", SPOT_TRAILING_TRIGGER_PCT: "33", ENTRY_SIZE_SPLIT: "0.3" },
+      stratOverrides: { ENTRY_FEE_MODE: "both", SWAP_SLIPPAGE_BPS: "250", ENTRY_SIZE_SPLIT: "0.3" },
     })
   );
   reloadConfig();
   assert.equal(config.entry.fees, fees);
-  assert.equal(config.spot, spot);
+  assert.equal(config.swap, swap);
   assert.equal(config.entry.fees.mode, "both");
-  assert.equal(config.rulesFor("spot").trailingTriggerPct, 33);
+  assert.equal(config.swap.slippageBps, 250);
   assert.equal(config.entry.sizeSplit, 0.3);
   fs.writeFileSync(SETTINGS, "{}");
   reloadConfig();

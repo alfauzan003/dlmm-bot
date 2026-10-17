@@ -9,7 +9,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "meteorabot-mode-"));
 process.env.STATE_FILE = path.join(TMP, "state.json");
 
 const { trackPosition, getTrackedPosition, updateTrackedMode } = await import("../src/state/positions.js");
-const { classifyMode, isCompositeMode, isSpotDistribution } = await import("../src/exit/classify.js");
+const { classifyMode, isCompositeMode, isSpotDistribution, LEGACY_MODE } = await import("../src/exit/classify.js");
 
 const POOL = "PoolPaid111111111111111111111111111111111";
 const POS = "PosPaid1111111111111111111111111111111111";
@@ -74,4 +74,10 @@ test("entry/execute.js memanggil trackPosition dengan urutan argumen yang benar"
   assert.equal(args.length, 6, `trackPosition harus 6 argumen, dapat ${args.length}: ${match[1]}`);
   assert.equal(args[4], "collectFeeMode", "argumen ke-5 harus collectFeeMode");
   assert.equal(args[5], '"bidask:double"', 'argumen ke-6 (mode) harus "bidask:double"');
+});
+
+test("LEGACY_MODE maps legacy mode names", () => {
+  assert.equal(LEGACY_MODE.bidask, "bidask:double");
+  assert.equal(LEGACY_MODE["token-only"], "bidask:token");
+  assert.equal(LEGACY_MODE["sol-only"], "bidask:sol");
 });

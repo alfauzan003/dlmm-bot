@@ -13,7 +13,6 @@ process.env.PNL_HISTORY_FILE = path.join(TMP, "pnl-history.json");
 
 const { buildCloseMessage, buildStatusMessage, exitLabel } = await import("../src/notify/telegram.js");
 const { trackPosition, updatePnlPeaks } = await import("../src/state/positions.js");
-const { armIndicatorTrailing } = await import("../src/state/trailing.js");
 
 const POOL = "PoolFries111111111111111111111111111111111";
 const POS = "PosFries1111111111111111111111111111111111";
@@ -130,11 +129,10 @@ test("status out-of-range: menampilkan tanda OOR", () => {
   assert.match(msg, /OOR 🟢/);
 });
 
-test("status trailing aktif: menampilkan Trailing, Peak, dan Exit at", () => {
+test("status tidak lagi menampilkan Trailing / Peak / Exit at (exit per trade)", () => {
   resetState();
   trackPosition(POS, POOL, "familiars-SOL", "mint", 1, "bidask:double");
   updatePnlPeaks(POS, 11.4);
-  armIndicatorTrailing(POS, "rsi_bb", 7);
 
   const msg = buildStatusMessage([
     {
@@ -149,9 +147,10 @@ test("status trailing aktif: menampilkan Trailing, Peak, dan Exit at", () => {
       mode: "bidask:double",
     },
   ]);
-  assert.match(msg, /Trailing: 🔁/);
-  assert.match(msg, /Peak: \+11\.40%/);
-  assert.match(msg, /Exit at : [+-]?\d+\.\d{2}%/);
+  assert.match(msg, /PnL: \+9\.00%/);
+  assert.doesNotMatch(msg, /Trailing/);
+  assert.doesNotMatch(msg, /Peak:/);
+  assert.doesNotMatch(msg, /Exit at/);
 });
 
 // --- Close alert: tx + Metlex hand-off ---

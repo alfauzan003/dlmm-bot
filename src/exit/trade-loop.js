@@ -3,7 +3,7 @@ import { sleep } from "../core/utils.js";
 import { readState } from "../state/store.js";
 import { fetchPoolPnl, usdPnlFromEntry } from "../meteora/positions.js";
 import { getOpenTrackedPositions, getTrackedPosition } from "../state/positions.js";
-import { exitPresetForNewTrade, isOn } from "../state/settings.js";
+import { exitPresetForNewTrade } from "../state/settings.js";
 import {
   createTrade,
   findTradeByPosition,
@@ -16,7 +16,6 @@ import {
 import { closeTrade } from "../lp/close-trade.js";
 import { notifyClosedButLive } from "../notify/telegram.js";
 import { isEntryInProgressPool } from "../entry/runtime.js";
-import { handleClose } from "./close.js";
 import { aggregateTradePnl, evaluateTradeExit } from "./trade-exit.js";
 
 // Logika per-tick berbasis trade untuk loop exit (dipanggil dari exit/index.js).
@@ -55,7 +54,7 @@ export function legacyAdoptionCount({ bootedAt = PROCESS_BOOT_AT } = {}) {
 const warnedClosedLive = new Set();
 
 // Bungkus posisi live yang belum punya trade, isi depositUsd bila sudah diketahui,
-// lalu selesaikan trade yang semua leg-nya sudah tertutup (oleh engine lama / di luar bot).
+// lalu selesaikan trade yang semua leg-nya sudah tertutup (di luar bot).
 export function syncTrades(positions, { wasTracked = new Set(), bootedAt = PROCESS_BOOT_AT } = {}) {
   for (const pos of positions || []) {
     if (!pos?.position || findTradeByPosition(pos.position)) continue;
@@ -108,7 +107,7 @@ export function syncTrades(positions, { wasTracked = new Set(), bootedAt = PROCE
 }
 
 // Selesaikan setiap trade terbuka yang semua leg-nya sudah closed di state (mis. leg terakhir
-// ditutup engine lama). Dipanggil juga saat tidak ada posisi live (loop exit berhenti lebih awal).
+// ditutup di luar bot). Dipanggil juga saat tidak ada posisi live (loop exit berhenti lebih awal).
 // Trade terkunci dilewati: penutupnya (closeTrade) menyelesaikan trade dan mengirim alert sendiri.
 export function settleOpenTrades() {
   for (const trade of listOpenTrades()) if (!tradeLock(trade.id)) settleTradeIfDone(trade.id);
@@ -243,24 +242,4 @@ export async function tradeExitLoop(intervalSec) {
     }
     await sleep(Math.max(0, intervalMs - (Date.now() - started)));
   }
-}
-
-// Penutup sadar-trade untuk engine deterministik (termasuk timer trailing):
-// trade multi-leg → closeTrade (semua leg), satu leg → handleClose lama.
-// Trade terkunci atau posisi yang sudah tertutup dilewati.
-export async function tradeAwareClose(pos, reason, opts, { positionsByAddr, deps = {} } = {}) {
-  const closeWhole = deps.closeTrade ?? closeTrade;
-  const closeOne = deps.handleClose ?? handleClose;
-  // Timer trailing bisa menyala setelah toggle deterministik dimatikan.
-  if (!isOn("deterministicExit")) return { success: false, skipped: true };
-  const trade = findTradeByPosition(pos?.position);
-  if (trade && tradeLock(trade.id)) {
-    log.info(`${pos.pair || pos.position.slice(0, 8)}: trade #${trade.id} sedang diproses — skip close (${reason})`);
-    return { success: false, busy: true };
-  }
-  if (getTrackedPosition(pos?.position)?.closed === true) return { success: false, skipped: true };
-  if (trade && trade.positions.length > 1) {
-    return closeWhole(trade, { reason, swap: true, positionsByAddr: positionsByAddr ?? byAddress([pos]) });
-  }
-  return closeOne(pos, reason, opts);
 }

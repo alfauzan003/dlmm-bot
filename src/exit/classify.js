@@ -6,6 +6,17 @@ const ENTRY_DUST_BASE = 1e-6;
 // dan harus direklasifikasi ulang dari data posisi.
 export const COMPOSITE_MODES = new Set(["bidask:double", "bidask:token", "bidask:sol", "spot"]);
 
+// Pemetaan mode lama (state.json sebelumnya) -> mode composite baru.
+export const LEGACY_MODE = {
+  bidask: "bidask:double",
+  "token-only": "bidask:token",
+  "sol-only": "bidask:sol",
+  spot: "spot",
+  "spot:double": "spot",
+  "spot:token": "spot",
+  "spot:sol": "spot",
+};
+
 export function isCompositeMode(mode) {
   return typeof mode === "string" && COMPOSITE_MODES.has(mode);
 }

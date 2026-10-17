@@ -19,9 +19,14 @@ import {
 import { trackPosition } from "../state/positions.js";
 import { createTrade, updateTradeMeta } from "../state/trades.js";
 import { exitPresetForNewTrade, getSettings } from "../state/settings.js";
-import { nonRefundableCost } from "../exit/spot-reentry.js";
 import { pctToBinRange, binPriceBounds } from "./range.js";
 import { splitParts, parallelWidth, chunkRange, spotPieces, legMode } from "./open-split.js";
+
+// Total biaya NON-REFUNDABLE dari quoteCreatePosition (SOL). Sewa bin array / bitmap extension
+// hangus; sewa akun posisi (refundable) tidak dihitung.
+function nonRefundableCost(quote) {
+  return (Number(quote?.binArrayCost) || 0) + (Number(quote?.bitmapExtensionCost) || 0);
+}
 
 export const SHAPES = ["spot", "curve", "bid_ask", "mixed"];
 export const SOL_BUFFER = 0.08;

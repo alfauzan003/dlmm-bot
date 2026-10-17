@@ -22,14 +22,12 @@ const {
   tryLockTrade,
   unlockTrade,
 } = await import("../src/state/trades.js");
-const { setToggle } = await import("../src/state/settings.js");
 const { __setSender } = await import("../src/notify/telegram.js");
 const { addEntryInProgressPool, removeEntryInProgressPool } = await import("../src/entry/runtime.js");
 const {
   syncTrades,
   runTradeExits,
   runFastTradeExitTick,
-  tradeAwareClose,
   settleTradesForPositions,
   legacyAdoptionCount,
   settleOpenTrades,
@@ -396,10 +394,10 @@ test("one leg closed outside", () => {
   assert.equal(after.closeReason, "closed_outside");
 });
 
-test("settleOpenTrades settles a trade whose last leg the legacy engine closed (no live positions left)", () => {
+test("settleOpenTrades settles a trade whose last leg was closed per position (no live positions left)", () => {
   reset();
   const t = newTrade(["PosA"]);
-  // handleClose (engine deterministik) mencatat close per posisi; tidak ada posisi live tersisa.
+  // handleClose mencatat close per posisi; tidak ada posisi live tersisa.
   recordClose("PosA", "stop_loss", -30, { pnlUsd: -30, closeTx: "TxSL" });
   settleOpenTrades();
   const after = getTrade(t.id);
@@ -450,58 +448,4 @@ test("locked trade skipped", async () => {
   } finally {
     unlockTrade(t.id);
   }
-});
-
-test("tradeAwareClose routes multi-leg to closeTrade and one-leg to handleClose", async () => {
-  reset();
-  setToggle("deterministicExit", true);
-  const multi = newTrade(["PosA", "PosB"]);
-  const single = newTrade(["PosC"]);
-  const calls = { closeTrade: [], handleClose: [] };
-  const deps = {
-    closeTrade: async (trade, opts) => {
-      calls.closeTrade.push({ trade, opts });
-      return { success: true };
-    },
-    handleClose: async (pos, reason, opts) => {
-      calls.handleClose.push({ pos, reason, opts });
-      return { success: true };
-    },
-  };
-  const positionsByAddr = new Map([["PosA", live("PosA", 9)]]);
-  await tradeAwareClose(live("PosA", 9), "trailing_tp", undefined, { positionsByAddr, deps });
-  assert.equal(calls.closeTrade.length, 1);
-  assert.equal(calls.closeTrade[0].trade.id, multi.id);
-  assert.equal(calls.closeTrade[0].opts.reason, "trailing_tp");
-  assert.equal(calls.closeTrade[0].opts.swap, true);
-  assert.equal(calls.closeTrade[0].opts.positionsByAddr, positionsByAddr);
-
-  await tradeAwareClose(live("PosC", 9), "trailing_tp", { skipDeactivate: true }, { deps });
-  assert.equal(calls.handleClose.length, 1);
-  assert.equal(calls.handleClose[0].reason, "trailing_tp");
-  assert.deepEqual(calls.handleClose[0].opts, { skipDeactivate: true });
-
-  // Trade terkunci (mis. close dari Telegram) -> tidak ada close kedua.
-  tryLockTrade(single.id, "close");
-  try {
-    const res = await tradeAwareClose(live("PosC", 9), "trailing_tp", undefined, { deps });
-    assert.equal(res.success, false);
-    assert.equal(calls.handleClose.length, 1);
-  } finally {
-    unlockTrade(single.id);
-  }
-});
-
-test("tradeAwareClose does nothing once deterministic exit is off", async () => {
-  reset();
-  newTrade(["PosC"]);
-  setToggle("deterministicExit", false);
-  let closes = 0;
-  const deps = {
-    closeTrade: async () => closes++,
-    handleClose: async () => closes++,
-  };
-  const res = await tradeAwareClose(live("PosC", 9), "trailing_tp", undefined, { deps });
-  assert.equal(res.success, false);
-  assert.equal(closes, 0);
 });

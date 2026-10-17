@@ -45,7 +45,7 @@ tradeExitLoop(config.tradeExitIntervalSec).catch((err) => {
   process.exit(1);
 });
 
-// Exit monitor (deterministic rules from exitbot) — runs forever
+// Position monitor (tracking, trade adoption, auto flip, status) — runs forever
 mainLoop().catch((err) => {
   log.error(`Fatal error: ${err.message}`);
   console.error(err);

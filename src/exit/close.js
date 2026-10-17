@@ -6,16 +6,12 @@ import { waitClosedPositionEntry, pnlFromEntry, usdPnlFromEntry } from "../meteo
 import { getTokenBalance } from "../solana/balances.js";
 import { swapToSol } from "../solana/swap.js";
 import { recordClose, getTrackedPosition, getOpenTrackedPositions } from "../state/positions.js";
-import { clearTrailingState } from "../state/trailing.js";
-import { clearBounceRecovery } from "../state/bounce.js";
-import { clearTrailingTimer } from "./trailing.js";
 import { addClosingPool, removeClosingPool, recordAction } from "../entry/runtime.js";
 import { removeKeepMint } from "../state/keep-mints.js";
 import { deactivatePool } from "../entry/index.js";
 import { humanReason, fmtPct } from "../core/report.js";
 
-// Guard per-posisi: cegah beberapa close paralel untuk posisi yang sama
-// (timer konfirmasi trailing + safety-net siklus bisa memicu bersamaan).
+// Guard per-posisi: cegah beberapa close paralel untuk posisi yang sama.
 const closingPositions = new Set();
 
 export async function handleClose(pos, reason, opts = {}) {
@@ -41,13 +37,9 @@ export async function handleClose(pos, reason, opts = {}) {
       const closedEntryPromise = result.dryRun
         ? Promise.resolve(null)
         : waitClosedPositionEntry(pos.pool, pos.position);
-      // Ambil tracked sebelum clearTrailingState agar referensi trailing masih tersedia.
       const trackedClose = getTrackedPosition(pos.position);
       const peakPnl = trackedClose?.lastPnlPeak ?? null;
       const lowestPnl = trackedClose?.lastPnlLowest ?? null;
-      clearTrailingTimer(pos.position);
-      clearTrailingState(pos.position);
-      clearBounceRecovery(pos.position);
 
       // Auto-swap base token to SOL (Jupiter V2, with retries)
       let swapInfo = null;
