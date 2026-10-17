@@ -1,9 +1,11 @@
-// Exit Evil Panda per trade (murni): tahan selama harga di atas Supertrend 15m; setelah bar tutup
-// menembus ke bawah (armed), close pada spike berikutnya (RSI / MACD / BB yang aktif). Bar yang tutup
-// kembali di atas Supertrend membatalkan arming. Hanya bar 15m yang sudah tutup yang dipakai.
+// Exit Evil Panda per trade: tahan selama harga di atas Supertrend 15m; setelah bar tutup menembus ke
+// bawah (armed), close pada spike berikutnya (RSI / MACD / BB yang aktif). Bar yang tutup kembali di atas
+// Supertrend membatalkan arming. Arming selalu dari bar 15m tutup; spike dicek pada bar tutup dan, bila
+// EVIL_PANDA_SIGNAL_MODE=live, juga pada harga live (bar yang sedang terbentuk).
 import config from "../config/index.js";
 import log from "../core/logger.js";
 import { fetchCandles } from "../market/candles.js";
+import { getPrices } from "../market/jupiter-price.js";
 import { bollinger, macd, rsi } from "../market/indicators.js";
 import { supertrendSeries } from "../market/supertrend.js";
 import { fetchPoolPnl } from "../meteora/positions.js";
@@ -49,6 +51,20 @@ function signalOf(row, params) {
   return null;
 }
 
+// Baris untuk bar yang sedang terbentuk: harga live dianggap close-nya (indikator dihitung ulang dengan
+// harga itu). Arah = apakah harga live masih di bawah garis Supertrend bar tutup terakhir.
+export function liveRow(closedCandles, price, params) {
+  const last = closedCandles[closedCandles.length - 1];
+  const forming = { time: last.time + BAR_SEC, open: last.close, high: price, low: price, close: price, volume: 0 };
+  return pandaRows([...closedCandles, forming], params).at(-1);
+}
+
+// Sinyal live: hanya saat armed dan harga live masih di bawah Supertrend (di atasnya = tahan, seperti bar tutup).
+export function livePandaSignal(progress, row, params) {
+  if (progress?.armed !== true || row?.direction !== "bearish") return null;
+  return signalOf(row, params);
+}
+
 // Proses bar setelah progress.lastBar (pertama kali: mulai bar saat trade dibuka). Hanya bar terakhir
 // (bar tutup terbaru) yang boleh memicu close; spike di bar lama (replay setelah restart / Panda baru
 // dinyalakan) hanya memperbarui arming. Saat terpicu, lastBar tetap di bar sebelumnya supaya close yang
@@ -86,7 +102,12 @@ const pandaStillOn = (id) => {
 const RETRY_GAP_MS = 60_000;
 const MAX_TRIES_PER_BAR = 3;
 const retries = new Map(); // mint -> { bar, tries, lastAt }
-export const __resetPandaThrottle = () => retries.clear();
+// Candle tutup per mint untuk bar berjalan: trade yang armed (mode live) tidak fetch ulang tiap tick.
+const barCandles = new Map(); // mint -> { bar, closed }
+export const __resetPandaThrottle = () => {
+  retries.clear();
+  barCandles.clear();
+};
 
 function throttled(mint, bar, now) {
   const r = retries.get(mint);
@@ -103,6 +124,7 @@ function noteIncomplete(mint, bar, now) {
 // lalu close trade yang terpicu. Mengembalikan id trade yang dicoba ditutup.
 export async function runEvilPanda(positions, { deps = {}, now = Date.now() } = {}) {
   const fetchCandlesFn = deps.fetchCandles ?? fetchCandles;
+  const getPricesFn = deps.getPrices ?? getPrices;
   const fetchPnl = deps.fetchPoolPnl ?? fetchPoolPnl;
   const close = deps.closeTrade ?? closeTrade;
   const params = config.evilPanda;
@@ -114,49 +136,72 @@ export async function runEvilPanda(positions, { deps = {}, now = Date.now() } = 
   const live = new Map();
   for (const p of positions || []) if (p?.position) live.set(p.position, p);
   const latestClosed = barStart(now / 1000) - BAR_SEC;
-  const rowsByMint = new Map(); // mint -> Promise<rows | null>
+  const liveMode = params.signalMode === "live";
+  const closedByMint = new Map(); // mint -> Promise<closed candles | null> (sekali per run)
   const handled = new Set();
 
-  for (const trade of listOpenTrades()) {
-    if (trade.exit?.panda?.on !== true || tradeLock(trade.id)) continue;
-    if (!trade.positions.some((addr) => live.has(addr))) continue;
-    if (trade.panda?.lastBar != null && trade.panda.lastBar >= latestClosed) continue;
+  function loadClosed(mint, pool, label) {
+    const cached = barCandles.get(mint);
+    if (cached?.bar === latestClosed) return Promise.resolve(cached.closed);
+    if (throttled(mint, latestClosed, now)) return Promise.resolve(null);
+    return fetchCandlesFn(mint, pool, { resolution: "15m", limit: 90, allowStale: false })
+      .then((candles) => closedBars(candles, now))
+      .catch((err) => {
+        log.warn(`${label}: Evil Panda candle 15m gagal: ${err.message}`);
+        return null;
+      })
+      .then((closed) => {
+        if (closed) {
+          retries.delete(mint);
+          barCandles.set(mint, { bar: latestClosed, closed });
+        } else noteIncomplete(mint, latestClosed, now);
+        return closed;
+      });
+  }
+
+  const trades = listOpenTrades().filter(
+    (t) => t.exit?.panda?.on === true && !tradeLock(t.id) && t.positions.some((addr) => live.has(addr))
+  );
+  // Harga live: satu request batch per run, hanya bila ada trade armed yang membutuhkannya.
+  let prices = null;
+  const livePrices = () =>
+    (prices ??= getPricesFn([...new Set(trades.map((t) => t.baseMint).filter(Boolean))], { force: true }).catch(
+      () => new Map()
+    ));
+
+  for (const trade of trades) {
+    const needClosed = trade.panda?.lastBar == null || trade.panda.lastBar < latestClosed;
+    if (!needClosed && !(liveMode && trade.panda?.armed === true)) continue;
 
     const label = `${trade.pair || trade.pool?.slice(0, 8)} #${trade.id}`;
     const mint = trade.baseMint;
-    if (!rowsByMint.has(mint)) {
-      if (throttled(mint, latestClosed, now)) continue;
-      rowsByMint.set(
-        mint,
-        fetchCandlesFn(mint, trade.pool, { resolution: "15m", limit: 90, allowStale: false })
-          .then((candles) => {
-            const closed = closedBars(candles, now);
-            return closed ? pandaRows(closed, params) : null;
-          })
-          .catch((err) => {
-            log.warn(`${label}: Evil Panda candle 15m gagal: ${err.message}`);
-            return null;
-          })
-          .then((rows) => {
-            if (rows) retries.delete(mint);
-            else noteIncomplete(mint, latestClosed, now);
-            return rows;
-          })
-      );
-    }
-    const rows = await rowsByMint.get(mint);
-    if (!rows) continue;
+    if (!closedByMint.has(mint)) closedByMint.set(mint, loadClosed(mint, trade.pool, label));
+    const closed = await closedByMint.get(mint);
+    if (!closed) continue;
 
     // Trade dibaca ulang setelah await: Panda bisa dimatikan / di-reset selama candle dimuat.
     const fresh = pandaStillOn(trade.id);
     if (!fresh || !sameProgress(trade.panda, fresh.panda)) continue;
 
-    const { progress, fire } = stepPanda(trade.panda, rows, params, { openedAtSec: (trade.openedAt || 0) / 1000 });
-    if (!sameProgress(trade.panda, progress)) {
-      updateTradePanda(trade.id, progress);
-      const wasArmed = trade.panda?.armed === true;
-      if (progress.armed && !wasArmed) log.info(`${label}: Evil Panda armed (Supertrend broke)`);
-      if (!progress.armed && wasArmed) log.info(`${label}: Evil Panda disarmed (back above Supertrend)`);
+    let progress = trade.panda;
+    let fire = null;
+    if (needClosed) {
+      const openedAtSec = (trade.openedAt || 0) / 1000;
+      ({ progress, fire } = stepPanda(trade.panda, pandaRows(closed, params), params, { openedAtSec }));
+      if (!sameProgress(trade.panda, progress)) {
+        updateTradePanda(trade.id, progress);
+        const wasArmed = trade.panda?.armed === true;
+        if (progress.armed && !wasArmed) log.info(`${label}: Evil Panda armed (Supertrend broke)`);
+        if (!progress.armed && wasArmed) log.info(`${label}: Evil Panda disarmed (back above Supertrend)`);
+      }
+    }
+    if (!fire && liveMode && progress?.armed === true) {
+      const price = (await livePrices()).get(mint);
+      if (Number.isFinite(price)) {
+        const row = liveRow(closed, price, params);
+        const signal = livePandaSignal(progress, row, params);
+        if (signal) fire = { signal, time: row.time, price };
+      }
     }
     if (!fire) continue;
 
@@ -167,7 +212,9 @@ export async function runEvilPanda(positions, { deps = {}, now = Date.now() } = 
       continue;
     }
     if (!pandaStillOn(trade.id)) continue;
-    log.info(`${label}: Evil Panda ${fire.signal} spike → close trade`);
+    log.info(
+      `${label}: Evil Panda ${fire.signal} spike${fire.price != null ? ` (live ${fire.price})` : ""} → close trade`
+    );
     try {
       await close(trade, { reason: `evil_panda_${fire.signal}`, swap: true, positionsByAddr });
     } catch (err) {

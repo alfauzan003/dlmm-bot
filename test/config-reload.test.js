@@ -51,6 +51,7 @@ test("reloadConfig updates config.evilPanda in place", () => {
   reloadConfig();
   assert.deepEqual(config.evilPanda, {
     defaultOn: false,
+    signalMode: "live",
     stAtrPeriod: 10,
     stMultiplier: 3,
     rsi: { on: true, length: 2, level: 90 },

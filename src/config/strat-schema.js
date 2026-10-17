@@ -32,6 +32,7 @@ const OVERRIDES = {
   ENTRY_DEFAULT_SIZE_SOL: { gt: 0 },
   POOL_LIST_FILE: { type: "file" },
   SUPERTREND_CACHE_FILE: { type: "file" },
+  EVIL_PANDA_SIGNAL_MODE: { type: "enum", options: ["live", "close"] },
   EVIL_PANDA_ST_ATR_PERIOD: { min: 1, int: true },
   EVIL_PANDA_ST_MULTIPLIER: { gt: 0 },
   EVIL_PANDA_RSI_LENGTH: { min: 1, int: true },

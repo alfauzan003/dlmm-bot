@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { closedBars, pandaRows, stepPanda } from "../src/exit/evil-panda.js";
+import { closedBars, livePandaSignal, liveRow, pandaRows, stepPanda } from "../src/exit/evil-panda.js";
 
 const BAR = 900;
 const PARAMS = {
@@ -152,4 +152,23 @@ test("a spike on an older bar does not fire (only the latest closed bar can)", (
   ]);
   assert.equal(r.fire, null);
   assert.deepEqual(r.progress, { seenAbove: true, armed: true, lastBar: 4 * BAR });
+});
+
+test("liveRow appends the live price as the forming bar", () => {
+  const closed = candles(60);
+  const live = liveRow(closed, 123, PARAMS);
+  assert.equal(live.time, 60 * BAR);
+  assert.equal(live.close, 123);
+  assert.ok(Number.isFinite(live.rsi));
+  assert.ok(["bullish", "bearish"].includes(live.direction));
+});
+
+test("livePandaSignal fires only while armed and still below the Supertrend", () => {
+  const armed = { seenAbove: true, armed: true, lastBar: 2 * BAR };
+  const spike = row(3, "bearish", { rsi: 95 });
+  assert.equal(livePandaSignal(armed, spike, PARAMS), "rsi");
+  assert.equal(livePandaSignal({ ...armed, armed: false }, spike, PARAMS), null);
+  assert.equal(livePandaSignal(undefined, spike, PARAMS), null);
+  assert.equal(livePandaSignal(armed, row(3, "bullish", { rsi: 99 }), PARAMS), null);
+  assert.equal(livePandaSignal(armed, row(3, "bearish", { rsi: 50 }), PARAMS), null);
 });

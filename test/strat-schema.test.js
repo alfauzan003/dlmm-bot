@@ -122,6 +122,9 @@ test("Evil Panda keys live in their own section and reject bad values", () => {
     for (const v of values) assert.equal(validateValue(key, v, schema).ok, false, `${key}=${v}`);
   }
   assert.equal(validateValue("EVIL_PANDA_RSI_LEVEL", "85", schema).ok, true);
+  assert.deepEqual(validateValue("EVIL_PANDA_SIGNAL_MODE", "Close", schema), { ok: true, value: "close" });
+  assert.equal(validateValue("EVIL_PANDA_SIGNAL_MODE", "fast", schema).ok, false);
+  assert.equal(schema.entries.EVIL_PANDA_SIGNAL_MODE.default, "live");
   for (const key of section.keys) assert.equal(RESTART_KEYS.has(key), false, key);
 });
 

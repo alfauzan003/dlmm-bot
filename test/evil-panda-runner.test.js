@@ -15,6 +15,7 @@ const { trackPosition } = await import("../src/state/positions.js");
 const { createTrade, getTrade, tryLockTrade, unlockTrade, updateTradePanda, setTradePanda } =
   await import("../src/state/trades.js");
 const { readState, writeState } = await import("../src/state/store.js");
+const { default: config } = await import("../src/config/index.js");
 const { runEvilPanda, kickEvilPanda, __resetPandaThrottle } = await import("../src/exit/evil-panda.js");
 
 const BAR = 900;
@@ -59,9 +60,13 @@ function newTrade({ positions = ["PosA"], mint = "MintA", panda = true } = {}) {
 
 const live = (addr, mint = "MintA") => ({ position: addr, pool: "PoolA", pair: "AAA-SOL", baseMint: mint });
 
-function fakeDeps({ candles = spikeCandles(), closeImpl } = {}) {
-  const calls = { fetchCandles: [], closeTrade: [] };
+function fakeDeps({ candles = spikeCandles(), closeImpl, prices = new Map() } = {}) {
+  const calls = { fetchCandles: [], closeTrade: [], getPrices: [] };
   const deps = {
+    getPrices: async (mints, opts) => {
+      calls.getPrices.push({ mints, opts });
+      return prices;
+    },
     fetchCandles: async (mint, pool, opts) => {
       calls.fetchCandles.push({ mint, pool, opts });
       return candles;
@@ -229,4 +234,76 @@ test("kickEvilPanda runs in the background and never overlaps", async () => {
   await first;
   assert.equal(calls.fetchCandles.length, 1);
   assert.ok(kickEvilPanda([live("PosA")], { deps, now: NOW }));
+});
+
+// Armed di bar jatuh, lalu 6 bar datar (tanpa spike); bar tutup terakhir = LATEST.
+function armedCandles() {
+  const closes = [...Array.from({ length: 40 }, (_, i) => 100 + i), 109, 109, 109, 109, 109, 109, 109];
+  const first = LATEST - (closes.length - 1) * BAR;
+  const list = closes.map((c, i) => candle(first + i * BAR, c));
+  list.push(candle(LATEST + BAR, 109));
+  return list;
+}
+
+test("live mode closes on a live RSI spike while price is still below the Supertrend", async () => {
+  reset();
+  const t = newTrade();
+  const { deps, calls } = fakeDeps({ candles: armedCandles(), prices: new Map([["MintA", 114]]) });
+  await runEvilPanda([live("PosA")], { deps, now: NOW });
+  assert.deepEqual(calls.getPrices[0], { mints: ["MintA"], opts: { force: true } });
+  assert.equal(calls.closeTrade.length, 1);
+  assert.equal(calls.closeTrade[0].opts.reason, "evil_panda_rsi");
+  assert.deepEqual(getTrade(t.id).panda, { seenAbove: true, armed: true, lastBar: LATEST });
+});
+
+test("close mode ignores the live price", async () => {
+  reset();
+  newTrade();
+  config.evilPanda.signalMode = "close";
+  try {
+    const { deps, calls } = fakeDeps({ candles: armedCandles(), prices: new Map([["MintA", 114]]) });
+    await runEvilPanda([live("PosA")], { deps, now: NOW });
+    assert.equal(calls.getPrices.length, 0);
+    assert.equal(calls.closeTrade.length, 0);
+  } finally {
+    config.evilPanda.signalMode = "live";
+  }
+});
+
+test("a live price back above the Supertrend does not close", async () => {
+  reset();
+  newTrade();
+  const { deps, calls } = fakeDeps({ candles: armedCandles(), prices: new Map([["MintA", 140]]) });
+  await runEvilPanda([live("PosA")], { deps, now: NOW });
+  assert.equal(calls.closeTrade.length, 0);
+});
+
+test("no live price means no live close", async () => {
+  reset();
+  newTrade();
+  const { deps, calls } = fakeDeps({ candles: armedCandles() });
+  await runEvilPanda([live("PosA")], { deps, now: NOW });
+  assert.equal(calls.getPrices.length, 1);
+  assert.equal(calls.closeTrade.length, 0);
+});
+
+test("armed trades reuse this bar's candles and only ask for prices each tick", async () => {
+  reset();
+  newTrade();
+  const { deps, calls } = fakeDeps({ candles: armedCandles(), prices: new Map([["MintA", 109]]) });
+  await runEvilPanda([live("PosA")], { deps, now: NOW });
+  await runEvilPanda([live("PosA")], { deps, now: NOW + 12_000 });
+  assert.equal(calls.fetchCandles.length, 1);
+  assert.equal(calls.getPrices.length, 2);
+  assert.equal(calls.closeTrade.length, 0);
+});
+
+test("a trade that is not armed asks for no live price", async () => {
+  reset();
+  const t = newTrade();
+  updateTradePanda(t.id, { seenAbove: true, armed: false, lastBar: LATEST });
+  const { deps, calls } = fakeDeps({ prices: new Map([["MintA", 114]]) });
+  await runEvilPanda([live("PosA")], { deps, now: NOW });
+  assert.equal(calls.fetchCandles.length, 0);
+  assert.equal(calls.getPrices.length, 0);
 });

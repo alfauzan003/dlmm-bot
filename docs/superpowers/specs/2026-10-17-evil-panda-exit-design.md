@@ -144,3 +144,15 @@ README: Exit strategy section. strat.conf: section description plus help per key
 ## Safety
 
 No transactions in tests. Manual check with `DRY_RUN=true` before live use.
+
+## Addendum 2026-10-17: live spike (`EVIL_PANDA_SIGNAL_MODE`)
+
+Waiting for the bar close can miss the spike (it fades within the bar). New strat.conf key
+`EVIL_PANDA_SIGNAL_MODE=live|close`, default `live`:
+
+- Arming / disarming stays on closed 15m bars only.
+- `live`: while armed, every runner tick takes the live Jupiter price (one batched `getPrices(..., { force: true })`
+  per run), appends it as the forming bar's close (`liveRow`), and fires if the live row is still below the
+  Supertrend (`direction === "bearish"`) and an enabled signal fires on it (`livePandaSignal`). Closed candles are
+  cached per mint for the current bar, so this costs no GMGN calls between bars.
+- `close`: the behaviour above this addendum.

@@ -139,6 +139,8 @@ export function buildConfig(e) {
     // Exit Evil Panda per trade (lihat src/exit/evil-panda.js).
     evilPanda: {
       defaultOn: bool(e.EVIL_PANDA_DEFAULT_ON, false),
+      // live = spike dicek pada harga live (bar terbentuk); close = hanya bar 15m tutup.
+      signalMode: (e.EVIL_PANDA_SIGNAL_MODE || "live").toLowerCase() === "close" ? "close" : "live",
       stAtrPeriod: Math.max(1, Math.floor(num(e.EVIL_PANDA_ST_ATR_PERIOD, 10))),
       stMultiplier: num(e.EVIL_PANDA_ST_MULTIPLIER, 3),
       rsi: {
