@@ -96,6 +96,27 @@ export function recordClose(positionAddress, reason, pnlPct, extra = {}) {
   fs.writeFileSync(DECISION_LOG_FILE, JSON.stringify(decisionLog, null, 2));
 }
 
+// PnL final (Meteora, ter-index setelah close) menggantikan PnL live yang dicatat recordClose.
+export function updateClosePnl(positionAddress, { pnlPct = null, pnlUsd = null } = {}) {
+  if (!positionAddress) return null;
+  const state = readState();
+  const p = state.positions[positionAddress];
+  if (!p || !p.closed) return null;
+  if (pnlPct != null) p.closePnlPct = pnlPct;
+  if (Number.isFinite(pnlUsd)) p.closePnlUsd = pnlUsd;
+  writeState(state);
+
+  if (pnlPct != null) {
+    const decisionLog = readJsonArray(DECISION_LOG_FILE);
+    const entry = decisionLog.findLast((e) => e.position === positionAddress);
+    if (entry) {
+      entry.pnlPct = pnlPct;
+      fs.writeFileSync(DECISION_LOG_FILE, JSON.stringify(decisionLog, null, 2));
+    }
+  }
+  return p;
+}
+
 // --- Deteksi posisi hilang (ditutup manual) ---
 
 // Semua posisi yang masih dianggap terbuka oleh bot (belum ditutup bot),

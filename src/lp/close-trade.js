@@ -3,8 +3,25 @@ import { handleClose } from "../exit/close.js";
 import { notifyTradeClosed } from "../notify/telegram.js";
 import { addKeepMint, removeKeepMint } from "../state/keep-mints.js";
 import { getTrackedPosition } from "../state/positions.js";
-import { getTrade, settleTradeIfDone, tryLockTrade, unlockTrade } from "../state/trades.js";
+import { getTrade, refreshTradePnl, settleTradeIfDone, tryLockTrade, unlockTrade } from "../state/trades.js";
 import { swapBaseToSol } from "./claim.js";
+
+// Tunggu PnL final leg, hitung ulang PnL trade, lalu edit alert bila berubah. Tidak pernah reject.
+async function refreshAlert(settled, finals, msgId, { swapInfo, notify }) {
+  try {
+    const results = await Promise.all(finals);
+    if (results.every((r) => r == null)) return null;
+    const fresh = refreshTradePnl(settled.id);
+    if (!fresh) return null;
+    const editMessageId = await msgId;
+    const changed = fresh.closePnlUsd !== settled.closePnlUsd || fresh.closePnlPct !== settled.closePnlPct;
+    if (editMessageId && changed) await notify(fresh, { swapInfo, editMessageId });
+    return fresh;
+  } catch (err) {
+    log.warn(`closeTrade #${settled.id}: update PnL final gagal: ${err.message}`);
+    return null;
+  }
+}
 
 // Tutup semua leg satu trade (tanpa alert per-leg), swap base token sekali,
 // lalu selesaikan trade dan kirim satu alert. Leg yang gagal membuat trade
@@ -21,6 +38,7 @@ export async function closeTrade(trade, { reason, swap = true, positionsByAddr =
 
     let closedNow = 0;
     const failed = [];
+    const finals = [];
     for (const addr of t.positions) {
       if (getTrackedPosition(addr)?.closed === true) continue;
       const pos = positionsByAddr.get(addr) ?? { position: addr, pool: t.pool, pair: t.pair, baseMint: t.baseMint };
@@ -28,8 +46,10 @@ export async function closeTrade(trade, { reason, swap = true, positionsByAddr =
         // Trade auto: pool ditandai '#' seperti close lama (handleClose cek sisa posisi di pool).
         const opts = { skipAutoSwap: true, silent: true, skipDeactivate: t.origin !== "auto" };
         const res = await close(pos, reason, opts);
-        if (res?.success) closedNow++;
-        else failed.push(addr);
+        if (res?.success) {
+          closedNow++;
+          if (res.finalPnl) finals.push(res.finalPnl);
+        } else failed.push(addr);
       } catch (err) {
         failed.push(addr);
         log.warn(`closeTrade #${t.id}: leg ${addr.slice(0, 8)} error: ${err.message}`);
@@ -47,8 +67,10 @@ export async function closeTrade(trade, { reason, swap = true, positionsByAddr =
     }
 
     const settled = settleTradeIfDone(t.id, { fallbackReason: reason });
-    if (settled) notify(settled, { swapInfo });
-    return { success: true, trade: settled ?? getTrade(t.id), failed, swapInfo };
+    const msgId = settled ? Promise.resolve(notify(settled, { swapInfo })) : null;
+    // Alert di atas memakai PnL live; perbarui setelah PnL final Meteora semua leg masuk (latar belakang).
+    const finalPnl = settled && finals.length > 0 ? refreshAlert(settled, finals, msgId, { swapInfo, notify }) : null;
+    return { success: true, trade: settled ?? getTrade(t.id), failed, swapInfo, finalPnl };
   } finally {
     unlockTrade(trade.id);
   }

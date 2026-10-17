@@ -21,7 +21,7 @@ const MINT = Keypair.generate().publicKey.toString();
 
 function fakeDeps({ hasLiquidity = true, feeCapOk = true } = {}) {
   const wallet = Keypair.generate();
-  const calls = { sends: [], removeLiquidity: 0, closePosition: 0, claim: 0 };
+  const calls = { sends: [], removeLiquidity: 0, closePosition: 0, claim: 0, scans: 0, accountChecks: 0 };
   let lookups = 0;
   const pool = {
     lbPair: { tokenXMint: MINT, tokenYMint: WSOL },
@@ -48,12 +48,20 @@ function fakeDeps({ hasLiquidity = true, feeCapOk = true } = {}) {
   };
   const DLMM = {
     // Lookup pertama: posisi ada; verifikasi setelah close: sudah hilang.
-    getAllLbPairPositionsByUser: async () =>
-      lookups++ === 0 ? new Map([[POOL, { lbPairPositionsData: [{ publicKey: POSITION }] }]]) : new Map(),
+    getAllLbPairPositionsByUser: async () => {
+      calls.scans++;
+      return lookups++ === 0 ? new Map([[POOL, { lbPairPositionsData: [{ publicKey: POSITION }] }]]) : new Map();
+    },
     create: async () => pool,
   };
   const deps = {
-    getConnection: () => ({}),
+    // Akun posisi sudah terhapus setelah close.
+    getConnection: () => ({
+      getAccountInfo: async () => {
+        calls.accountChecks++;
+        return null;
+      },
+    }),
     getWallet: () => wallet,
     getDlmmSdk: async () => ({ DLMM }),
     getTokenBalance: async () => 42,
@@ -84,21 +92,23 @@ async function withLive(fn) {
   }
 }
 
-test("close + claim dikirim lewat sendAndConfirmRobust dengan fee plan baru per tx", async () => {
+test("close (claim di dalam tx removeLiquidity) dikirim lewat sendAndConfirmRobust dengan fee plan baru per tx", async () => {
   await withLive(async () => {
     const { deps, calls, wallet } = fakeDeps();
     const res = await closePosition(POSITION.toString(), { deps });
 
     assert.equal(res.success, true);
-    assert.equal(res.claimTx, "sig-claim");
+    assert.equal(res.claimTx, null);
     assert.deepEqual(res.txs, ["sig-remove-1", "sig-remove-2"]);
     assert.equal(res.baseMint, MINT);
     assert.equal(res.baseAmount, 42);
 
     assert.deepEqual(
       calls.sends.map((s) => s.tx.kind),
-      ["claim", "remove-1", "remove-2"]
+      ["remove-1", "remove-2"]
     );
+    // Posisi berlikuiditas: tidak ada tx claim terpisah (shouldClaimAndClose sudah claim).
+    assert.equal(calls.claim, 0);
     for (const s of calls.sends) {
       assert.equal(s.wallet, wallet);
       assert.deepEqual(s.signers, [wallet]);
@@ -136,7 +146,7 @@ test("fee cap terlampaui tidak membatalkan close", async () => {
 
     assert.equal(res.success, true);
     assert.deepEqual(res.txs, ["sig-remove-1", "sig-remove-2"]);
-    assert.equal(calls.sends.length, 3);
+    assert.equal(calls.sends.length, 2);
   });
 });
 
@@ -154,6 +164,29 @@ test("close gagal kirim dicoba ulang dengan tx dibangun ulang", async () => {
     assert.equal(res.success, true);
     assert.deepEqual(res.txs, ["sig-close"]);
     assert.equal(calls.closePosition, 2);
+  });
+});
+
+test("pool diketahui: tanpa scan wallet; verifikasi lewat getAccountInfo", async () => {
+  await withLive(async () => {
+    const { deps, calls } = fakeDeps();
+    const res = await closePosition(POSITION.toString(), { poolAddress: POOL, deps });
+
+    assert.equal(res.success, true);
+    assert.equal(res.pool, POOL);
+    assert.equal(calls.scans, 0);
+    assert.equal(calls.accountChecks, 1);
+  });
+});
+
+test("pool tidak diketahui: scan wallet sekali saja (bukan untuk verifikasi)", async () => {
+  await withLive(async () => {
+    const { deps, calls } = fakeDeps();
+    const res = await closePosition(POSITION.toString(), { deps });
+
+    assert.equal(res.success, true);
+    assert.equal(res.pool, POOL);
+    assert.equal(calls.scans, 1);
   });
 });
 

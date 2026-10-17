@@ -10,7 +10,7 @@ process.env.STATE_FILE = path.join(TMP, "state.json");
 process.env.DECISION_LOG_FILE = path.join(TMP, "decision-log.json");
 process.env.PNL_HISTORY_FILE = path.join(TMP, "pnl-history.json");
 
-const { trackPosition, recordClose, getTrackedPosition } = await import("../src/state/positions.js");
+const { trackPosition, recordClose, updateClosePnl, getTrackedPosition } = await import("../src/state/positions.js");
 const { createTrade, getTrade, setTradeDepositUsd, tryLockTrade, tradeLock, unlockTrade } =
   await import("../src/state/trades.js");
 const { closeTrade } = await import("../src/lp/close-trade.js");
@@ -338,4 +338,87 @@ test("legacy handleClose clears a kept mint once it auto-swaps it; a failed swap
     assert.equal(res.success, true);
     assert.deepEqual(listKeepMints(), swapOk ? [] : ["MintA"]);
   }
+});
+
+test("closeTrade alerts with live PnL, then edits the alert once final PnL arrives", async () => {
+  reset();
+  const t = newTrade(["A", "B"]);
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const { deps, calls } = fakeDeps({
+    handleClose: async (pos, reason) => {
+      recordClose(pos.position, reason, 5, { pnlUsd: 5, closeTx: `tx-${pos.position}` });
+      const finalPnl = gate.then(
+        () => updateClosePnl(pos.position, { pnlPct: 8, pnlUsd: 8 }) && { pnlPct: 8, pnlUsd: 8 }
+      );
+      return { success: true, swapInfo: null, closeTx: `tx-${pos.position}`, pnlUsd: 5, pnlPct: 5, finalPnl };
+    },
+    notifyTradeClosed: (trade, extra) => {
+      calls.notify.push({ trade: structuredClone(trade), extra });
+      return 99;
+    },
+  });
+  const res = await closeTrade(t, { reason: "manual", swap: false, deps });
+  assert.equal(res.success, true);
+  assert.equal(calls.notify.length, 1);
+  assert.equal(calls.notify[0].trade.closePnlUsd, 10);
+  assert.equal(calls.notify[0].extra.editMessageId, undefined);
+
+  release();
+  await res.finalPnl;
+  assert.equal(getTrade(t.id).closePnlUsd, 16);
+  assert.equal(calls.notify.length, 2);
+  assert.equal(calls.notify[1].extra.editMessageId, 99);
+  assert.equal(calls.notify[1].trade.closePnlUsd, 16);
+});
+
+test("handleClose records live PnL first, then final Meteora PnL and edits the alert", async () => {
+  reset();
+  trackPosition("PosF", "PoolA", "AAA-SOL", "MintA", null, "spot");
+  const sent = [];
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const deps = {
+    closePosition: async () => ({ success: true, txs: ["sig-close"], baseMint: null }),
+    waitClosedPositionEntry: async () => {
+      await gate;
+      return { pnlPctChange: "7.5", pnlSolPctChange: "7.5", pnlUsd: "3.2" };
+    },
+    notifyClose: (...args) => {
+      sent.push(args);
+      return 55;
+    },
+  };
+  const pos = { position: "PosF", pool: "PoolA", pair: "AAA-SOL", baseMint: "MintA", pnlPct: 1, pnlUsd: 0.4 };
+  const res = await handleClose(pos, "stop_loss", { skipDeactivate: true, deps });
+
+  assert.equal(res.success, true);
+  assert.equal(res.pnlPct, 1);
+  assert.equal(getTrackedPosition("PosF").closePnlPct, 1);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0][2], 1);
+
+  release();
+  assert.deepEqual(await res.finalPnl, { pnlPct: 7.5, pnlUsd: 3.2 });
+  assert.equal(getTrackedPosition("PosF").closePnlPct, 7.5);
+  assert.equal(getTrackedPosition("PosF").closePnlUsd, 3.2);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1][2], 7.5);
+  assert.equal(sent[1][6].editMessageId, 55);
+});
+
+test("handleClose keeps live PnL and does not edit when final PnL never arrives", async () => {
+  reset();
+  trackPosition("PosG", "PoolA", "AAA-SOL", "MintA", null, "spot");
+  const sent = [];
+  const deps = {
+    closePosition: async () => ({ success: true, txs: ["sig-close"], baseMint: null }),
+    waitClosedPositionEntry: async () => null,
+    notifyClose: (...args) => sent.push(args),
+  };
+  const pos = { position: "PosG", pool: "PoolA", pair: "AAA-SOL", baseMint: "MintA", pnlPct: 2, pnlUsd: 1 };
+  const res = await handleClose(pos, "tp", { skipDeactivate: true, deps });
+  assert.equal(await res.finalPnl, null);
+  assert.equal(getTrackedPosition("PosG").closePnlPct, 2);
+  assert.equal(sent.length, 1);
 });

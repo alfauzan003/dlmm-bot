@@ -24,7 +24,8 @@ function withDeps(deps = {}) {
   };
 }
 
-export async function closePosition(positionAddress, { deps } = {}) {
+// `poolAddress` (opsional): pool pemilik posisi; tanpa itu pool dicari lewat scan semua posisi wallet.
+export async function closePosition(positionAddress, { poolAddress: knownPool = null, deps } = {}) {
   const d = withDeps(deps);
   const connection = d.getConnection();
   const wallet = d.getWallet();
@@ -55,18 +56,19 @@ export async function closePosition(positionAddress, { deps } = {}) {
     (await d.sendAndConfirmRobust({ connection, tx, signers: [wallet], feePlan: txFeePlan(), wallet })).signature;
 
   try {
-    // Find the pool that owns this position
-    const allPositions = await DLMM.getAllLbPairPositionsByUser(connection, wallet.publicKey);
-
-    let poolAddress = null;
+    // Find the pool that owns this position (scan semua posisi wallet hanya bila pool belum diketahui)
+    let poolAddress = knownPool;
     let pool = null;
 
-    for (const [lbPairKey, info] of allPositions) {
-      const posList = info?.lbPairPositionsData || [];
-      const match = posList.find((p) => p.publicKey.toString() === positionAddress);
-      if (match) {
-        poolAddress = lbPairKey;
-        break;
+    if (!poolAddress) {
+      const allPositions = await DLMM.getAllLbPairPositionsByUser(connection, wallet.publicKey);
+      for (const [lbPairKey, info] of allPositions) {
+        const posList = info?.lbPairPositionsData || [];
+        const match = posList.find((p) => p.publicKey.toString() === positionAddress);
+        if (match) {
+          poolAddress = lbPairKey;
+          break;
+        }
       }
     }
 
@@ -75,23 +77,6 @@ export async function closePosition(positionAddress, { deps } = {}) {
     }
 
     pool = await DLMM.create(connection, new PublicKey(poolAddress));
-
-    // Claim fees first
-    let claimTx = null;
-    try {
-      const { userPositions } = await pool.getPositionsByUserAndLbPair(wallet.publicKey);
-      const userPos = userPositions?.find((p) => p.publicKey.toString() === positionAddress);
-      if (userPos) {
-        const claimTxs = await pool.claimSwapFee({ owner: wallet.publicKey, position: userPos });
-        const txs = Array.isArray(claimTxs) ? claimTxs : [claimTxs];
-        for (const tx of txs) {
-          claimTx = await send(tx);
-        }
-        if (claimTx) log.info(`Claimed fees: ${claimTx.slice(0, 16)}`);
-      }
-    } catch (err) {
-      log.warn(`Fee claim skipped: ${err.message}`);
-    }
 
     // Close position
     let closeFromBin, closeToBin;
@@ -108,6 +93,26 @@ export async function closePosition(positionAddress, { deps } = {}) {
       }
     } catch (err) {
       log.warn(`Could not check liquidity: ${err.message}`);
+    }
+
+    // Claim fee terpisah hanya untuk posisi tanpa likuiditas: removeLiquidity dengan
+    // shouldClaimAndClose sudah memuat claim fee + reward dalam tx close.
+    let claimTx = null;
+    if (!hasLiquidity) {
+      try {
+        const { userPositions } = await pool.getPositionsByUserAndLbPair(wallet.publicKey);
+        const userPos = userPositions?.find((p) => p.publicKey.toString() === positionAddress);
+        if (userPos) {
+          const claimTxs = await pool.claimSwapFee({ owner: wallet.publicKey, position: userPos });
+          const txs = Array.isArray(claimTxs) ? claimTxs : [claimTxs];
+          for (const tx of txs) {
+            claimTx = await send(tx);
+          }
+          if (claimTx) log.info(`Claimed fees: ${claimTx.slice(0, 16)}`);
+        }
+      } catch (err) {
+        log.warn(`Fee claim skipped: ${err.message}`);
+      }
     }
 
     const closeTxHashes = [];
@@ -156,22 +161,12 @@ export async function closePosition(positionAddress, { deps } = {}) {
     }
     if (lastErr) throw lastErr;
 
-    await d.sleep(5000);
-
-    // Verify position is actually closed
+    // Verify position is actually closed: akun posisi dihapus saat close (tx sudah confirmed).
     let closedConfirmed = false;
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
-        const refreshed = await DLMM.getAllLbPairPositionsByUser(connection, wallet.publicKey);
-        let stillOpen = false;
-        for (const [, info] of refreshed) {
-          const posList = info?.lbPairPositionsData || [];
-          if (posList.some((p) => p.publicKey.toString() === positionAddress)) {
-            stillOpen = true;
-            break;
-          }
-        }
-        if (!stillOpen) {
+        const account = await connection.getAccountInfo(positionPubKey);
+        if (!account) {
           closedConfirmed = true;
           break;
         }

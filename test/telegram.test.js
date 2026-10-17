@@ -247,3 +247,23 @@ test("notifyTradeClosed: PnL tidak diketahui dan tanpa tx", () => {
   assert.match(sent[0].text, /PnL.*\?/);
   assert.equal(sent[0].extra.reply_markup.inline_keyboard[0][0].url, METLEX_URL);
 });
+
+test("close alerts pass editMessageId through to edit the sent alert", async () => {
+  const sent = [];
+  __setSender((text, extra = {}) => {
+    sent.push({ text, extra });
+    return 42;
+  });
+  const id = await notifyTradeClosed(
+    { id: 3, pair: "AAA-SOL", closeReason: "tp", closePnlUsd: 1, closePnlPct: 1, openedAt: 0, closedAt: 60000 },
+    { editMessageId: 7 }
+  );
+  notifyClose("AAA-SOL", "tp", 4, null, null, null, { closeTx: "sigX", editMessageId: 8 });
+  notifyClose("AAA-SOL", "tp", 4, null);
+  __setSender(null);
+  assert.equal(id, 42);
+  assert.equal(sent[0].extra.editMessageId, 7);
+  assert.equal(sent[0].extra.parse_mode, "HTML");
+  assert.equal(sent[1].extra.editMessageId, 8);
+  assert.deepEqual(sent[2].extra, {});
+});

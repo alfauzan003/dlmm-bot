@@ -179,15 +179,32 @@ export function settleTradeIfDone(id, { fallbackReason = "closed_outside" } = {}
   let last = legs[0];
   for (const p of legs) if ((p.closedAt ?? 0) >= (last.closedAt ?? 0)) last = p;
 
-  const pnls = legs.map((p) => p.closePnlUsd);
-  const pnlUsd = pnls.some((v) => v == null) ? null : pnls.reduce((s, v) => s + v, 0);
-
   t.closed = true;
   t.closedAt = Math.max(...legs.map((p) => p.closedAt ?? 0));
   t.closeReason = !last.closeReason || UNKNOWN_REASONS.has(last.closeReason) ? fallbackReason : last.closeReason;
+  setPnlFromLegs(t, legs);
+  t.closeTx = last.closeTx ?? null;
+  writeState(state);
+  return t;
+}
+
+// PnL trade = jumlah PnL USD leg (null bila ada leg tanpa PnL).
+function setPnlFromLegs(t, legs) {
+  const pnls = legs.map((p) => p?.closePnlUsd);
+  const pnlUsd = pnls.some((v) => v == null) ? null : pnls.reduce((s, v) => s + v, 0);
   t.closePnlUsd = pnlUsd;
   t.closePnlPct = pnlUsd != null && t.depositUsd > 0 ? (pnlUsd / t.depositUsd) * 100 : null;
-  t.closeTx = last.closeTx ?? null;
+}
+
+// Hitung ulang PnL trade tertutup dari leg (setelah PnL final Meteora masuk).
+export function refreshTradePnl(id) {
+  const state = readState();
+  const t = state.trades?.[String(id)];
+  if (!t || t.closed !== true) return null;
+  setPnlFromLegs(
+    t,
+    t.positions.map((addr) => state.positions[addr])
+  );
   writeState(state);
   return t;
 }

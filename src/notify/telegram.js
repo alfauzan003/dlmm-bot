@@ -10,34 +10,48 @@ const BASE = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;
 const METLEX_URL = "https://www.metlex.io/pnl-cards";
 const METLEX_KEYBOARD = { inline_keyboard: [[{ text: "🖼 Open Metlex", url: METLEX_URL }]] };
 
+// Resolve ke message_id (null bila gagal). `extra.editMessageId` = edit pesan itu, bukan kirim baru.
 function rawSend(text, extra = {}) {
-  if (!BASE || !CHAT_ID) return;
+  if (!BASE || !CHAT_ID) return Promise.resolve(null);
   const payload = { chat_id: CHAT_ID, text: String(text).slice(0, 4096) };
   if (extra.parse_mode) payload.parse_mode = extra.parse_mode;
   if (extra.reply_markup) payload.reply_markup = extra.reply_markup;
+  if (extra.editMessageId) payload.message_id = extra.editMessageId;
   const body = JSON.stringify(payload);
-  const url = new URL(`${BASE}/sendMessage`);
-  const req = https.request(
-    url,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      family: 4,
-      timeout: 15000,
-    },
-    (res) => {
-      let data = "";
-      res.on("data", (c) => (data += c));
-      res.on("end", () => {
-        if (res.statusCode !== 200) {
-          log.warn(`Telegram send failed: ${res.statusCode} ${data.slice(0, 200)}`);
-        }
-      });
-    }
-  );
-  req.on("error", (err) => log.warn(`Telegram error: ${err.message}`));
-  req.write(body);
-  req.end();
+  const url = new URL(`${BASE}/${extra.editMessageId ? "editMessageText" : "sendMessage"}`);
+  return new Promise((resolve) => {
+    const req = https.request(
+      url,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        family: 4,
+        timeout: 15000,
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => {
+          if (res.statusCode !== 200) {
+            log.warn(`Telegram send failed: ${res.statusCode} ${data.slice(0, 200)}`);
+            return resolve(null);
+          }
+          try {
+            resolve(JSON.parse(data)?.result?.message_id ?? null);
+          } catch {
+            resolve(null);
+          }
+        });
+      }
+    );
+    req.on("timeout", () => req.destroy(new Error("timeout")));
+    req.on("error", (err) => {
+      log.warn(`Telegram error: ${err.message}`);
+      resolve(null);
+    });
+    req.write(body);
+    req.end();
+  });
 }
 
 // Pengirim level-bawah; hanya untuk tes (tangkap payload tanpa jaringan).
@@ -46,8 +60,8 @@ export function __setSender(fn) {
   sender = typeof fn === "function" ? fn : rawSend;
 }
 
-function send(text, extra = {}) {
-  return sender(text, extra);
+function send(text, { editMessageId, ...extra } = {}) {
+  return sender(text, editMessageId ? { ...extra, editMessageId } : extra);
 }
 
 export function notifyEntry({ pair, pool, feeMode, feeSol }) {
@@ -110,10 +124,19 @@ export function buildCloseMessage(
   return lines.join("\n");
 }
 
-export function notifyClose(pair, reason, pnlPct, swapInfo, drawdownPnl = null, peakPnl = null, { closeTx } = {}) {
+// Resolve ke message_id; `editMessageId` = perbarui alert yang sudah terkirim (mis. PnL final).
+export function notifyClose(
+  pair,
+  reason,
+  pnlPct,
+  swapInfo,
+  drawdownPnl = null,
+  peakPnl = null,
+  { closeTx, editMessageId } = {}
+) {
   const text = buildCloseMessage(pair, reason, pnlPct, swapInfo, drawdownPnl, peakPnl, { closeTx });
-  if (closeTx) send(text, { parse_mode: "HTML", reply_markup: METLEX_KEYBOARD });
-  else send(text);
+  if (closeTx) return send(text, { parse_mode: "HTML", reply_markup: METLEX_KEYBOARD, editMessageId });
+  return send(text, { editMessageId });
 }
 
 function fmtDuration(ms) {
@@ -126,8 +149,9 @@ function fmtDuration(ms) {
   return h > 0 ? `${h}h ${mins % 60}m` : `${mins}m`;
 }
 
-// Alert close untuk satu trade utuh (semua leg sudah tutup).
-export function notifyTradeClosed(trade, { swapInfo = null } = {}) {
+// Alert close untuk satu trade utuh (semua leg sudah tutup). Resolve ke message_id;
+// `editMessageId` = perbarui alert yang sudah terkirim (mis. PnL final).
+export function notifyTradeClosed(trade, { swapInfo = null, editMessageId } = {}) {
   const lines = [
     `🔒 Trade #${trade.id} closed — ${esc(trade.pair)}`,
     "",
@@ -139,7 +163,7 @@ export function notifyTradeClosed(trade, { swapInfo = null } = {}) {
     lines.push(`⚠️ Swap failed${swapInfo.error ? `: ${esc(swapInfo.error)}` : " — swap manually"}`);
   }
   if (trade.closeTx) lines.push("", `Tx: <code>${esc(trade.closeTx)}</code>`);
-  send(lines.join("\n"), { parse_mode: "HTML", reply_markup: METLEX_KEYBOARD });
+  return send(lines.join("\n"), { parse_mode: "HTML", reply_markup: METLEX_KEYBOARD, editMessageId });
 }
 
 // Hasil auto flip (teks dari exit/auto-flip.js).
