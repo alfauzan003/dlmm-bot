@@ -65,7 +65,8 @@ function live(addr, pnlUsd, extra = {}) {
   };
 }
 
-function newTrade(positions, exit = EXIT) {
+// openedAt default 0: lewat dari masa tenggang exit setelah open. `null` = dibuka sekarang.
+function newTrade(positions, exit = EXIT, { openedAt = 0 } = {}) {
   for (const p of positions) trackPosition(p, "PoolA", "AAA-SOL", "MintA", null, "spot");
   const t = createTrade({
     pool: "PoolA",
@@ -76,6 +77,11 @@ function newTrade(positions, exit = EXIT) {
     exit: structuredClone(exit),
   });
   setTradeDepositUsd(t.id, 100 * positions.length);
+  if (openedAt != null) {
+    const state = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8"));
+    state.trades[String(t.id)].openedAt = openedAt;
+    fs.writeFileSync(process.env.STATE_FILE, JSON.stringify(state, null, 2));
+  }
   return getTrade(t.id);
 }
 
@@ -369,6 +375,36 @@ test("fast tick skips a locked trade", async () => {
   } finally {
     unlockTrade(t.id);
   }
+});
+
+test("no TP/SL/Trail in the first minute after open (Meteora PnL not indexed yet)", async () => {
+  reset();
+  const t = newTrade(["PosA"], EXIT, { openedAt: null });
+  // Bacaan palsu -100% beberapa detik setelah open (trade #27/#28 SUPERCORE).
+  const { deps, calls } = fakeDeps({ reread: new Map([["PosA", entry(-100)]]) });
+  const ids = await runTradeExits([live("PosA", -100)], { deps });
+  assert.equal(calls.fetch.length, 0);
+  assert.equal(calls.closeTrade.length, 0);
+  assert.ok(!ids.has(t.id));
+  assert.equal(getTrade(t.id).peakPnlPct, null);
+});
+
+test("fast tick skips a trade opened less than a minute ago", async () => {
+  reset();
+  newTrade(["PosA"], EXIT, { openedAt: Date.now() - 30_000 });
+  const { deps, calls } = fakeDeps({ reread: new Map([["PosA", entry(-100)]]) });
+  await runFastTradeExitTick({ positions: [live("PosA", 0)], deps });
+  assert.equal(calls.fetch.length, 0);
+  assert.equal(calls.closeTrade.length, 0);
+});
+
+test("SL fires once the trade is older than a minute", async () => {
+  reset();
+  newTrade(["PosA"], EXIT, { openedAt: Date.now() - 61_000 });
+  const { deps, calls } = fakeDeps({ reread: new Map([["PosA", entry(-30)]]) });
+  await runTradeExits([live("PosA", -30)], { deps });
+  assert.equal(calls.closeTrade.length, 1);
+  assert.equal(calls.closeTrade[0].opts.reason, "sl");
 });
 
 test("unchanged progress does not rewrite state", async () => {

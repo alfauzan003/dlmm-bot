@@ -142,6 +142,11 @@ export async function rereadTrade(trade, live, fetchPnl) {
   return map;
 }
 
+// Menit pertama setelah open TP/SL/Trail tidak dievaluasi: PnL Meteora posisi baru sering
+// belum lengkap ter-index (mis. -100% beberapa detik setelah open) dan memicu SL palsu.
+export const EXIT_GRACE_MS = 60_000;
+const inExitGrace = (t) => Number.isFinite(t.openedAt) && Date.now() - t.openedAt < EXIT_GRACE_MS;
+
 // TP/SL/Trail per trade. Sebelum close, PnL dibaca ulang (paksa) dan dievaluasi lagi;
 // close hanya bila masih terpicu. Mengembalikan id trade yang ditutup/terkunci tick ini.
 export async function runTradeExits(positions, { deps = {} } = {}) {
@@ -155,6 +160,7 @@ export async function runTradeExits(positions, { deps = {} } = {}) {
       handled.add(trade.id);
       continue;
     }
+    if (inExitGrace(trade)) continue;
     const agg = aggregateTradePnl(trade, live, { isClosed: isLegClosed });
     if (!agg) continue;
 
@@ -215,7 +221,7 @@ export async function runFastTradeExitTick({ positions = livePositions, deps = {
   const base = byAddress(positions);
   const pools = new Set();
   for (const t of listOpenTrades()) {
-    if (hasExitOn(t) && !tradeLock(t.id) && t.positions.some((addr) => base.has(addr))) pools.add(t.pool);
+    if (hasExitOn(t) && !tradeLock(t.id) && !inExitGrace(t) && t.positions.some((addr) => base.has(addr))) pools.add(t.pool);
   }
   if (pools.size === 0) return new Set();
 
