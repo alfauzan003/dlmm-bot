@@ -200,6 +200,21 @@ test("custom deposit parses", async () => {
   assert.ok(lastData(calls).includes("op:rng:custom"));
 });
 
+test("range keyboard: single-side presets on the left, double-side on the right", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(textUpdate(POOL_ADDR));
+  await bot.handleUpdate(cbUpdate("op:dep:0.5"));
+  const edit = calls.filter((c) => c.payload.reply_markup).at(-1);
+  const rows = edit.payload.reply_markup.inline_keyboard.map((row) => row.map((b) => b.callback_data));
+  assert.deepEqual(rows, [
+    ["op:rng:narrow_sol", "op:rng:narrow"],
+    ["op:rng:balanced_sol", "op:rng:balanced"],
+    ["op:rng:wide_sol", "op:rng:wide"],
+    ["op:rng:custom"],
+    ["op:back"],
+  ]);
+});
+
 test("invalid custom deposit keeps the prompt", async () => {
   const { bot, calls } = build();
   await bot.handleUpdate(textUpdate(POOL_ADDR));

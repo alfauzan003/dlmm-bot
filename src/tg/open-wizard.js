@@ -95,12 +95,16 @@ function depositKeyboard() {
   return cancelRow(kb.text("Custom", "op:dep:custom").row());
 }
 
+// Kolom kiri = preset satu-sisi (SOL only), kolom kanan = dua-sisi; satu baris per pasangan.
 function rangeKeyboard() {
   const kb = new InlineKeyboard();
-  getRangePresets().forEach((p, i) => {
-    kb.text(presetLabel(p), `op:rng:${p.key}`);
-    if (i % 2 === 1) kb.row();
-  });
+  const presets = getRangePresets();
+  const single = presets.filter((p) => p.key.endsWith("_sol"));
+  const double = presets.filter((p) => !p.key.endsWith("_sol"));
+  for (let i = 0; i < Math.max(single.length, double.length); i++) {
+    for (const p of [single[i], double[i]]) if (p) kb.text(presetLabel(p), `op:rng:${p.key}`);
+    kb.row();
+  }
   return kb.text("Custom", "op:rng:custom").row().text("◀ Back", "op:back");
 }
 
