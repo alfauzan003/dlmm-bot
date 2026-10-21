@@ -12,6 +12,19 @@ const TOKEN_BATCH = 100;
 const TOKEN_CACHE_MS = 5 * 60 * 1000;
 
 const tokenCache = new Map(); // mint -> { at, token }
+let meteoraLastAt = -Infinity; // jam pacing bersama semua request datapi Meteora
+
+export function resetMeteoraPace() {
+  meteoraLastAt = -Infinity;
+}
+
+// Tunggu sampai jarak antar request Meteora >= 60000 / meteoraMaxPerMin ms.
+async function paceMeteora(d) {
+  const gapMs = 60000 / Math.max(1, Number(config.meteoraMaxPerMin) || 120);
+  const wait = meteoraLastAt + gapMs - d.now();
+  if (wait > 0) await d.sleep(wait);
+  meteoraLastAt = d.now();
+}
 
 export async function fetchJson(url, { headers } = {}) {
   const r = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
@@ -21,12 +34,15 @@ export async function fetchJson(url, { headers } = {}) {
 
 const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const num = (v) => (v == null ? NaN : Number(v)); // null jangan jadi 0
+
 function withDeps(deps = {}) {
   return { fetchJson, sleep: sleepMs, now: Date.now, ...deps };
 }
 
 export async function fetchPoolRows(url, { deps } = {}) {
   const d = withDeps(deps);
+  await paceMeteora(d);
   const json = await d.fetchJson(url);
   const list = Array.isArray(json?.data) ? json.data : [];
   return list.map(toPoolRow).filter(Boolean);
@@ -35,23 +51,20 @@ export async function fetchPoolRows(url, { deps } = {}) {
 // Bar 5m [startSec, endSec], per jendela 90 bar, diberi jeda sesuai batas request Meteora.
 export async function fetchOhlcvRange(pool, startSec, endSec, { deps } = {}) {
   const d = withDeps(deps);
-  const gapMs = 60000 / Math.max(1, Number(config.meteoraMaxPerMin) || 120);
   const bars = [];
-  let first = true;
   for (let s = startSec; s < endSec;) {
     const e = Math.min(s + OHLCV_WINDOW_SEC, endSec);
     const from = e - s < OHLCV_MIN_RANGE_SEC ? e - OHLCV_MIN_RANGE_SEC : s; // jendela terlalu pendek -> mundur
-    if (!first) await d.sleep(gapMs);
-    first = false;
+    await paceMeteora(d);
     const json = await d.fetchJson(`${METEORA_BASE}/pools/${pool}/ohlcv?timeframe=5m&start_time=${from}&end_time=${e}`);
     for (const c of Array.isArray(json?.data) ? json.data : []) {
       bars.push({
-        time: Number(c.timestamp),
-        open: Number(c.open),
-        high: Number(c.high),
-        low: Number(c.low),
-        close: Number(c.close),
-        volume: Number(c.volume),
+        time: num(c.timestamp),
+        open: num(c.open),
+        high: num(c.high),
+        low: num(c.low),
+        close: num(c.close),
+        volume: num(c.volume),
       });
     }
     s = e;
@@ -59,7 +72,7 @@ export async function fetchOhlcvRange(pool, startSec, endSec, { deps } = {}) {
   const seen = new Set();
   return bars
     .sort((a, b) => a.time - b.time)
-    .filter((b) => Number.isFinite(b.time) && !seen.has(b.time) && seen.add(b.time));
+    .filter((b) => Object.values(b).every(Number.isFinite) && !seen.has(b.time) && seen.add(b.time));
 }
 
 // Info token Jupiter (organic score, audit, dst) per mint; batch 100, cache 5 menit.
@@ -91,6 +104,7 @@ export async function fetchTokens(mints, { deps } = {}) {
 // Pool WSOL/USDC dengan volume 24j terbesar; solIsX menentukan arah harga close.
 export async function findSolUsdPoolInfo({ deps } = {}) {
   const d = withDeps(deps);
+  await paceMeteora(d);
   const json = await d.fetchJson(`${METEORA_BASE}/pools?page_size=20&sort_by=volume_24h:desc`);
   for (const p of Array.isArray(json?.data) ? json.data : []) {
     const x = p?.token_x?.address;

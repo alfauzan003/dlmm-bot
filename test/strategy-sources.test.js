@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import config from "../src/config/index.js";
 import { WSOL_MINT, USDC_MINT } from "../src/core/constants.js";
 import {
   fetchOhlcvRange,
@@ -8,6 +9,7 @@ import {
   findSolUsdPool,
   solUsdSeries,
   solUsdAtFn,
+  resetMeteoraPace,
 } from "../src/strategy/sources.js";
 
 test("fetchOhlcvRange paginates windows and dedupes", async () => {
@@ -76,7 +78,7 @@ test("fetchPoolRows maps pool rows and drops nulls", async () => {
     pool_config: { bin_step: 100 },
     tvl: 5000,
   };
-  const deps = { fetchJson: async () => ({ data: [good, { address: "bad" }] }) };
+  const deps = { sleep: async () => {}, fetchJson: async () => ({ data: [good, { address: "bad" }] }) };
   const rows = await fetchPoolRows("http://x", { deps });
   assert.equal(rows.length, 1);
   assert.equal(rows[0].address, "P1");
@@ -84,6 +86,7 @@ test("fetchPoolRows maps pool rows and drops nulls", async () => {
 
 test("findSolUsdPool picks the WSOL/USDC row", async () => {
   const deps = {
+    sleep: async () => {},
     fetchJson: async () => ({
       data: [
         { address: "P_X", token_x: { address: "X" }, token_y: { address: USDC_MINT } },
@@ -107,4 +110,68 @@ test("solUsdAtFn picks last point at or before time", () => {
 test("solUsdSeries inverts when SOL is Y", () => {
   assert.deepEqual(solUsdSeries([{ time: 0, close: 0.01 }], false), [[0, 100]]);
   assert.deepEqual(solUsdSeries([{ time: 0, close: 150 }], true), [[0, 150]]);
+});
+
+test("Meteora pacing is shared across calls and endpoints", async () => {
+  resetMeteoraPace();
+  const gap = 60000 / config.meteoraMaxPerMin;
+  const sleeps = [];
+  const deps = {
+    now: () => 1_000_000,
+    sleep: async (ms) => sleeps.push(ms),
+    fetchJson: async (url) => (url.includes("/ohlcv") ? { data: [] } : { data: [] }),
+  };
+  await fetchOhlcvRange("P", 0, 60000, { deps }); // 3 request: 1 pertama tanpa jeda
+  assert.deepEqual(sleeps, [gap, gap]);
+  await fetchOhlcvRange("Q", 0, 7000, { deps }); // call baru tetap menunggu
+  assert.deepEqual(sleeps, [gap, gap, gap]);
+  await fetchPoolRows("http://x", { deps });
+  await findSolUsdPool({ deps }).catch(() => {});
+  assert.equal(sleeps.length, 5);
+  assert.ok(sleeps.every((ms) => ms === gap));
+});
+
+test("fetchOhlcvRange drops bars with non-finite fields", async () => {
+  const ok = { timestamp: 0, open: 1, high: 1, low: 1, close: 1, volume: 1 };
+  const deps = {
+    sleep: async () => {},
+    fetchJson: async () => ({
+      data: [
+        ok,
+        { ...ok, timestamp: 300, close: null },
+        { ...ok, timestamp: 600, volume: "x" },
+        { ...ok, timestamp: 900 },
+      ],
+    }),
+  };
+  const bars = await fetchOhlcvRange("P", 0, 7000, { deps });
+  assert.deepEqual(
+    bars.map((b) => b.time),
+    [0, 900]
+  );
+});
+
+test("fetchTokens routes by Jupiter key", async () => {
+  const saved = [config.jupiterSwapApiKey, config.jupiterPriceApiKey];
+  const seen = [];
+  const deps = {
+    now: () => 1,
+    fetchJson: async (url, opts) => {
+      seen.push({ url, headers: opts?.headers });
+      return [];
+    },
+  };
+  try {
+    config.jupiterSwapApiKey = "test-key";
+    await fetchTokens(["K1"], { deps });
+    config.jupiterSwapApiKey = "";
+    config.jupiterPriceApiKey = "";
+    await fetchTokens(["K2"], { deps });
+  } finally {
+    [config.jupiterSwapApiKey, config.jupiterPriceApiKey] = saved;
+  }
+  assert.ok(seen[0].url.startsWith("https://api.jup.ag/tokens/v2/search?"));
+  assert.equal(seen[0].headers["x-api-key"], "test-key");
+  assert.ok(seen[1].url.startsWith("https://lite-api.jup.ag/tokens/v2/search?"));
+  assert.ok(!seen[1].headers || !("x-api-key" in seen[1].headers));
 });

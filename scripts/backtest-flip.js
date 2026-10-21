@@ -62,7 +62,9 @@ async function cmdFetch(args) {
 
   const rows = [];
   for (let page = 1; page <= MAX_PAGES && rows.length < maxPools; page++) {
-    rows.push(...(await fetchPoolRows(universeUrl(profile, days, nowMs, page))));
+    for (const r of await fetchPoolRows(universeUrl(profile, days, nowMs, page))) {
+      if (!rows.some((x) => x.address === r.address)) rows.push(r);
+    }
   }
   rows.length = Math.min(rows.length, maxPools);
   console.log(`[${profile}] ${rows.length} pool SOL, window ${days} hari`);
@@ -93,6 +95,7 @@ async function cmdFetch(args) {
 
   const sol = await findSolUsdPoolInfo();
   const solBars = await fetchOhlcvRange(sol.address, startSec, endSec);
+  if (solBars.length === 0) throw new Error("No SOL/USD candles — cannot build dataset");
   const dataset = { fetchedAt: nowMs, days, pools, solUsd: solUsdSeries(solBars, sol.solIsX) };
   fs.writeFileSync(path.join(dir, "dataset.json"), JSON.stringify(dataset));
   console.log(
