@@ -102,31 +102,41 @@ function tradeRefs(d, now, g) {
   };
 }
 
-// Rem rugi harian: true bila batas kena (Auto Entry dimatikan + alert). Tidak pernah melempar.
+// Rem rugi harian: true bila batas kena -> scan berhenti. Gagal hitung PnL = fail open (scan lanjut);
+// begitu batas kena, selalu true walau aksi (matikan toggle / alert) gagal.
 async function dailyBrake(deps) {
+  const d = withDeps(deps);
+  const g = config.autoEntry;
+  let pnl;
   try {
-    const d = withDeps(deps);
-    const g = config.autoEntry;
     const now = d.now();
     const closed = closedRefs(d, periodStart("today", now));
     let solUsd = null;
     if (closed.length > 0) {
       try {
         solUsd = await d.getSolUsd();
-      } catch {
-        solUsd = null;
+      } catch (err) {
+        log.warn(`Auto entry: harga SOL gagal: ${err.message} — close USD-only dilewati di rem harian`);
       }
     }
-    const pnl = todayAutoPnlSol(closed, solUsd, now);
+    pnl = todayAutoPnlSol(closed, solUsd, now);
     if (!brakeHit(pnl, g)) return false;
-    d.setToggle("autoEntry", false);
-    d.notifyDailyBrake({ pnlSol: pnl, limitSol: g.dailyLossLimitSol });
-    log.warn(`Auto entry: rem rugi harian kena (${pnl.toFixed(3)} SOL ≤ −${g.dailyLossLimitSol} SOL) — Auto Entry OFF`);
-    return true;
   } catch (err) {
     log.warn(`Auto entry: cek rem rugi harian gagal: ${err.message}`);
     return false;
   }
+  try {
+    d.setToggle("autoEntry", false);
+  } catch (err) {
+    log.error(`Auto entry: gagal mematikan Auto Entry setelah rem rugi harian: ${err.message}`);
+  }
+  try {
+    d.notifyDailyBrake({ pnlSol: pnl, limitSol: g.dailyLossLimitSol });
+  } catch (err) {
+    log.warn(`Auto entry: alert rem rugi harian gagal: ${err.message}`);
+  }
+  log.warn(`Auto entry: rem rugi harian kena (${pnl.toFixed(3)} SOL ≤ −${g.dailyLossLimitSol} SOL) — Auto Entry OFF`);
+  return true;
 }
 
 function recordFailure(row, pair, error, now) {

@@ -484,11 +484,31 @@ test("daily brake: manual trades do not count, DRY_RUN has no refs", async () =>
 });
 
 test("daily brake: a throwing dependency does not escape runScan", async () => {
-  const { deps } = makeDeps({
+  const brake = [];
+  const { deps, calls } = makeDeps({
+    notifyDailyBrake: (a) => brake.push(a),
     listClosedTrades: () => {
       throw new Error("state unreadable");
     },
   });
   await runScan({ deps });
   assert.equal(isOn("autoEntry"), true);
+  assert.equal(calls.fetchPoolRows.length, 1, "scan went ahead (fail open)");
+  assert.equal(brake.length, 0);
+});
+
+test("daily brake: a throwing setToggle still stops the scan and still alerts", async () => {
+  const brake = [];
+  const { deps, calls } = makeDeps({
+    listClosedTrades: () => [brakeLoss({ closePnlSol: -0.6 })],
+    getSolUsd: async () => 100,
+    setToggle: () => {
+      throw new Error("disk full");
+    },
+    notifyDailyBrake: (a) => brake.push(a),
+  });
+  await runScan({ deps });
+  assert.equal(brake.length, 1);
+  assert.equal(calls.fetchPoolRows.length, 0);
+  assert.equal(calls.executeOpen.length, 0);
 });
