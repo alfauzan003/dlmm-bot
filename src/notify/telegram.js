@@ -193,20 +193,6 @@ export function notifyClosedButLive(position) {
   send(`Position ${short} is still on-chain but marked closed — check it on Meteora.`);
 }
 
-export function notifyPoolExpired({ pool, pair, expiryHours }) {
-  const label = pair || pool;
-  send(
-    `⏰ Pool EXPIRED: ${label}\nPool: ${pool}\nTidak ada entry dalam ${expiryHours} jam — pool di-skip dari scan sampai bot restart.`
-  );
-}
-
-export function notifyPoolUnsupported({ pool, pair, quoteMint }) {
-  const label = pair || pool;
-  send(
-    `⛔ Pool DITOLAK: ${label}\nPool: ${pool}\nPair bukan SOL (quote: ${quoteMint || "?"}) — pool dilewati dari scan sampai bot restart.`
-  );
-}
-
 export function notifyEntryFailed({ pool, pair, error, attempts, maxFailures, cooldownSec }) {
   const label = pair || pool;
   const lines = [
@@ -217,19 +203,6 @@ export function notifyEntryFailed({ pool, pair, error, attempts, maxFailures, co
   ];
   if (config.entry.fees.mode !== "none") lines.push(`Fee: ${config.entry.fees.mode}`);
   if (cooldownSec > 0) lines.push(`Cooldown: ${cooldownSec}s`);
-  send(lines.join("\n"));
-}
-
-export function notifyEntryRateLimited({ pool, pair, error, attempts, maxFailures, cooldownSec }) {
-  const label = pair || pool;
-  const lines = [
-    `⚠️ ENTRY GAGAL (RATE LIMIT): ${label}`,
-    `Pool: ${pool}`,
-    `Alasan: ${error || "unknown"}`,
-    `Percobaan: ${attempts}/${maxFailures}`,
-  ];
-  if (cooldownSec > 0) lines.push(`Cooldown: ${cooldownSec}s`);
-  if (maxFailures != null && attempts >= maxFailures) lines.push("Pool di-skip sampai bot restart.");
   send(lines.join("\n"));
 }
 

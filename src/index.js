@@ -16,8 +16,10 @@ import { legacyAdoptionCount, tradeExitLoop } from "./exit/trade-loop.js";
 log.info("========================================");
 log.info("  Meteora Bot starting...");
 log.info(`  Mode: ${config.dryRun ? "DRY RUN" : "LIVE"} (dari .env) | SOL_MODE: ${config.solMode} (strat.conf/.env)`);
+const { degen, multihour } = config.autoEntry.profiles;
+const profileLabel = (name, p) => `${name} ${p.on ? "on" : "off"} ${p.sizeSol} SOL`;
 log.info(
-  `  Entry: per-pool size from ${config.entry.poolListFile} | split ${config.entry.sizeSplit} | bins -34/+34 BidAsk | kandidat ${config.entry.scanIntervalSec}s | Jupiter poll ${config.jupiterPollIntervalSec}s`
+  `  Auto entry: ${profileLabel("degen", degen)} · ${profileLabel("multihour", multihour)} · scan ${config.autoEntry.scanIntervalSec}s`
 );
 log.info("========================================");
 
@@ -35,7 +37,7 @@ startBot([start, help, settings, positions, openWizard, pnl, wallet])
   .then((bot) => bot && start.sendHome(bot.api, { prefix: start.onlinePrefix(legacyCount) }))
   .catch((err) => log.error(`Telegram startup gagal: ${err?.message ?? err}`));
 
-// Entry scanner (Supertrend touch) — own cadence
+// Entry scanner (Meteora screener, bid-ask flip) — own cadence
 startEntryScanner();
 
 // TP/SL/Trail per trade — own cadence (TRADE_EXIT_INTERVAL_SEC)

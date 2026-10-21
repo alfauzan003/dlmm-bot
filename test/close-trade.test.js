@@ -66,20 +66,6 @@ function fakeDeps(overrides = {}) {
   return { deps, calls };
 }
 
-test("auto trades let handleClose deactivate the pool; others do not", async () => {
-  for (const [origin, skip] of [
-    ["auto", false],
-    ["manual", true],
-    ["external", true],
-  ]) {
-    reset();
-    const t = newTrade(["A"], origin);
-    const { deps, calls } = fakeDeps();
-    await closeTrade(t, { reason: "tp", deps });
-    assert.equal(calls.handleClose[0].opts.skipDeactivate, skip, origin);
-  }
-});
-
 test("close settles and alerts once", async () => {
   reset();
   const t = newTrade(["A", "B"]);
@@ -88,7 +74,7 @@ test("close settles and alerts once", async () => {
   assert.equal(res.success, true);
   assert.deepEqual(res.failed, []);
   assert.equal(calls.handleClose.length, 2);
-  assert.deepEqual(calls.handleClose[0].opts, { skipAutoSwap: true, silent: true, skipDeactivate: true });
+  assert.deepEqual(calls.handleClose[0].opts, { skipAutoSwap: true, silent: true });
   assert.equal(calls.notify.length, 1);
   assert.equal(calls.notify[0].trade.id, t.id);
   const stored = getTrade(t.id);
@@ -334,7 +320,7 @@ test("legacy handleClose clears a kept mint once it auto-swaps it; a failed swap
       swapToSol: async () => (swapOk ? { success: true } : { success: false, error: "no route" }),
     };
     const pos = { position: "PosK", pool: "PoolA", pair: "AAA-SOL", baseMint: "MintA", pnlPct: 1 };
-    const res = await handleClose(pos, "stop_loss", { silent: true, skipDeactivate: true, deps });
+    const res = await handleClose(pos, "stop_loss", { silent: true, deps });
     assert.equal(res.success, true);
     assert.deepEqual(listKeepMints(), swapOk ? [] : ["MintA"]);
   }
@@ -390,7 +376,7 @@ test("handleClose records live PnL first, then final Meteora PnL and edits the a
     },
   };
   const pos = { position: "PosF", pool: "PoolA", pair: "AAA-SOL", baseMint: "MintA", pnlPct: 1, pnlUsd: 0.4 };
-  const res = await handleClose(pos, "stop_loss", { skipDeactivate: true, deps });
+  const res = await handleClose(pos, "stop_loss", { deps });
 
   assert.equal(res.success, true);
   assert.equal(res.pnlPct, 1);
@@ -417,7 +403,7 @@ test("handleClose keeps live PnL and does not edit when final PnL never arrives"
     notifyClose: (...args) => sent.push(args),
   };
   const pos = { position: "PosG", pool: "PoolA", pair: "AAA-SOL", baseMint: "MintA", pnlPct: 2, pnlUsd: 1 };
-  const res = await handleClose(pos, "tp", { skipDeactivate: true, deps });
+  const res = await handleClose(pos, "tp", { deps });
   assert.equal(await res.finalPnl, null);
   assert.equal(getTrackedPosition("PosG").closePnlPct, 2);
   assert.equal(sent.length, 1);

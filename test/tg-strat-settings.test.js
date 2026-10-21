@@ -15,8 +15,8 @@ fs.writeFileSync(
     "SWEEP_EXCLUDE_MINTS=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "",
     "# ===== Entry =====",
-    "# Share of the deposit kept as SOL",
-    "ENTRY_SIZE_SPLIT=0.5",
+    "# RSI level a bar must close above",
+    "EVIL_PANDA_RSI_LEVEL=90",
     "TRADE_EXIT_INTERVAL_SEC=1",
     ...EXTRA,
     "ENTRY_FEE_MODE=none",
@@ -147,16 +147,16 @@ test("enum keys offer their options and reject others", async () => {
 
 test("number keys are edited through a prompt with validation", async () => {
   const { bot, calls } = build();
-  await bot.handleUpdate(cbUpdate("st:edit:ENTRY_SIZE_SPLIT"));
-  assert.deepEqual(session.get("prompt"), { kind: "strat-edit", key: "ENTRY_SIZE_SPLIT" });
-  assert.match(lastText(calls), /between 0 and 1/);
+  await bot.handleUpdate(cbUpdate("st:edit:EVIL_PANDA_RSI_LEVEL"));
+  assert.deepEqual(session.get("prompt"), { kind: "strat-edit", key: "EVIL_PANDA_RSI_LEVEL" });
+  assert.match(lastText(calls), /between 0 and 100/);
   await bot.handleUpdate(textUpdate("0,5"));
-  assert.match(lastText(calls), /must be a number between 0 and 1/);
+  assert.match(lastText(calls), /must be a number between 0 and 100/);
   assert.equal(session.get("prompt")?.kind, "strat-edit");
-  await bot.handleUpdate(textUpdate("0.3"));
-  assert.deepEqual(getStratOverrides(), { ENTRY_SIZE_SPLIT: "0.3" });
+  await bot.handleUpdate(textUpdate("95"));
+  assert.deepEqual(getStratOverrides(), { EVIL_PANDA_RSI_LEVEL: "95" });
   assert.equal(session.get("prompt"), null);
-  assert.match(lastText(calls), /Share of the deposit kept as SOL/);
+  assert.match(lastText(calls), /RSI level a bar must close above/);
 });
 
 test("restart keys say they apply after restart and are marked in the list", async () => {
@@ -172,7 +172,7 @@ test("restart keys say they apply after restart and are marked in the list", asy
 
 test("reset all asks for confirmation first", async () => {
   setStratOverride("SOL_MODE", "true");
-  setStratOverride("ENTRY_SIZE_SPLIT", "0.2");
+  setStratOverride("EVIL_PANDA_RSI_LEVEL", "80");
   const { bot, calls } = build();
   await bot.handleUpdate(cbUpdate("st:resetall"));
   assert.ok(lastData(calls).includes("st:resetall:yes"));

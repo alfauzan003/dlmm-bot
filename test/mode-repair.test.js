@@ -65,17 +65,6 @@ test("classifyMode: spot dari distribusi, bukan lebar range", () => {
   assert.equal(isCompositeMode(sol), true);
 });
 
-test("entry/execute.js memanggil trackPosition dengan urutan argumen yang benar", () => {
-  const src = fs.readFileSync(new URL("../src/entry/execute.js", import.meta.url), "utf8");
-  const match = src.match(/trackPosition\(([\s\S]*?)\);/);
-  assert.ok(match, "panggilan trackPosition tidak ditemukan di entry/execute.js");
-
-  const args = match[1].split(",").map((a) => a.trim());
-  assert.equal(args.length, 6, `trackPosition harus 6 argumen, dapat ${args.length}: ${match[1]}`);
-  assert.equal(args[4], "collectFeeMode", "argumen ke-5 harus collectFeeMode");
-  assert.equal(args[5], '"bidask:double"', 'argumen ke-6 (mode) harus "bidask:double"');
-});
-
 test("LEGACY_MODE maps legacy mode names", () => {
   assert.equal(LEGACY_MODE.bidask, "bidask:double");
   assert.equal(LEGACY_MODE["token-only"], "bidask:token");

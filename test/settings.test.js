@@ -9,7 +9,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "meteorabot-settings-"));
 const FILE = path.join(TMP, "settings.json");
 process.env.SETTINGS_FILE = FILE;
 const STRAT = path.join(TMP, "strat.conf");
-fs.writeFileSync(STRAT, "ENTRY_SIZE_SPLIT=0.5\nSOL_MODE=false\n");
+fs.writeFileSync(STRAT, "EVIL_PANDA_RSI_LEVEL=90\nSOL_MODE=false\n");
 process.env.STRAT_FILE = STRAT;
 
 const {
@@ -171,17 +171,17 @@ test("invalid auto flip default in the file falls back to off", () => {
 });
 
 test("setStratOverride validates, stores, and reloads config", () => {
-  assert.deepEqual(setStratOverride("ENTRY_SIZE_SPLIT", "2"), {
+  assert.deepEqual(setStratOverride("EVIL_PANDA_RSI_LEVEL", "150"), {
     ok: false,
-    error: "ENTRY_SIZE_SPLIT must be a number between 0 and 1",
+    error: "EVIL_PANDA_RSI_LEVEL must be a number between 0 and 100",
   });
   assert.deepEqual(getStratOverrides(), {});
-  assert.deepEqual(setStratOverride("ENTRY_SIZE_SPLIT", "0.3"), { ok: true, value: "0.3", previous: null });
-  assert.equal(config.entry.sizeSplit, 0.3);
-  assert.equal(JSON.parse(fs.readFileSync(FILE, "utf8")).stratOverrides.ENTRY_SIZE_SPLIT, "0.3");
-  assert.deepEqual(setStratOverride("ENTRY_SIZE_SPLIT", "0.4"), { ok: true, value: "0.4", previous: "0.3" });
-  clearStratOverride("ENTRY_SIZE_SPLIT");
-  assert.equal(config.entry.sizeSplit, 0.5);
+  assert.deepEqual(setStratOverride("EVIL_PANDA_RSI_LEVEL", "95"), { ok: true, value: "95", previous: null });
+  assert.equal(config.evilPanda.rsi.level, 95);
+  assert.equal(JSON.parse(fs.readFileSync(FILE, "utf8")).stratOverrides.EVIL_PANDA_RSI_LEVEL, "95");
+  assert.deepEqual(setStratOverride("EVIL_PANDA_RSI_LEVEL", "80"), { ok: true, value: "80", previous: "95" });
+  clearStratOverride("EVIL_PANDA_RSI_LEVEL");
+  assert.equal(config.evilPanda.rsi.level, 90);
   assert.deepEqual(getStratOverrides(), {});
 });
 

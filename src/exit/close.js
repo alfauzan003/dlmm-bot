@@ -5,17 +5,16 @@ import { closePosition } from "../meteora/close.js";
 import { waitClosedPositionEntry, pnlFromEntry, usdPnlFromEntry } from "../meteora/positions.js";
 import { getTokenBalance } from "../solana/balances.js";
 import { swapToSol } from "../solana/swap.js";
-import { recordClose, updateClosePnl, getTrackedPosition, getOpenTrackedPositions } from "../state/positions.js";
+import { recordClose, updateClosePnl, getTrackedPosition } from "../state/positions.js";
 import { addClosingPool, removeClosingPool, recordAction } from "../entry/runtime.js";
 import { removeKeepMint } from "../state/keep-mints.js";
-import { deactivatePool } from "../entry/index.js";
 import { humanReason, fmtPct } from "../core/report.js";
 
 // Guard per-posisi: cegah beberapa close paralel untuk posisi yang sama.
 const closingPositions = new Set();
 
 export async function handleClose(pos, reason, opts = {}) {
-  const { skipAutoSwap = false, skipDeactivate = false, silent = false, deps = {} } = opts;
+  const { skipAutoSwap = false, silent = false, deps = {} } = opts;
   const pairLabel = pos.pair || pos.position?.slice(0, 8) || "?";
   const positionAddress = pos.position;
 
@@ -99,11 +98,6 @@ export async function handleClose(pos, reason, opts = {}) {
           log.warn(`${pairLabel}: update PnL final gagal: ${err.message}`);
           return null;
         });
-
-      // Sesi pool selesai (tak ada posisi tersisa) → tandai '#'
-      // di pool.txt agar tidak di-entry lagi tanpa pengawasan manual.
-      const stillOpenInPool = getOpenTrackedPositions().some((p) => p.pool === pos.pool);
-      if (!skipDeactivate && !stillOpenInPool) deactivatePool(pos.pool, "entry+exit selesai");
       return { success: true, swapInfo, closeTx, pnlUsd, pnlPct: realizedPnl, finalPnl };
     } else {
       const brief = String(result?.error || "unknown").split("\n")[0];

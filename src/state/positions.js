@@ -140,10 +140,6 @@ export function countOpenByPoolAndMode(positions, mode) {
   return counts;
 }
 
-export function countOpenBotPositionsByPool(mode) {
-  return countOpenByPoolAndMode(getOpenTrackedPositions(), mode);
-}
-
 export function registerMissedCycle(positionAddress) {
   if (!positionAddress) return 0;
   const state = readState();

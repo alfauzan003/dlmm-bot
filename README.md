@@ -4,8 +4,9 @@ A single-user Telegram assistant for providing liquidity on [Meteora DLMM](https
 You drive it from a chat with your own bot: open liquidity with SOL, claim fees, set take-profit / stop-loss /
 trailing, close, and track profit in USD. It runs as one Node.js process on your own server and uses one wallet.
 
-The older auto-entry (open on a Supertrend signal) is still in the code. It is off by default and can be switched
-on and off from Telegram. Exits are always per trade (TP / SL / Trail).
+Auto Entry can also screen Meteora pools by itself and run a bid-ask flip strategy (see
+[Auto Entry · bid-ask flip](#auto-entry--bid-ask-flip)). It is off by default and can be switched on and off from
+Telegram. Exits are always per trade (TP / SL / Trail).
 
 **This bot sends real Solana transactions.** Always start with `DRY_RUN=true`.
 
@@ -35,7 +36,7 @@ on and off from Telegram. Exits are always per trade (TP / SL / Trail).
    | `WALLET_PRIVATE_KEY`        | Wallet secret key (base58 or JSON array). A `wallet.key` file, if present, overrides it. |
    | `RPC_URL`, `HELIUS_API_KEY` | Solana RPC and Helius access                                                             |
    | `JUPITER_API_KEY`           | Jupiter key (or the separate `JUPITER_PRICE_API_KEY` / `JUPITER_SWAP_API_KEY`)           |
-   | `GMGN_API_KEY`              | Only needed for auto-entry candles                                                       |
+   | `GMGN_API_KEY`              | Only needed for the 15m candles of Evil Panda                                            |
    | `TELEGRAM_BOT_TOKEN`        | Token from BotFather                                                                     |
    | `TELEGRAM_CHAT_ID`          | Your chat id. Message [@userinfobot](https://t.me/userinfobot) to find it.               |
    | `DRY_RUN`                   | `true` = no transactions or swaps are sent. Anything other than `false` counts as on.    |
@@ -158,18 +159,81 @@ off per trade with **🐼 Panda** in `/positions` (the card shows `🐼 Evil Pan
 with it on when Auto Exit is ON and `EVIL_PANDA_DEFAULT_ON=true`. Tune it in **/settings → 🐼 Exit strategy → Evil
 Panda**. The close alert shows which signal fired, e.g. `Evil Panda (RSI)`.
 
+## Auto Entry · bid-ask flip
+
+While **Auto Entry** is ON the bot looks for pools on its own and opens trades without a confirm tap. There is no
+pool list: the screener reads Meteora, and SOL pairs only. Every number below is a key in `strat.conf`, grouped in
+`/settings` → `🧩 Strategy` under the `Auto Entry · …` sections.
+
+**Two profiles**, each with its own on/off switch, size, limits and thresholds (Auto Entry is the master switch):
+
+| Profile     | For                               | Defaults                                 |
+| ----------- | --------------------------------- | ---------------------------------------- |
+| `degen`     | Young, volatile pools, short hold | `DEGEN_*`: 0.5 SOL, max 2 open, hold 2 h |
+| `multihour` | Bigger, older pools, long hold    | `MULTI_*`: 1 SOL, max 2 open, hold 24 h  |
+
+**Screener** (every `AUTO_SCAN_INTERVAL_SEC`, 60 s): reads the Meteora pool list with the profile's TVL, 30 minute
+volume, fee / TVL, bin step, market cap, holders, pool age and base fee limits. Per token it keeps only the
+cheapest pool (lowest base fee, then highest TVL). The top `AUTO_CANDIDATES_PER_SCAN` are then checked with Jupiter
+token data (organic score, top holders, mint and freeze authority off), the 30 minute volatility band and, if set,
+the number of LP owners.
+
+**Entry signal** (on closed 5m bars): the price pumped by at least `MIN_PUMP_PCT` inside `PUMP_LOOKBACK_MIN`, has
+pulled back from the high by `MIN_PULLBACK_PCT` to `MAX_PULLBACK_PCT`, and the last closed bar is red. With
+`ENTRY_TIMING=immediate` the signal is skipped. The pool-price check from the Transactions settings still runs before
+opening.
+
+**Open**: SOL only, BidAsk, from the current price down to `RANGE_PCT` below (`RANGE_MODE=fixed`) or down to the
+recent low plus a buffer (`support`), clamped to `RANGE_MIN_PCT` – `RANGE_MAX_PCT` and to `MAX_POSITIONS` on-chain
+positions. Pools whose non-refundable position cost is above `AUTO_MAX_NONREFUNDABLE_SOL` are skipped.
+
+**Flip**: when `FLIP_PCT`% of the SOL side has been crossed by price, the existing auto flip moves the token bins above
+the price (token only, BidAsk), so the trade keeps earning fees while price bounces.
+
+**Exits**: TP / SL / Trail come from the profile (`TP_PCT`, `SL_PCT`, `TRAIL_*`; 0 = off), not from the Auto Exit
+defaults, and stay editable per trade in `/positions`. On top of that, strategy exits close the trade with swap to SOL:
+
+| Reason         | Closes when                                                                      |
+| -------------- | -------------------------------------------------------------------------------- |
+| `cycle_done`   | The trade flipped and price is above every flip leg (all token sold back to SOL) |
+| `pumped_away`  | Not flipped and price stays above the SOL range top for `OOR_ABOVE_MIN`          |
+| `range_broken` | Price stays below the whole range for `OOR_BELOW_MIN`                            |
+| `volume_died`  | `LOW_VOLUME_BARS` closed 5m bars in a row below `MIN_VOLUME_5M_USD`              |
+| `max_hold`     | The trade is open for `MAX_HOLD_MIN` minutes                                     |
+
+**Limits**: at most `MAX_OPEN` auto trades per profile, one open auto trade per token, a cooldown per token after a
+close (`AUTO_COOLDOWN_MIN`, longer after a loss: `AUTO_COOLDOWN_LOSS_MIN`), and failed entries use
+`ENTRY_FAILURE_COOLDOWN_SEC` / `ENTRY_MAX_FAILURES`. `GAS_RESERVE` SOL always stays in the wallet.
+
+**Daily loss brake**: once auto trades closed since 00:00 WIB lose `AUTO_DAILY_LOSS_LIMIT_SOL` or more, Auto Entry is
+switched OFF and you get one Telegram alert. Open trades keep their exits. Turn Auto Entry back on in `/settings`.
+
+**DRY_RUN**: nothing is ever sent. The screener runs and logs what it would open.
+
+**Backtester**: picks starting values per profile from Meteora 5m candles. It never changes your config; paste the
+result into `strat.conf` or set the keys in `/settings` → `🧩 Strategy`.
+
+```bash
+node scripts/backtest-flip.js fetch --profile <degen|multihour> --days 5 --max-pools 200
+node scripts/backtest-flip.js run --profile <degen|multihour> --samples 400
+```
+
+`fetch` downloads the dataset to `data/backtest/<profile>/` (the first run can take a while). `run` searches
+parameter sets (older 70% of the days to train, newest 30% to validate) and writes
+`data/backtest/<profile>/report-<date>.md` and `best.conf`. The simulator assumptions are the `SIM_*` keys.
+
 ## Settings and toggles
 
-| Toggle     | First-start value | Effect                                                      |
-| ---------- | ----------------- | ----------------------------------------------------------- |
-| Auto Exit  | ON                | Attach TP / SL / Trail defaults to new trades               |
-| Auto Entry | OFF               | Scan `pool.txt` and open positions on the Supertrend signal |
+| Toggle     | First-start value | Effect                                                 |
+| ---------- | ----------------- | ------------------------------------------------------ |
+| Auto Exit  | ON                | Attach TP / SL / Trail defaults to new trades          |
+| Auto Entry | OFF               | Screen Meteora pools and run the bid-ask flip strategy |
 
 The toggles are saved in `settings.json`. They take effect without a restart and are the only on/off switch for
 these features.
 
 **🧩 Strategy** (in `/settings`) shows every key of `strat.conf`, grouped by its `# ===== … =====` sections (General, Auto
-Entry · Pools & sizing / Signal / Safety, Exit strategy · Evil Panda, Transactions, Swap & sweep, Monitoring, Market data & rate limits, Logs).
+Entry · Safety / Screener / Degen profile / Multi-hour profile / Limits / Simulator, Exit strategy · Evil Panda, Transactions, Swap & sweep, Monitoring, Market data & rate limits, Logs).
 The comment block right under a section header is shown as that section's description, and the comment above each
 key as its help. Changing a value there saves it as an override in `settings.json`
 (`stratOverrides`); `strat.conf` stays the committed default and **↩ Reset to default** / **Reset all overrides**
@@ -181,7 +245,8 @@ only in `.env` and are never shown.
 
 - Positions the old bot already tracked (in `state.json`) are adopted as trades **without TP / SL / Trail**, so
   nothing is sold on the first start. The online message says how many; set exits per trade in `/positions`.
-- Auto Entry starts OFF. Turn it on in `/settings` to keep the old entry behavior.
+- Auto Entry starts OFF. The old Supertrend entry and its pool list file are gone: turn Auto Entry on in `/settings` to use
+  the bid-ask flip strategy. Leftover pool list and `supertrend-cache.json` files are ignored and can be deleted.
 - The old rule-based "deterministic" exit (per-mode stop loss, OOR, indicators, trailing, low yield, OOR fallback
   and spot re-entry) has been removed, along with its `BIDASK_*` / `SPOT_*` / `TIMEFRAME` / `TRAILING_*` keys.
   Use TP / SL / Trail per trade instead. Leftover overrides for removed keys in `settings.json` are ignored.
@@ -220,14 +285,13 @@ A private key pasted anywhere else in the chat is deleted automatically.
 
 These are created while the bot runs and are git-ignored. Do not edit them while the bot is running.
 
-| File                                                             | Purpose                                                                                  |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `state.json`                                                     | Trades, positions and auto-entry/exit state                                              |
-| `settings.json`                                                  | Toggles, Auto Exit defaults, range and deposit presets                                   |
-| `wallet.key`                                                     | Imported wallet key (overrides `.env`)                                                   |
-| `pool.txt`                                                       | Pools for auto-entry, one address per line; the bot comments out finished pools with `#` |
-| `decision-log.json`, `pnl-history.json`, `supertrend-cache.json` | Logs and caches                                                                          |
-| `logs/`                                                          | Process logs (PM2)                                                                       |
+| File                                    | Purpose                                                |
+| --------------------------------------- | ------------------------------------------------------ |
+| `state.json`                            | Trades, positions and auto-entry/exit state            |
+| `settings.json`                         | Toggles, Auto Exit defaults, range and deposit presets |
+| `wallet.key`                            | Imported wallet key (overrides `.env`)                 |
+| `decision-log.json`, `pnl-history.json` | Logs and caches                                        |
+| `logs/`                                 | Process logs (PM2)                                     |
 
 ## Scripts
 

@@ -9,30 +9,11 @@ function normalizeFeeMode(raw) {
   return FEE_MODES.includes(value) ? value : "none";
 }
 
-// Entry execution is fixed by design: BidAsk, two-sided (token + SOL), bins ±34.
-export const BINS_BELOW = 34;
-export const BINS_ABOVE = 34;
-export const STRATEGY = "bid_ask";
-
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 // Seluruh config dari satu peta env (lihat loadEnv: .env < strat.conf < override Telegram).
 export function buildConfig(e) {
   const entry = {
-    poolListFile: e.POOL_LIST_FILE || "pool.txt",
-    // Default untuk baris pool.txt yang hanya berisi alamat (tanpa ,size,max).
-    defaultSizeSol: num(e.ENTRY_DEFAULT_SIZE_SOL, 0),
-    defaultMaxPositions: Math.max(1, Math.floor(num(e.ENTRY_DEFAULT_MAX_POSITION, 1))),
-    // Kuota posisi `bidask:double` milik bot yang boleh terbuka serentak di satu
-    // pool. Posisi mode lain (mis. spot manual) tidak dihitung, jadi tidak
-    // memblokir entry.
-    maxConcurrentBidaskDouble: Math.max(1, Math.floor(num(e.ENTRY_MAX_CONCURRENT_BIDASK_DOUBLE, 1))),
-    // Refresh kandidat (pool list + posisi terbuka via RPC), bukan cadence sinyal.
-    scanIntervalSec: num(e.ENTRY_SCAN_INTERVAL_SEC, 30),
-    stAtrPeriod: num(e.ST_ATR_PERIOD, 10),
-    stMultiplier: num(e.ST_MULTIPLIER, 3),
-    expiryHours: num(e.ENTRY_EXPIRY_HOURS, 6),
-    sizeSplit: num(e.ENTRY_SIZE_SPLIT, 0.5),
     // Slippage aktif bin untuk add-liquidity, dalam PERSEN (SDK memakai persen,
     // bukan basis poin). Menghasilkan maxActiveBinSlippage = ceil(pct / binStep%).
     activeBinSlippagePct: Math.max(0, num(e.ENTRY_ACTIVE_BIN_SLIPPAGE_PCT, 10)),
@@ -112,7 +93,6 @@ export function buildConfig(e) {
     candle15mSource: (e.CANDLE_15M_SOURCE || "gmgn").toLowerCase() === "meteora" ? "meteora" : "gmgn",
     gmgnMaxPerMin: num(e.GMGN_MAX_PER_MIN, 4),
     gmgnMinGapSec: num(e.GMGN_MIN_GAP_SEC, 15),
-    gmgnMaxStaleMin: num(e.GMGN_MAX_STALE_MIN, 30),
     gmgnFallbackToMeteora: bool(e.GMGN_FALLBACK_TO_METEORA, false),
     meteoraMaxPerMin: num(e.METEORA_MAX_PER_MIN, 120),
 
@@ -120,8 +100,6 @@ export function buildConfig(e) {
     // Satu request batch untuk semua pool. Limit price/v3 ≈ 10 req/10s (~1 req/s);
     // pakai key khusus harga + interval 2s (≈5 req/10s) agar aman dari 429.
     jupiterPollIntervalSec: Math.max(1, num(e.JUPITER_POLL_INTERVAL_SEC, 2)),
-    entryTouchTolerancePct: num(e.ENTRY_TOUCH_TOLERANCE_PCT, 0),
-    supertrendCacheFile: e.SUPERTREND_CACHE_FILE || "supertrend-cache.json",
 
     logRetentionDays: num(e.LOG_RETENTION_DAYS, 7),
 

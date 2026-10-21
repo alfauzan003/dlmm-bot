@@ -9,16 +9,15 @@ const TEXT = [
   "SOL_MODE=false",
   "",
   "# ===== Entry =====",
-  "# Ukuran split",
-  "# token vs SOL",
-  "ENTRY_SIZE_SPLIT=0.5",
+  "# Level RSI",
+  "# close di atas",
+  "EVIL_PANDA_RSI_LEVEL=90",
   "ENTRY_SCAN_INTERVAL_SEC=15",
   "#OLD_KEY=1",
   "",
   "# ===== Fee entry (priority fee / Jito tip) =====",
   "ENTRY_FEE_MODE=none",
   "JITO_TIP_ACCOUNTS=",
-  "POOL_LIST_FILE=pool.txt",
 ].join("\n");
 
 test("parseStratText: comment block right under a header is the section description", () => {
@@ -47,10 +46,10 @@ test("parseStratText: sections, help, defaults", () => {
     s.sections.map((x) => x.title),
     ["General", "Entry", "Fee entry (priority fee / Jito tip)"]
   );
-  assert.deepEqual(s.sections[1].keys, ["ENTRY_SIZE_SPLIT", "ENTRY_SCAN_INTERVAL_SEC"]);
-  assert.equal(s.entries.ENTRY_SIZE_SPLIT.help, "Ukuran split\ntoken vs SOL");
+  assert.deepEqual(s.sections[1].keys, ["EVIL_PANDA_RSI_LEVEL", "ENTRY_SCAN_INTERVAL_SEC"]);
+  assert.equal(s.entries.EVIL_PANDA_RSI_LEVEL.help, "Level RSI\nclose di atas");
   assert.equal(s.entries.ENTRY_SCAN_INTERVAL_SEC.help, "");
-  assert.equal(s.entries.ENTRY_SIZE_SPLIT.default, "0.5");
+  assert.equal(s.entries.EVIL_PANDA_RSI_LEVEL.default, "90");
   assert.equal(s.entries.OLD_KEY, undefined);
   assert.equal(s.entries.SOL_MODE.section, 0);
 });
@@ -60,14 +59,13 @@ test("typeOf infers and applies the override table", () => {
   assert.equal(typeOf("ENTRY_SCAN_INTERVAL_SEC", "15").type, "number");
   assert.deepEqual(typeOf("ENTRY_FEE_MODE", "none"), { type: "enum", options: ["none", "priority", "jito", "both"] });
   assert.equal(typeOf("JITO_TIP_ACCOUNTS", "").type, "list");
-  assert.equal(typeOf("POOL_LIST_FILE", "pool.txt").type, "file");
   assert.equal(typeOf("JITO_BLOCK_ENGINE_URL", "https://x").type, "string");
-  assert.deepEqual([typeOf("ENTRY_SIZE_SPLIT", "0.5").min, typeOf("ENTRY_SIZE_SPLIT", "0.5").max], [0, 1]);
+  assert.deepEqual([typeOf("EVIL_PANDA_RSI_LEVEL", "90").min, typeOf("EVIL_PANDA_RSI_LEVEL", "90").max], [0, 100]);
 });
 
 test("validateValue accepts and normalizes good input", () => {
   const s = parseStratText(TEXT);
-  assert.deepEqual(validateValue("ENTRY_SIZE_SPLIT", " +0.25 ", s), { ok: true, value: "0.25" });
+  assert.deepEqual(validateValue("EVIL_PANDA_RSI_LEVEL", " +25 ", s), { ok: true, value: "25" });
   assert.deepEqual(validateValue("SOL_MODE", "TRUE", s), { ok: true, value: "true" });
   assert.deepEqual(validateValue("ENTRY_FEE_MODE", "Jito", s), { ok: true, value: "jito" });
   assert.deepEqual(validateValue("JITO_TIP_ACCOUNTS", " a, ,b ", s), { ok: true, value: "a,b" });
@@ -76,12 +74,11 @@ test("validateValue accepts and normalizes good input", () => {
 
 test("validateValue rejects bad input with a reason", () => {
   const s = parseStratText(TEXT);
-  for (const raw of ["0,5", "abc", "", "1.5"]) assert.equal(validateValue("ENTRY_SIZE_SPLIT", raw, s).ok, false, raw);
-  assert.match(validateValue("ENTRY_SIZE_SPLIT", "1.5", s).error, /0.*1/);
+  for (const raw of ["0,5", "abc", "", "150"]) assert.equal(validateValue("EVIL_PANDA_RSI_LEVEL", raw, s).ok, false, raw);
+  assert.match(validateValue("EVIL_PANDA_RSI_LEVEL", "150", s).error, /0.*100/);
   assert.equal(validateValue("ENTRY_SCAN_INTERVAL_SEC", "-1", s).ok, false);
   assert.equal(validateValue("SOL_MODE", "yes", s).ok, false);
   assert.equal(validateValue("ENTRY_FEE_MODE", "fast", s).ok, false);
-  assert.equal(validateValue("POOL_LIST_FILE", "  ", s).ok, false);
   assert.equal(validateValue("NOT_A_KEY", "1", s).ok, false);
 });
 
@@ -162,34 +159,13 @@ test("safety-relevant numbers reject one-typo values from a phone", () => {
     POLL_INTERVAL_IDLE: ["0"],
     TG_STATUS_INTERVAL: ["0"],
     GAS_RESERVE: ["-5"],
-    ST_ATR_PERIOD: ["0", "2.5"],
-    ENTRY_DEFAULT_SIZE_SOL: ["0"],
-    ENTRY_SIZE_SPLIT: ["1.5", "-0.1"],
-    GMGN_MAX_STALE_MIN: ["0"],
+    EVIL_PANDA_ST_ATR_PERIOD: ["0", "2.5"],
+    EVIL_PANDA_RSI_LEVEL: ["150", "-0.1"],
     ENTRY_TX_RETRY_ATTEMPTS: ["1.5"],
   };
   for (const [key, values] of Object.entries(bad)) {
     for (const v of values) assert.equal(validateValue(key, v, schema).ok, false, `${key}=${v}`);
   }
   assert.equal(validateValue("POLL_INTERVAL_HOLD", "0.1", schema).ok, true);
-  assert.equal(validateValue("ST_ATR_PERIOD", "14", schema).ok, true);
-});
-
-test("file keys accept only a bare, non-protected filename", () => {
-  const schema = loadStratSchema(fileURLToPath(new URL("../strat.conf", import.meta.url)));
-  for (const key of ["POOL_LIST_FILE", "SUPERTREND_CACHE_FILE"]) {
-    for (const v of [
-      ".env",
-      "state.json",
-      "wallet.key",
-      "settings.json",
-      "strat.conf",
-      "../x.txt",
-      "a/b.txt",
-      "a\\b.txt",
-    ]) {
-      assert.equal(validateValue(key, v, schema).ok, false, `${key}=${v}`);
-    }
-    assert.equal(validateValue(key, "pools-2.txt", schema).ok, true, key);
-  }
+  assert.equal(validateValue("EVIL_PANDA_ST_ATR_PERIOD", "14", schema).ok, true);
 });
