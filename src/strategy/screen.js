@@ -5,9 +5,9 @@ const DATAPI_POOLS = "https://dlmm.datapi.meteora.ag/pools";
 const HOUR_MS = 3600000;
 export const BIN_PER_POSITION = 70; // sama dengan DEFAULT_BIN_PER_POSITION
 
-// Jumlah bin (termasuk bin aktif) untuk range -pct%; sama dengan pctToBinRange di lp/range.js.
+// Jumlah bin di bawah bin aktif untuk range -pct% (binsBelow di pctToBinRange, lp/range.js); total bin = hasil + 1.
 export function binsForPct(pct, binStep) {
-  return Math.floor(Math.log(1 - pct / 100) / -Math.log(1 + binStep / 10000)) + 1;
+  return Math.floor(Math.log(1 - pct / 100) / -Math.log(1 + binStep / 10000));
 }
 
 export function poolQueryUrl(p, now, { pageSize = 100 } = {}) {
@@ -84,7 +84,7 @@ function better(a, b) {
 
 // Range minimum harus muat di maxPositions posisi (70 bin per posisi).
 export function coversMinRange(binStep, p) {
-  return binsForPct(p.rangeMinPct, binStep) <= p.maxPositions * BIN_PER_POSITION;
+  return binsForPct(p.rangeMinPct, binStep) + 1 <= p.maxPositions * BIN_PER_POSITION;
 }
 
 export function passesTokenFilters(token, g) {

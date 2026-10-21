@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { WSOL_MINT } from "../src/core/constants.js";
+import { pctToBinRange } from "../src/lp/range.js";
 import { buildProfile, buildAutoEntry } from "../src/strategy/params.js";
 import {
   poolQueryUrl,
@@ -98,8 +99,12 @@ test("pickPoolPerToken: lowest base fee, then highest TVL, then smallest bin ste
 });
 
 test("binsForPct matches pctToBinRange", () => {
-  assert.equal(binsForPct(20, 1), 2232);
-  assert.equal(binsForPct(20, 100), 23);
+  assert.equal(binsForPct(20, 1), 2231);
+  assert.equal(binsForPct(20, 100), 22);
+  for (const [pct, s] of [[20, 1], [20, 100], [65, 80]]) {
+    const r = pctToBinRange({ activeBin: 0, binStep: s, below: pct, above: 0, baseIsX: true });
+    assert.equal(binsForPct(pct, s) + 1, r.binCount);
+  }
 });
 
 test("coversMinRange", () => {
