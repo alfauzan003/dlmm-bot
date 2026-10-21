@@ -128,6 +128,29 @@ test("Evil Panda keys live in their own section and reject bad values", () => {
   for (const key of section.keys) assert.equal(RESTART_KEYS.has(key), false, key);
 });
 
+test("auto entry profile keys: enums, ranges, whole numbers, restart key", () => {
+  const s = parseStratText(
+    [
+      "# ===== Auto Entry · Degen profile =====",
+      "DEGEN_ENTRY_TIMING=pullback",
+      "DEGEN_MAX_POSITIONS=2",
+      "DEGEN_FLIP_PCT=60",
+      "DEGEN_RANGE_PCT=50",
+      "DEGEN_MIN_HOLDERS=800",
+      "AUTO_SCAN_INTERVAL_SEC=60",
+    ].join("\n")
+  );
+  assert.deepEqual(typeOf("DEGEN_ENTRY_TIMING", "pullback"), { type: "enum", options: ["pullback", "immediate"] });
+  assert.deepEqual(typeOf("MULTI_RANGE_MODE", "support"), { type: "enum", options: ["fixed", "support"] });
+  assert.equal(validateValue("DEGEN_MAX_POSITIONS", "11", s).ok, false);
+  assert.equal(validateValue("DEGEN_MAX_POSITIONS", "10", s).ok, true);
+  assert.equal(validateValue("DEGEN_FLIP_PCT", "0", s).ok, false);
+  assert.equal(validateValue("DEGEN_RANGE_PCT", "99.5", s).ok, false);
+  assert.equal(validateValue("DEGEN_MIN_HOLDERS", "1.5", s).ok, false);
+  assert.equal(validateValue("AUTO_SCAN_INTERVAL_SEC", "10", s).ok, false);
+  assert.equal(RESTART_KEYS.has("AUTO_SCAN_INTERVAL_SEC"), true);
+});
+
 test("loadStratSchema on a missing file is empty", () => {
   assert.deepEqual(loadStratSchema("does-not-exist.conf"), { sections: [], entries: {} });
 });

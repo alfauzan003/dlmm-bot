@@ -23,3 +23,7 @@ export const DECISION_LOG_FILE = resolveFile("DECISION_LOG_FILE", "decision-log.
 export const PNL_HISTORY_FILE = resolveFile("PNL_HISTORY_FILE", "pnl-history.json");
 export const SETTINGS_FILE = resolveFile("SETTINGS_FILE", "settings.json");
 export const WALLET_KEY_FILE = resolveFile("WALLET_KEY_FILE", "wallet.key");
+// Auto Entry bid-ask flip: paper trade, log strategi, hasil backtest.
+export const PAPER_FILE = resolveFile("PAPER_FILE", "paper-trades.json");
+export const STRATEGY_LOG_FILE = resolveFile("STRATEGY_LOG_FILE", "strategy-log.jsonl");
+export const BACKTEST_DIR = resolveFile("BACKTEST_DIR", "data/backtest");

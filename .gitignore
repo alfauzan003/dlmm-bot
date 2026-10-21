@@ -14,3 +14,6 @@ backup/
 updatelist.txt
 settings.json
 wallet.key*
+data/
+paper-trades.json
+strategy-log.jsonl

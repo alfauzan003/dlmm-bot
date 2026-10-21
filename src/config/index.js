@@ -1,4 +1,5 @@
 import { loadEnv, bool, num } from "./env.js";
+import { buildAutoEntry } from "../strategy/params.js";
 
 const FEE_MODES = ["none", "priority", "jito", "both"];
 function normalizeFeeMode(raw) {
@@ -163,6 +164,8 @@ export function buildConfig(e) {
 
     entry,
     swap,
+    // Auto Entry bid-ask flip (lihat src/strategy/params.js).
+    autoEntry: buildAutoEntry(e),
   };
 
   return config;

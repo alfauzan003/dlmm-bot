@@ -42,10 +42,24 @@ const OVERRIDES = {
   EVIL_PANDA_MACD_SIGNAL: { min: 1, int: true },
   EVIL_PANDA_BB_LENGTH: { min: 2, int: true },
   EVIL_PANDA_BB_STDDEV: { gt: 0 },
+  DEGEN_ENTRY_TIMING: { type: "enum", options: ["pullback", "immediate"] },
+  MULTI_ENTRY_TIMING: { type: "enum", options: ["pullback", "immediate"] },
+  DEGEN_RANGE_MODE: { type: "enum", options: ["fixed", "support"] },
+  MULTI_RANGE_MODE: { type: "enum", options: ["fixed", "support"] },
+  AUTO_SCAN_INTERVAL_SEC: { min: 15 },
+  AUTO_ORGANIC_SCORE_MIN: { min: 0, max: 100 },
+  AUTO_TOP_HOLDERS_MAX_PCT: { min: 0, max: 100 },
 };
 
 // Aturan per pola nama. OVERRIDES menang.
-const PATTERNS = [[/_(ATTEMPTS|RETRY)$/, { int: true }]];
+const PATTERNS = [
+  [/^(DEGEN|MULTI)_MAX_POSITIONS$/, { min: 1, max: 10, int: true }],
+  [/^(DEGEN|MULTI)_FLIP_PCT$/, { min: 1, max: 100 }],
+  [/^(DEGEN|MULTI)_RANGE_(MIN_|MAX_)?PCT$/, { gt: 0, max: 99 }],
+  [/^(DEGEN|MULTI)_(MAX_OPEN|LOW_VOLUME_BARS|MIN_LPS|MIN_HOLDERS|MIN_BIN_STEP)$/, { min: 0, int: true }],
+  [/^(DEGEN|MULTI)_.*_(PCT|USD|MIN|H|SOL)$/, { min: 0 }],
+  [/_(ATTEMPTS|RETRY)$/, { int: true }],
+];
 
 // File yang ditulis/dibaca bot: tidak boleh diarahkan ke rahasia atau state lain.
 const PROTECTED_FILES = new Set([
@@ -79,6 +93,7 @@ const NON_NEGATIVE_SUFFIXES = [
 export const RESTART_KEYS = new Set([
   "TRADE_EXIT_INTERVAL_SEC",
   "ENTRY_SCAN_INTERVAL_SEC",
+  "AUTO_SCAN_INTERVAL_SEC",
   "JUPITER_POLL_INTERVAL_SEC",
   "LOG_LEVEL",
   "LOG_RETENTION_DAYS",
