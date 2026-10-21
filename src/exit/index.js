@@ -22,6 +22,7 @@ import { getWatchSnapshot, deactivatePool } from "../entry/index.js";
 import { buildSummaryBlock } from "../core/report.js";
 import { runSafetySweep, sweepClosedPosition } from "./sweep.js";
 import { runAutoFlips } from "./auto-flip.js";
+import { runStrategyExits } from "./strategy-exit.js";
 import { kickEvilPanda } from "./evil-panda.js";
 import { syncTrades, setLivePositions, settleTradesForPositions, settleOpenTrades } from "./trade-loop.js";
 
@@ -185,6 +186,12 @@ export async function mainLoop() {
       await runAutoFlips(positions);
     } catch (err) {
       log.error(`Auto flip error: ${err.message}`);
+    }
+    // Exit strategi Auto Entry (cycle_done / pumped_away / range_broken / volume_died / max_hold).
+    try {
+      await runStrategyExits(positions);
+    } catch (err) {
+      log.error(`Strategy exit error: ${err.message}`);
     }
     // Evil Panda per trade (bar 15m yang baru tutup), di latar belakang supaya antrean GMGN tidak menahan loop.
     kickEvilPanda(positions);

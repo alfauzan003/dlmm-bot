@@ -97,6 +97,11 @@ export function exitLabel(reason) {
   if (r === "evil_panda_rsi") return "Evil Panda (RSI)";
   if (r === "evil_panda_macd") return "Evil Panda (MACD)";
   if (r === "evil_panda_bb") return "Evil Panda (BB)";
+  if (r === "cycle_done") return "Cycle done";
+  if (r === "pumped_away") return "Pumped away";
+  if (r === "range_broken") return "Range broken";
+  if (r === "volume_died") return "Volume died";
+  if (r === "max_hold") return "Max hold";
   if (r === "manual") return "Manual close";
   if (r === "closed_outside") return "Closed outside bot";
   return r;

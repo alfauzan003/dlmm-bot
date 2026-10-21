@@ -77,6 +77,14 @@ test("close: drawdown null tidak menampilkan baris Drawdown", () => {
   assert.doesNotMatch(msg, /Drawdown/);
 });
 
+test("exitLabel names the strategy exits", () => {
+  assert.equal(exitLabel("cycle_done"), "Cycle done");
+  assert.equal(exitLabel("pumped_away"), "Pumped away");
+  assert.equal(exitLabel("range_broken"), "Range broken");
+  assert.equal(exitLabel("volume_died"), "Volume died");
+  assert.equal(exitLabel("max_hold"), "Max hold");
+});
+
 test("exitLabel names the Evil Panda signal", () => {
   assert.equal(exitLabel("evil_panda_rsi"), "Evil Panda (RSI)");
   assert.equal(exitLabel("evil_panda_macd"), "Evil Panda (MACD)");
