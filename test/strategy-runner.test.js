@@ -18,7 +18,8 @@ process.env.STRAT_FILE = STRAT;
 const { default: config } = await import("../src/config/index.js");
 const { buildAutoEntry } = await import("../src/strategy/params.js");
 const { entrySignal, barsNeeded } = await import("../src/strategy/signal.js");
-const { setToggle } = await import("../src/state/settings.js");
+const { setToggle, isOn } = await import("../src/state/settings.js");
+const { periodStart } = await import("../src/lp/pnl-stats.js");
 const tg = await import("../src/notify/telegram.js");
 const { runScan, getScreenSnapshot, _resetRunnerForTest } = await import("../src/strategy/runner.js");
 const runtime = await import("../src/entry/runtime.js");
@@ -393,4 +394,101 @@ test("undefined wallet balance is a skip, not a throw", async () => {
   await runScan({ deps });
   assert.equal(calls.planOpen.length, 0);
   assert.equal(getScreenSnapshot()[0].signal, "low_balance");
+});
+
+// Rem rugi harian: batas default 0.5 SOL.
+const brakeLoss = (over) => ({ id: 1, origin: "auto", baseMint: "Other", strategy: { profile: "degen" }, closedAt: NOW - 60_000, ...over });
+
+test("daily brake: limit hit turns Auto Entry off, alerts once, scans nothing", async () => {
+  const brake = [];
+  const { deps, calls } = makeDeps({
+    listClosedTrades: () => [brakeLoss({ closePnlSol: -0.3 }), brakeLoss({ id: 2, closePnlSol: -0.2 })],
+    getSolUsd: async () => 100,
+    notifyDailyBrake: (a) => brake.push(a),
+  });
+  await runScan({ deps });
+  assert.equal(config.autoEntry.dailyLossLimitSol, 0.5);
+  assert.equal(isOn("autoEntry"), false);
+  assert.equal(brake.length, 1);
+  assert.ok(Math.abs(brake[0].pnlSol + 0.5) < 1e-9);
+  assert.equal(brake[0].limitSol, 0.5);
+  assert.equal(calls.fetchPoolRows.length, 0);
+  assert.equal(calls.executeOpen.length, 0);
+});
+
+test("daily brake: just under the limit scans on", async () => {
+  const brake = [];
+  const { deps, calls } = makeDeps({
+    listClosedTrades: () => [brakeLoss({ closePnlSol: -0.499 })],
+    getSolUsd: async () => 100,
+    notifyDailyBrake: (a) => brake.push(a),
+  });
+  await runScan({ deps });
+  assert.equal(isOn("autoEntry"), true);
+  assert.equal(brake.length, 0);
+  assert.equal(calls.fetchPoolRows.length, 1);
+});
+
+test("daily brake: converts USD-only losses with the SOL price", async () => {
+  const brake = [];
+  const { deps } = makeDeps({
+    listClosedTrades: () => [brakeLoss({ closePnlUsd: -60 })],
+    getSolUsd: async () => 100,
+    notifyDailyBrake: (a) => brake.push(a),
+  });
+  await runScan({ deps });
+  assert.equal(isOn("autoEntry"), false);
+  assert.equal(brake.length, 1);
+});
+
+test("daily brake: price lookup fails and only USD-only losses exist -> no brake", async () => {
+  const brake = [];
+  const { deps, calls } = makeDeps({
+    listClosedTrades: () => [brakeLoss({ closePnlUsd: -1000 })],
+    getSolUsd: async () => Promise.reject(new Error("price down")),
+    notifyDailyBrake: (a) => brake.push(a),
+  });
+  await runScan({ deps });
+  assert.equal(isOn("autoEntry"), true);
+  assert.equal(brake.length, 0);
+  assert.equal(calls.fetchPoolRows.length, 1);
+});
+
+test("daily brake: yesterday's losses (WIB) are ignored", async () => {
+  const brake = [];
+  const { deps, calls } = makeDeps({
+    listClosedTrades: ({ sinceMs }) => [brakeLoss({ closedAt: periodStart("today", NOW) - 1000, closePnlSol: -5 })].filter((t) => t.closedAt >= sinceMs),
+    getSolUsd: async () => 100,
+    notifyDailyBrake: (a) => brake.push(a),
+  });
+  await runScan({ deps });
+  assert.equal(isOn("autoEntry"), true);
+  assert.equal(brake.length, 0);
+  assert.equal(calls.fetchPoolRows.length, 1);
+});
+
+test("daily brake: manual trades do not count, DRY_RUN has no refs", async () => {
+  const brake = [];
+  const manual = [brakeLoss({ origin: "manual", strategy: null, closePnlSol: -5 })];
+  const a = makeDeps({ listClosedTrades: () => manual, getSolUsd: async () => 100, notifyDailyBrake: (x) => brake.push(x) });
+  await runScan({ deps: a.deps });
+  const b = makeDeps({
+    dryRun: true,
+    listClosedTrades: () => [brakeLoss({ closePnlSol: -5 })],
+    getSolUsd: async () => 100,
+    notifyDailyBrake: (x) => brake.push(x),
+  });
+  await runScan({ deps: b.deps });
+  assert.equal(brake.length, 0);
+  assert.equal(isOn("autoEntry"), true);
+});
+
+test("daily brake: a throwing dependency does not escape runScan", async () => {
+  const { deps } = makeDeps({
+    listClosedTrades: () => {
+      throw new Error("state unreadable");
+    },
+  });
+  await runScan({ deps });
+  assert.equal(isOn("autoEntry"), true);
 });

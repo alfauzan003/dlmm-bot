@@ -240,6 +240,10 @@ export function notifyEntryAborted({ pool, pair, attempts, error }) {
   );
 }
 
+export function notifyDailyBrake({ pnlSol, limitSol }) {
+  send(`🛑 Daily loss limit hit (${pnlSol.toFixed(3)} SOL ≤ −${limitSol} SOL) — Auto Entry turned OFF. Open trades keep their exits.`);
+}
+
 // Alert entry Auto Entry (live atau paper).
 export function notifyAutoEntry({
   profile,

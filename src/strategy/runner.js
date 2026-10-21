@@ -3,11 +3,14 @@
 import config from "../config/index.js";
 import log from "../core/logger.js";
 import * as tg from "../notify/telegram.js";
-import { isOn } from "../state/settings.js";
+import { isOn, setToggle } from "../state/settings.js";
 import { listOpenTrades, listClosedTrades } from "../state/trades.js";
 import { recordAction, getEntryInProgressMints, isEntryInProgressPool } from "../entry/runtime.js";
 import { planOpen, executeOpen, SOL_BUFFER } from "../lp/open-trade.js";
 import { fetchCandles } from "../market/candles.js";
+import { getPrice } from "../market/jupiter-price.js";
+import { WSOL_MINT } from "../core/constants.js";
+import { periodStart } from "../lp/pnl-stats.js";
 import { getConnection } from "../solana/connection.js";
 import { getWallet } from "../solana/wallet.js";
 import { PROFILES, profileExit } from "./params.js";
@@ -22,7 +25,7 @@ import {
   passesVolatility,
 } from "./screen.js";
 import { entrySignal, pickRangePct, barsNeeded } from "./signal.js";
-import { canOpen } from "./limits.js";
+import { canOpen, todayAutoPnlSol, brakeHit } from "./limits.js";
 import { fetchPoolRows, fetchTokens, countPoolLps } from "./sources.js";
 
 // Runtime-only (reset saat restart): kegagalan entry per base mint, catatan dry run, snapshot.
@@ -54,6 +57,9 @@ function withDeps(deps = {}) {
     notify: tg.notifyAutoEntry,
     notifyEntryFailed: tg.notifyEntryFailed,
     notifyEntryAborted: tg.notifyEntryAborted,
+    notifyDailyBrake: tg.notifyDailyBrake,
+    getSolUsd: () => getPrice(WSOL_MINT),
+    setToggle,
     isOn,
     now: Date.now,
     dryRun: config.dryRun,
@@ -67,26 +73,60 @@ function failureBlocked(mint, now) {
   return f.count >= config.entry.maxFailures || now < f.until;
 }
 
+const isAuto = (t) => t?.origin === "auto" && t.strategy;
+
+// Ref close trade auto sejak sinceMs. DRY_RUN: kosong sampai paper trade ada.
+function closedRefs(d, sinceMs) {
+  if (d.dryRun) return [];
+  return d
+    .listClosedTrades({ sinceMs })
+    .filter(isAuto)
+    .map((t) => ({
+      baseMint: t.baseMint,
+      closedAt: t.closedAt,
+      closePnlUsd: t.closePnlUsd,
+      closePnlSol: t.closePnlSol,
+    }));
+}
+
 // Ref trade auto untuk canOpen. DRY_RUN: kosong sampai paper trade ada.
 function tradeRefs(d, now, g) {
   if (d.dryRun) return { open: [], closed: [] };
-  const auto = (t) => t?.origin === "auto" && t.strategy;
   const sinceMs = now - Math.max(g.cooldownMin, g.cooldownLossMin) * 60000;
   return {
     open: d
       .listOpenTrades()
-      .filter(auto)
+      .filter(isAuto)
       .map((t) => ({ profile: t.strategy.profile, baseMint: t.baseMint })),
-    closed: d
-      .listClosedTrades({ sinceMs })
-      .filter(auto)
-      .map((t) => ({
-        baseMint: t.baseMint,
-        closedAt: t.closedAt,
-        closePnlUsd: t.closePnlUsd,
-        closePnlSol: t.closePnlSol,
-      })),
+    closed: closedRefs(d, sinceMs),
   };
+}
+
+// Rem rugi harian: true bila batas kena (Auto Entry dimatikan + alert). Tidak pernah melempar.
+async function dailyBrake(deps) {
+  try {
+    const d = withDeps(deps);
+    const g = config.autoEntry;
+    const now = d.now();
+    const closed = closedRefs(d, periodStart("today", now));
+    let solUsd = null;
+    if (closed.length > 0) {
+      try {
+        solUsd = await d.getSolUsd();
+      } catch {
+        solUsd = null;
+      }
+    }
+    const pnl = todayAutoPnlSol(closed, solUsd, now);
+    if (!brakeHit(pnl, g)) return false;
+    d.setToggle("autoEntry", false);
+    d.notifyDailyBrake({ pnlSol: pnl, limitSol: g.dailyLossLimitSol });
+    log.warn(`Auto entry: rem rugi harian kena (${pnl.toFixed(3)} SOL ≤ −${g.dailyLossLimitSol} SOL) — Auto Entry OFF`);
+    return true;
+  } catch (err) {
+    log.warn(`Auto entry: cek rem rugi harian gagal: ${err.message}`);
+    return false;
+  }
 }
 
 function recordFailure(row, pair, error, now) {
@@ -353,7 +393,8 @@ export async function runScan({ deps } = {}) {
   if (scanning) return;
   scanning = true;
   try {
-    // Rem rugi harian (AUTO_DAILY_LOSS_LIMIT_SOL) dicek di sini, sebelum profil di-scan.
+    // Rem rugi harian (AUTO_DAILY_LOSS_LIMIT_SOL): cek sebelum profil di-scan.
+    if (await dailyBrake(deps)) return;
 
     for (const name of PROFILES) {
       if (!on("autoEntry")) break;
