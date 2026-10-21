@@ -21,6 +21,7 @@ const { entrySignal, barsNeeded } = await import("../src/strategy/signal.js");
 const { setToggle } = await import("../src/state/settings.js");
 const tg = await import("../src/notify/telegram.js");
 const { runScan, getScreenSnapshot, _resetRunnerForTest } = await import("../src/strategy/runner.js");
+const runtime = await import("../src/entry/runtime.js");
 
 const NOW = 1_800_000_000_000;
 const POOL = "PoolRunner111111111111111111111111111111111";
@@ -341,4 +342,55 @@ test("DRY_RUN uses the openPaperTrade hook when provided", async () => {
   assert.equal(paper[0].strategy.profile, "degen");
   assert.equal(calls.planOpen.length, 0);
   assert.equal(calls.executeOpen.length, 0);
+});
+
+test("Auto Entry turned off mid-scan: no executeOpen, second profile not scanned", async () => {
+  config.autoEntry.profiles.multihour.on = true;
+  const { deps, calls } = makeDeps({
+    planOpen: async (args) => {
+      calls.planOpen.push(args);
+      setToggle("autoEntry", false);
+      return { poolAddress: POOL, pair: "AAA-SOL", baseMint: MINT, positionCount: 1, nonRefundableSol: 0 };
+    },
+  });
+  await runScan({ deps });
+  assert.equal(calls.planOpen.length, 1);
+  assert.equal(calls.executeOpen.length, 0);
+  assert.equal(calls.fetchPoolRows.length, 1, "multihour not scanned after the toggle went off");
+});
+
+test("Auto Entry off before the open step stops the profile (deps.isOn)", async () => {
+  let n = 0;
+  // on saat runScan mulai, lalu off saat scanProfile mencapai langkah open
+  const { deps, calls } = makeDeps({ isOn: () => n++ < 2 });
+  await runScan({ deps });
+  assert.equal(calls.fetchPoolRows.length, 1);
+  assert.equal(calls.planOpen.length, 0);
+  assert.equal(calls.executeOpen.length, 0);
+});
+
+test("manual open started mid-scan on the same mint is not raced, no failure counted", async () => {
+  const { deps, calls } = makeDeps({
+    planOpen: async (args) => {
+      calls.planOpen.push(args);
+      runtime.addEntryInProgressMint(MINT);
+      return { poolAddress: POOL, pair: "AAA-SOL", baseMint: MINT, positionCount: 1, nonRefundableSol: 0 };
+    },
+  });
+  try {
+    await runScan({ deps });
+  } finally {
+    runtime.removeEntryInProgressMint(MINT);
+  }
+  assert.equal(calls.planOpen.length, 1);
+  assert.equal(calls.executeOpen.length, 0);
+  assert.equal(calls.failed.length + calls.aborted.length, 0);
+  assert.equal(getScreenSnapshot()[0].signal, "in_progress");
+});
+
+test("undefined wallet balance is a skip, not a throw", async () => {
+  const { deps, calls } = makeDeps({ getSolBalance: async () => undefined });
+  await runScan({ deps });
+  assert.equal(calls.planOpen.length, 0);
+  assert.equal(getScreenSnapshot()[0].signal, "low_balance");
 });

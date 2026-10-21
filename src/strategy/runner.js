@@ -54,6 +54,7 @@ function withDeps(deps = {}) {
     notify: tg.notifyAutoEntry,
     notifyEntryFailed: tg.notifyEntryFailed,
     notifyEntryAborted: tg.notifyEntryAborted,
+    isOn,
     now: Date.now,
     dryRun: config.dryRun,
     ...deps,
@@ -236,6 +237,9 @@ export async function scanProfile(name, { deps } = {}) {
       continue;
     }
 
+    // Auto Entry dimatikan di tengah scan: berhenti sebelum transaksi apa pun.
+    if (!d.isOn("autoEntry")) break;
+
     // Saldo kurang bukan kegagalan entry: profil dilewati scan ini.
     let balance;
     try {
@@ -246,7 +250,7 @@ export async function scanProfile(name, { deps } = {}) {
     }
     const need = p.sizeSol + config.entry.gasReserve + SOL_BUFFER;
     if (!(balance >= need)) {
-      log.warn(`Auto entry ${name}: saldo ${balance.toFixed(4)} SOL < ${need.toFixed(4)} SOL — profil dilewati`);
+      log.warn(`Auto entry ${name}: saldo ${Number(balance).toFixed(4)} SOL < ${need.toFixed(4)} SOL — profil dilewati`);
       snap.signal = "low_balance";
       break;
     }
@@ -277,6 +281,14 @@ export async function scanProfile(name, { deps } = {}) {
     if (plan.positionCount > p.maxPositions) {
       log.warn(`Auto entry ${name}: ${pair} dilewati: ${plan.positionCount} posisi > ${p.maxPositions}`);
       snap.signal = "positions";
+      continue;
+    }
+
+    // Cek ulang tepat sebelum transaksi: toggle bisa OFF selama planOpen; /open manual bisa mulai di pool/mint ini.
+    if (!d.isOn("autoEntry")) break;
+    if (getEntryInProgressMints().has(row.baseMint) || isEntryInProgressPool(row.address)) {
+      log.warn(`Auto entry ${name}: ${pair} dilewati: entry lain sedang berjalan`);
+      snap.signal = "in_progress";
       continue;
     }
 
@@ -333,7 +345,8 @@ export async function scanProfile(name, { deps } = {}) {
 
 // Satu putaran scan semua profil aktif. Langsung kembali bila Auto Entry OFF atau scan masih jalan.
 export async function runScan({ deps } = {}) {
-  if (!isOn("autoEntry")) {
+  const on = deps?.isOn ?? isOn;
+  if (!on("autoEntry")) {
     snapshots.clear();
     return;
   }
@@ -343,6 +356,7 @@ export async function runScan({ deps } = {}) {
     // Rem rugi harian (AUTO_DAILY_LOSS_LIMIT_SOL) dicek di sini, sebelum profil di-scan.
 
     for (const name of PROFILES) {
+      if (!on("autoEntry")) break;
       if (!config.autoEntry.profiles[name]?.on) {
         snapshots.delete(name);
         continue;
