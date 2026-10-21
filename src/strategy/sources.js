@@ -1,7 +1,9 @@
 // Sumber data backtest/strategi (I/O): daftar pool Meteora, OHLCV, info token Jupiter, seri SOL/USD.
 // Setiap fungsi menerima deps { fetchJson, sleep, now } agar tes tidak menyentuh jaringan.
+import { PublicKey } from "@solana/web3.js";
 import config from "../config/index.js";
 import { WSOL_MINT, USDC_MINT } from "../core/constants.js";
+import { getConnection } from "../solana/connection.js";
 import { toPoolRow } from "./screen.js";
 
 const METEORA_BASE = "https://dlmm.datapi.meteora.ag";
@@ -10,8 +12,11 @@ const OHLCV_WINDOW_SEC = 90 * OHLCV_BAR_SEC;
 const OHLCV_MIN_RANGE_SEC = 6900;
 const TOKEN_BATCH = 100;
 const TOKEN_CACHE_MS = 5 * 60 * 1000;
+const LP_CACHE_MS = 10 * 60 * 1000;
+const POSITION_OWNER_OFFSET = 40; // discriminator 8 + lb_pair 32 (positionOwnerFilter SDK)
 
 const tokenCache = new Map(); // mint -> { at, token }
+const lpCache = new Map(); // pool -> { at, count }
 let meteoraLastAt = -Infinity; // jam pacing bersama semua request datapi Meteora
 
 export function resetMeteoraPace() {
@@ -99,6 +104,25 @@ export async function fetchTokens(mints, { deps } = {}) {
     }
   }
   return out;
+}
+
+// Jumlah LP (owner unik posisi DLMM) di pool; cache 10 menit, null bila RPC gagal (tidak di-cache).
+export async function countPoolLps(pool, { deps } = {}) {
+  const d = { now: Date.now, getConnection, loadSdk: () => import("@meteora-ag/dlmm"), ...deps };
+  const hit = lpCache.get(pool);
+  if (hit && d.now() - hit.at < LP_CACHE_MS) return hit.count;
+  try {
+    const sdk = await d.loadSdk();
+    const accounts = await d.getConnection().getProgramAccounts(new PublicKey(sdk.LBCLMM_PROGRAM_IDS["mainnet-beta"]), {
+      filters: [sdk.positionV2Filter(), sdk.positionLbPairFilter(new PublicKey(pool))],
+      dataSlice: { offset: POSITION_OWNER_OFFSET, length: 32 },
+    });
+    const owners = new Set(accounts.map((a) => Buffer.from(a.account.data).toString("hex")));
+    lpCache.set(pool, { at: d.now(), count: owners.size });
+    return owners.size;
+  } catch {
+    return null;
+  }
 }
 
 // Pool WSOL/USDC dengan volume 24j terbesar; solIsX menentukan arah harga close.

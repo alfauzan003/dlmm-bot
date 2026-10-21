@@ -48,24 +48,12 @@ export function humanReason(reason) {
   return r;
 }
 
-function trendLabel(trend) {
-  if (trend === "bullish") return "tren NAIK";
-  if (trend === "bearish") return "tren TURUN";
-  return "tren belum siap";
-}
+const pctOrQ = (v, n) => (v != null && Number.isFinite(Number(v)) ? `${Number(v).toFixed(n)}%` : "?");
 
+// Kandidat screener terakhir (strategy/runner.js getScreenSnapshot).
 function watchLine(w) {
   const name = w.pairName || `${w.pool.slice(0, 8)}…`;
-  if (w.line == null || w.price == null) {
-    return `${name} | ${trendLabel(w.trend)} | harga belum tersedia untuk dibandingkan`;
-  }
-  if (w.trend !== "bullish") {
-    return `${name} | ${trendLabel(w.trend)} | harga ${fmtNum(w.price)} vs garis ${fmtNum(w.line)} → tidak dipantau untuk entry`;
-  }
-  const above = w.price > w.line;
-  return `${name} | ${trendLabel(w.trend)} | harga ${fmtNum(w.price)} vs garis ${fmtNum(w.line)} → ${
-    above ? "masih DI ATAS garis (menunggu turun)" : "sudah menyentuh garis (siap entry)"
-  }`;
+  return `${name} | ${w.profile} | fee/TVL ${pctOrQ(w.feeTvl30mPct, 2)} | vol ${pctOrQ(w.volatilityPct, 1)} | ${w.signal}`;
 }
 
 // Bangun blok ringkasan multi-baris (satu string).

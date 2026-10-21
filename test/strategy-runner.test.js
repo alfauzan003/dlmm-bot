@@ -1,0 +1,344 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "fs";
+import os from "os";
+import path from "path";
+
+// Semua file runtime ke direktori sementara SEBELUM modul di-import.
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "meteorabot-runner-"));
+process.env.STATE_FILE = path.join(TMP, "state.json");
+process.env.SETTINGS_FILE = path.join(TMP, "settings.json");
+process.env.PAPER_FILE = path.join(TMP, "paper-trades.json");
+process.env.STRATEGY_LOG_FILE = path.join(TMP, "strategy-log.jsonl");
+process.env.BACKTEST_DIR = path.join(TMP, "backtest");
+const STRAT = path.join(TMP, "strat.conf");
+fs.writeFileSync(STRAT, fs.readFileSync(new URL("../strat.conf", import.meta.url), "utf8"));
+process.env.STRAT_FILE = STRAT;
+
+const { default: config } = await import("../src/config/index.js");
+const { buildAutoEntry } = await import("../src/strategy/params.js");
+const { entrySignal, barsNeeded } = await import("../src/strategy/signal.js");
+const { setToggle } = await import("../src/state/settings.js");
+const tg = await import("../src/notify/telegram.js");
+const { runScan, getScreenSnapshot, _resetRunnerForTest } = await import("../src/strategy/runner.js");
+
+const NOW = 1_800_000_000_000;
+const POOL = "PoolRunner111111111111111111111111111111111";
+const MINT = "MintRunner111111111111111111111111111111111";
+
+// Nilai default terkunci (tidak bergantung strat.conf lokal); hanya profil degen yang aktif.
+function resetConfig() {
+  Object.assign(config.autoEntry, buildAutoEntry({}));
+  config.autoEntry.profiles.multihour.on = false;
+  config.entry.maxFailures = 3;
+  config.entry.failureCooldownSec = 300;
+  config.entry.gasReserve = 0.05;
+}
+
+// 13 bar 5m tertutup: naik 6 bar (+5%/bar), lalu turun 6 bar merah (-1%/bar) => sinyal pullback.
+function makeBars({ lastGreen = false } = {}) {
+  const bars = [];
+  const startSec = NOW / 1000 - 300 * 14;
+  let o = 1;
+  for (let i = 0; i < 13; i++) {
+    let c;
+    if (i === 0) c = 1;
+    else if (i <= 6) c = o * 1.05;
+    else c = o * 0.99;
+    if (i === 12 && lastGreen) c = o * 1.001;
+    bars.push({
+      time: startSec + i * 300,
+      open: o,
+      high: Math.max(o, c) * 1.01,
+      low: Math.min(o, c) * 0.99,
+      close: c,
+      volume: 1000,
+    });
+    o = c;
+  }
+  return bars;
+}
+
+const ROW = {
+  address: POOL,
+  name: "AAA-SOL",
+  baseMint: MINT,
+  baseIsX: true,
+  binStep: 100,
+  baseFeePct: 2,
+  protocolFeePct: 5,
+  tvlUsd: 50000,
+  volume30mUsd: 50000,
+  feeTvl30mPct: 1.5,
+  mcapUsd: 1_000_000,
+  holders: 2000,
+  createdAt: NOW - 3_600_000,
+};
+
+const TOKEN = {
+  id: MINT,
+  organicScore: 80,
+  audit: { topHoldersPercentage: 10, mintAuthorityDisabled: true, freezeAuthorityDisabled: true },
+};
+
+// Semua deps di-stub; mencatat panggilan. `over` menimpa stub tertentu.
+function makeDeps(over = {}) {
+  const calls = { fetchPoolRows: [], fetchTokens: [], planOpen: [], executeOpen: [], notify: [], failed: [], aborted: [] };
+  let now = NOW;
+  const deps = {
+    now: () => now,
+    dryRun: false,
+    fetchPoolRows: async (url) => {
+      calls.fetchPoolRows.push(url);
+      return [ROW];
+    },
+    fetchTokens: async (mints) => {
+      calls.fetchTokens.push(mints);
+      return new Map([[MINT, TOKEN]]);
+    },
+    fetchCandles: async () => makeBars(),
+    countPoolLps: async () => 50,
+    listOpenTrades: () => [],
+    listClosedTrades: () => [],
+    getSolBalance: async () => 10,
+    planOpen: async (args) => {
+      calls.planOpen.push(args);
+      return { poolAddress: POOL, pair: "AAA-SOL", baseMint: MINT, positionCount: 1, nonRefundableSol: 0 };
+    },
+    executeOpen: async (plan, opts) => {
+      calls.executeOpen.push({ plan, opts });
+      return { success: true, trade: { id: 1 } };
+    },
+    notify: (a) => calls.notify.push(a),
+    notifyEntryFailed: (a) => calls.failed.push(a),
+    notifyEntryAborted: (a) => calls.aborted.push(a),
+    ...over,
+  };
+  return { deps, calls, setNow: (ms) => (now = ms) };
+}
+
+test.beforeEach(() => {
+  fs.rmSync(process.env.SETTINGS_FILE, { force: true });
+  setToggle("autoEntry", true);
+  resetConfig();
+  _resetRunnerForTest();
+  tg.__setSender(async () => null);
+});
+
+test.after(() => {
+  tg.__setSender(null);
+  fs.rmSync(TMP, { recursive: true, force: true });
+});
+
+test("fixture bars form an entry signal", () => {
+  const p = config.autoEntry.profiles.degen;
+  assert.equal(entrySignal(makeBars(), p).enter, true);
+  assert.equal(entrySignal(makeBars({ lastGreen: true }), p).reason, "not_red");
+  assert.ok(makeBars().length >= barsNeeded(p));
+});
+
+test("runScan does nothing when Auto Entry is off", async () => {
+  setToggle("autoEntry", false);
+  const { deps, calls } = makeDeps();
+  await runScan({ deps });
+  assert.equal(calls.fetchPoolRows.length, 0);
+});
+
+test("happy path opens one live trade with auto meta", async () => {
+  const p = config.autoEntry.profiles.degen;
+  const { deps, calls } = makeDeps();
+  await runScan({ deps });
+
+  assert.equal(calls.fetchPoolRows.length, 1, "multihour off => one profile scanned");
+  assert.ok(calls.fetchPoolRows[0].startsWith("https://dlmm.datapi.meteora.ag/pools?"));
+  assert.equal(calls.planOpen.length, 1);
+  const args = calls.planOpen[0];
+  assert.equal(args.poolAddress, POOL);
+  assert.equal(args.depositSol, p.sizeSol);
+  assert.equal(args.below, p.rangePct);
+  assert.equal(args.above, 0);
+  assert.equal(args.shape, "bid_ask");
+
+  assert.equal(calls.executeOpen.length, 1);
+  const { meta } = calls.executeOpen[0].opts;
+  assert.equal(meta.origin, "auto");
+  assert.equal(meta.autoFlip.pct, p.flipPct);
+  assert.deepEqual(meta.exit.tp, { on: true, pct: p.tpPct });
+  assert.equal(meta.strategy.profile, "degen");
+  assert.deepEqual(meta.strategy.params, { ...p });
+  assert.equal(meta.strategy.entry.rangePct, p.rangePct);
+  assert.deepEqual(meta.strategy.entry.poolMeta, { binStep: 100, baseFeePct: 2, protocolFeePct: 5, tvlUsd: 50000 });
+  assert.equal(meta.strategy.entry.metrics.feeTvl30mPct, 1.5);
+  assert.equal(meta.strategy.entry.metrics.lps, 50);
+  assert.ok(meta.strategy.entry.metrics.volatilityPct > 2);
+  assert.equal(meta.strategy.entry.signal.reason, "signal");
+  assert.ok(meta.strategy.entry.signal.pumpPct > 20);
+
+  assert.equal(calls.notify.length, 1);
+  assert.equal(calls.notify[0].profile, "degen");
+  assert.equal(calls.notify[0].pair, "AAA-SOL");
+  assert.equal(calls.notify[0].pool, POOL);
+  assert.equal(calls.notify[0].rangePct, p.rangePct);
+});
+
+test("skips non-refundable rent above the cap and too many positions", async () => {
+  const p = config.autoEntry.profiles.degen;
+  for (const plan of [
+    { positionCount: 1, nonRefundableSol: config.autoEntry.maxNonRefundableSol + 0.01 },
+    { positionCount: p.maxPositions + 1, nonRefundableSol: 0 },
+    { positionCount: 1, nonRefundableSol: null },
+    { error: "range too wide" },
+  ]) {
+    _resetRunnerForTest();
+    const { deps, calls } = makeDeps({
+      planOpen: async () => ({ poolAddress: POOL, pair: "AAA-SOL", baseMint: MINT, ...plan }),
+    });
+    await runScan({ deps });
+    assert.equal(calls.executeOpen.length, 0, JSON.stringify(plan));
+    assert.equal(calls.failed.length, 0);
+  }
+});
+
+test("skips when wallet SOL is below size + GAS_RESERVE + 0.08, without counting a failure", async () => {
+  const p = config.autoEntry.profiles.degen;
+  const need = p.sizeSol + config.entry.gasReserve + 0.08;
+  for (let i = 0; i < config.entry.maxFailures + 1; i++) {
+    const { deps, calls } = makeDeps({ getSolBalance: async () => need - 0.001 });
+    await runScan({ deps });
+    assert.equal(calls.planOpen.length, 0);
+    assert.equal(calls.executeOpen.length, 0);
+    assert.equal(calls.failed.length + calls.aborted.length, 0);
+  }
+  const { deps, calls } = makeDeps({ getSolBalance: async () => need + 0.001 });
+  await runScan({ deps });
+  assert.equal(calls.executeOpen.length, 1, "not blocked: low balance is not a failure");
+});
+
+test("token already open in another profile is skipped", async () => {
+  const { deps, calls } = makeDeps({
+    listOpenTrades: () => [{ id: 9, origin: "auto", baseMint: MINT, strategy: { profile: "multihour" } }],
+  });
+  await runScan({ deps });
+  assert.equal(calls.fetchTokens.length, 0);
+  assert.equal(calls.executeOpen.length, 0);
+});
+
+test("manual trade of the same token does not count as an auto open", async () => {
+  const { deps, calls } = makeDeps({
+    listOpenTrades: () => [{ id: 9, origin: "manual", baseMint: MINT, strategy: null }],
+  });
+  await runScan({ deps });
+  assert.equal(calls.executeOpen.length, 1);
+});
+
+test("token closed recently with a loss is in cooldown", async () => {
+  const { deps, calls } = makeDeps({
+    listClosedTrades: () => [
+      { id: 3, origin: "auto", baseMint: MINT, strategy: { profile: "degen" }, closedAt: NOW - 60_000, closePnlUsd: -5 },
+    ],
+  });
+  await runScan({ deps });
+  assert.equal(calls.executeOpen.length, 0);
+});
+
+test("datapi failure skips the profile without throwing", async () => {
+  config.autoEntry.profiles.multihour.on = true;
+  let n = 0;
+  const { deps, calls } = makeDeps({
+    fetchPoolRows: async (url) => {
+      calls.fetchPoolRows.push(url);
+      if (n++ === 0) throw new Error("HTTP 500");
+      return [];
+    },
+  });
+  await runScan({ deps });
+  assert.equal(calls.fetchPoolRows.length, 2, "second profile still scanned");
+  assert.equal(calls.executeOpen.length, 0);
+});
+
+test("token / candle failures skip without throwing", async () => {
+  const a = makeDeps({ fetchTokens: async () => Promise.reject(new Error("jup down")) });
+  await runScan({ deps: a.deps });
+  assert.equal(a.calls.executeOpen.length, 0);
+  const b = makeDeps({ fetchCandles: async () => Promise.reject(new Error("ohlcv down")) });
+  await runScan({ deps: b.deps });
+  assert.equal(b.calls.executeOpen.length, 0);
+});
+
+test("LP count below MIN_LPS or unknown skips", async () => {
+  for (const lps of [3, null]) {
+    _resetRunnerForTest();
+    const { deps, calls } = makeDeps({ countPoolLps: async () => lps });
+    await runScan({ deps });
+    assert.equal(calls.planOpen.length, 0, String(lps));
+  }
+});
+
+test("failures: cooldown then block after ENTRY_MAX_FAILURES", async () => {
+  const max = config.entry.maxFailures;
+  const cooldownMs = config.entry.failureCooldownSec * 1000;
+  const { deps, calls, setNow } = makeDeps({
+    executeOpen: async (plan, opts) => {
+      calls.executeOpen.push({ plan, opts });
+      return { success: false, error: "boom" };
+    },
+  });
+  let t = NOW;
+  for (let i = 1; i <= max; i++) {
+    setNow(t);
+    await runScan({ deps });
+    assert.equal(calls.executeOpen.length, i);
+    if (i < max) {
+      // masih cooldown
+      setNow(t + cooldownMs - 1000);
+      await runScan({ deps });
+      assert.equal(calls.executeOpen.length, i, "cooldown blocks a retry");
+    }
+    t += cooldownMs + 1000;
+  }
+  assert.equal(calls.failed.length, max - 1);
+  assert.equal(calls.failed[0].pool, POOL);
+  assert.equal(calls.failed[0].pair, "AAA-SOL");
+  assert.equal(calls.failed[0].error, "boom");
+  assert.equal(calls.aborted.length, 1);
+  assert.equal(calls.aborted[0].attempts, max);
+
+  setNow(t + 10 * cooldownMs);
+  await runScan({ deps });
+  assert.equal(calls.executeOpen.length, max, "blocked until restart");
+});
+
+test("snapshot lists candidates with signal reason", async () => {
+  const { deps, calls } = makeDeps({ fetchCandles: async () => makeBars({ lastGreen: true }) });
+  await runScan({ deps });
+  assert.equal(calls.planOpen.length, 0);
+  const snap = getScreenSnapshot();
+  assert.equal(snap.length, 1);
+  assert.equal(snap[0].profile, "degen");
+  assert.equal(snap[0].pairName, "AAA-SOL");
+  assert.equal(snap[0].pool, POOL);
+  assert.equal(snap[0].feeTvl30mPct, 1.5);
+  assert.ok(snap[0].volatilityPct > 2);
+  assert.equal(snap[0].signal, "not_red");
+});
+
+test("DRY_RUN never calls planOpen/executeOpen", async () => {
+  const { deps, calls } = makeDeps({ dryRun: true });
+  await runScan({ deps });
+  await runScan({ deps });
+  assert.equal(calls.planOpen.length, 0);
+  assert.equal(calls.executeOpen.length, 0);
+  assert.equal(calls.notify.length, 0);
+});
+
+test("DRY_RUN uses the openPaperTrade hook when provided", async () => {
+  const paper = [];
+  const { deps, calls } = makeDeps({ dryRun: true, openPaperTrade: async (a) => paper.push(a) });
+  await runScan({ deps });
+  assert.equal(paper.length, 1);
+  assert.equal(paper[0].profile, "degen");
+  assert.equal(paper[0].rangePct, config.autoEntry.profiles.degen.rangePct);
+  assert.equal(paper[0].strategy.profile, "degen");
+  assert.equal(calls.planOpen.length, 0);
+  assert.equal(calls.executeOpen.length, 0);
+});

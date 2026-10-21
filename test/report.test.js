@@ -6,21 +6,21 @@ function blockWith(watch) {
   return buildSummaryBlock({ mode: "LIVE", now: Date.now(), watched: [watch] });
 }
 
-test("bullish + harga <= garis ditandai siap entry", () => {
-  const block = blockWith({ pool: "p1", pairName: "WOW-SOL", trend: "bullish", line: 100, price: 99 });
-  assert.match(block, /siap entry/);
+test("watched candidate line shows profile, fee/TVL, volatility and signal", () => {
+  const block = blockWith({
+    profile: "degen",
+    pairName: "AAA-SOL",
+    pool: "P",
+    feeTvl30mPct: 0.85,
+    volatilityPct: 3.1,
+    signal: "signal",
+  });
+  assert.ok(block.includes("AAA-SOL | degen | fee/TVL 0.85% | vol 3.1% | signal"));
 });
 
-test("bullish + harga di atas garis menunggu turun", () => {
-  const block = blockWith({ pool: "p1", pairName: "WOW-SOL", trend: "bullish", line: 100, price: 101 });
-  assert.match(block, /menunggu turun/);
-  assert.doesNotMatch(block, /siap entry/);
-});
-
-test("bearish tidak pernah ditandai siap entry walau harga di bawah garis", () => {
-  const block = blockWith({ pool: "p1", pairName: "WOW-SOL", trend: "bearish", line: 100, price: 99 });
-  assert.doesNotMatch(block, /siap entry/);
-  assert.match(block, /tidak dipantau untuk entry/);
+test("watched candidate without pair name or volatility", () => {
+  const block = blockWith({ profile: "multihour", pairName: null, pool: "PoolAbcdef123", feeTvl30mPct: 1, volatilityPct: null, signal: "organic" });
+  assert.ok(block.includes("PoolAbcd… | multihour | fee/TVL 1.00% | vol ? | organic"));
 });
 
 test("clock menampilkan WIB (UTC+7)", () => {

@@ -8,32 +8,16 @@ import path from "path";
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "meteorabot-toggles-"));
 const STATE = path.join(TMP, "state.json");
 const SETTINGS = path.join(TMP, "settings.json");
-const POOLS = path.join(TMP, "pool.txt");
 const STRAT = path.join(TMP, "strat.conf");
 process.env.STATE_FILE = STATE;
 process.env.SETTINGS_FILE = SETTINGS;
+process.env.PAPER_FILE = path.join(TMP, "paper-trades.json");
+process.env.STRATEGY_LOG_FILE = path.join(TMP, "strategy-log.jsonl");
+process.env.BACKTEST_DIR = path.join(TMP, "backtest");
 process.env.DECISION_LOG_FILE = path.join(TMP, "decision-log.json");
 process.env.PNL_HISTORY_FILE = path.join(TMP, "pnl-history.json");
-process.env.SUPERTREND_CACHE_FILE = path.join(TMP, "supertrend-cache.json");
 
-const POOL = "PoolToggle1111111111111111111111111111111111";
-// Pool terpisah dari POOL: refreshCandidates menandai POOL sebagai "entered".
-const WATCH_POOL = "PoolWatch11111111111111111111111111111111111";
-const MINT = "MintToggle1111111111111111111111111111111111";
-
-// Supertrend bullish untuk MINT (bar tutup terakhir), supaya watchPrices lanjut
-// ke fetch harga Jupiter tanpa menyentuh GMGN.
-const closedBar = Math.floor(Date.now() / 1000 / 900) * 900 - 900;
-fs.writeFileSync(
-  process.env.SUPERTREND_CACHE_FILE,
-  JSON.stringify({
-    schema: 2,
-    savedAt: Date.now(),
-    state: { [MINT]: { direction: "bullish", line: 1, closedBar, updatedAt: Date.now() } },
-  })
-);
-
-// Spy fetch: hitung panggilan, kembalikan respons inert (tidak pernah ke jaringan).
+// Spy fetch: catat URL, kembalikan respons gagal (tidak pernah ke jaringan) => profil dilewati.
 async function withFetchSpy(fn) {
   const realFetch = globalThis.fetch;
   const urls = [];
@@ -49,65 +33,32 @@ async function withFetchSpy(fn) {
   return urls;
 }
 
-// strat.conf sementara = salinan strat.conf asli + pool list sementara, supaya
-// refreshCandidates punya satu pool tanpa menyentuh pool.txt produksi.
+// strat.conf sementara = salinan strat.conf asli + profil degen aktif.
 const realStrat = fs.readFileSync(new URL("../strat.conf", import.meta.url), "utf8");
-fs.writeFileSync(STRAT, `${realStrat}\nPOOL_LIST_FILE=${POOLS}\nENTRY_ENABLED=true\n`);
-fs.writeFileSync(POOLS, `${POOL},0.1,3\n`);
+fs.writeFileSync(STRAT, `${realStrat}\nDEGEN_ON=true\n`);
 process.env.STRAT_FILE = STRAT;
 
 const { setToggle } = await import("../src/state/settings.js");
-const { trackPosition } = await import("../src/state/positions.js");
-const { refreshCandidates, watchAndEnter, _setCandidatesForTest } = await import("../src/entry/index.js");
-
-const POSITION = "PosToggle11111111111111111111111111111111111";
-
-function resetState() {
-  fs.writeFileSync(STATE, JSON.stringify({ positions: {} }));
-}
+const { runScan } = await import("../src/strategy/runner.js");
 
 test.beforeEach(() => {
   fs.rmSync(SETTINGS, { force: true });
-  resetState();
-  // Posisi bot yang sudah terbuka di pool => refreshCandidates tidak perlu RPC
-  // saat toggle ON (pool dihitung sebagai "masih terbuka") dan mengembalikan [].
-  trackPosition(POSITION, POOL, "TEST-SOL", "mint", 0, "bidask:double");
+  fs.writeFileSync(STATE, JSON.stringify({ positions: {} }));
 });
 
 test.after(() => {
   fs.rmSync(TMP, { recursive: true, force: true });
 });
 
-test("refreshCandidates returns null when autoEntry off", async () => {
+test("runScan returns without fetching when autoEntry off; fetches the datapi pool list when on", async () => {
   setToggle("autoEntry", false);
-  assert.equal(await refreshCandidates(), null);
-});
+  const offUrls = await withFetchSpy(() => runScan());
+  assert.deepEqual(offUrls, [], "no fetch at all when autoEntry off");
 
-test("refreshCandidates runs when autoEntry on (toggle, not strat.conf, decides)", async () => {
   setToggle("autoEntry", true);
-  assert.deepEqual(await refreshCandidates(), []);
-});
-
-test("watchAndEnter skips the Jupiter price fetch when autoEntry off, does it when on", async () => {
-  _setCandidatesForTest([{ pool: WATCH_POOL, mint: MINT, sizeSol: 0.1, pairName: "TEST-SOL" }]);
-  try {
-    setToggle("autoEntry", false);
-    let result;
-    const offUrls = await withFetchSpy(async () => {
-      result = await watchAndEnter();
-    });
-    assert.equal(result, null);
-    assert.deepEqual(offUrls, [], "no fetch at all when autoEntry off");
-
-    setToggle("autoEntry", true);
-    const onUrls = await withFetchSpy(async () => {
-      await watchAndEnter();
-    });
-    assert.ok(
-      onUrls.some((u) => u.startsWith("https://api.jup.ag/price/")),
-      "Jupiter price fetched when autoEntry on"
-    );
-  } finally {
-    _setCandidatesForTest([]);
-  }
+  const onUrls = await withFetchSpy(() => runScan());
+  assert.ok(
+    onUrls.some((u) => u.startsWith("https://dlmm.datapi.meteora.ag/pools?")),
+    "datapi pool list fetched when autoEntry on"
+  );
 });

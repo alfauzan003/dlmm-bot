@@ -293,3 +293,8 @@ test("set:exit opens the Exit strategy screen", async () => {
   const edit = calls.filter((c) => c.method === "editMessageText").at(-1);
   assert.match(edit.payload.text, /Exit strategy/);
 });
+
+test("settings text explains Auto Entry", () => {
+  const { text } = buildSettings(DEFAULT_SETTINGS, true);
+  assert.ok(text.includes("Auto Entry screens Meteora pools and runs the bid-ask flip (profiles in 🧩 Strategy)."));
+});

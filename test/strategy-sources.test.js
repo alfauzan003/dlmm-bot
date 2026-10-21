@@ -10,6 +10,7 @@ import {
   solUsdSeries,
   solUsdAtFn,
   resetMeteoraPace,
+  countPoolLps,
 } from "../src/strategy/sources.js";
 
 test("fetchOhlcvRange paginates windows and dedupes", async () => {
@@ -174,4 +175,28 @@ test("fetchTokens routes by Jupiter key", async () => {
   assert.equal(seen[0].headers["x-api-key"], "test-key");
   assert.ok(seen[1].url.startsWith("https://lite-api.jup.ag/tokens/v2/search?"));
   assert.ok(!seen[1].headers || !("x-api-key" in seen[1].headers));
+});
+
+test("countPoolLps counts distinct owners, caches per pool, null on error", async () => {
+  const owner = (b) => ({ account: { data: Buffer.alloc(32, b) } });
+  const seen = [];
+  const connection = {
+    getProgramAccounts: async (programId, opts) => {
+      seen.push({ programId: programId.toBase58(), opts });
+      return [owner(1), owner(2), owner(1)];
+    },
+  };
+  const deps = { now: () => 1_000, getConnection: () => connection };
+  assert.equal(await countPoolLps(WSOL_MINT, { deps }), 2);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].programId, "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo");
+  assert.deepEqual(seen[0].opts.dataSlice, { offset: 40, length: 32 });
+  assert.equal(seen[0].opts.filters.length, 2);
+  assert.equal(seen[0].opts.filters[1].memcmp.offset, 8); // lb_pair
+  // cache 10 menit
+  assert.equal(await countPoolLps(WSOL_MINT, { deps }), 2);
+  assert.equal(seen.length, 1);
+
+  const failing = { getProgramAccounts: async () => Promise.reject(new Error("rpc down")) };
+  assert.equal(await countPoolLps(USDC_MINT, { deps: { now: () => 1_000, getConnection: () => failing } }), null);
 });

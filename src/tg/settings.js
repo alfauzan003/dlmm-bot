@@ -58,6 +58,7 @@ export function buildSettings(settings, dryRun) {
     "⚙️ Settings",
     "",
     "Tap a toggle to switch it. Tap TP / SL / Trail to change the Auto Exit defaults for new trades.",
+    "Auto Entry screens Meteora pools and runs the bid-ask flip (profiles in 🧩 Strategy).",
     "Range presets and Deposits set the quick-pick buttons in /open.",
     "Auto flip is the default for new bid_ask / mixed trades from /open.",
     "",

@@ -235,6 +235,30 @@ export function notifyEntryAborted({ pool, pair, attempts, error }) {
   );
 }
 
+// Alert entry Auto Entry (live atau paper).
+export function notifyAutoEntry({
+  profile,
+  pair,
+  pool,
+  sizeSol,
+  rangePct,
+  binStep,
+  baseFeePct,
+  feeTvl30mPct,
+  volatilityPct,
+  mcapUsd,
+  paper = false,
+}) {
+  send(
+    [
+      `${paper ? "📝 PAPER " : ""}🤖 Auto entry · ${profile} · ${pair}`,
+      `Size ${sizeSol} SOL · range −${rangePct.toFixed(0)}% · bin ${binStep} · fee ${baseFeePct}%`,
+      `Fee/TVL 30m ${feeTvl30mPct.toFixed(2)}% · volatility ${volatilityPct.toFixed(1)}% · MC ${fmtUsd(mcapUsd)}`,
+      `Pool: ${pool}`,
+    ].join("\n")
+  );
+}
+
 function emoji(v) {
   if (v == null || v === 0) return "";
   return v > 0 ? "🟢" : "🔴";

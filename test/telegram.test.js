@@ -161,7 +161,7 @@ test("status tidak lagi menampilkan Trailing / Peak / Exit at (exit per trade)",
 
 // --- Close alert: tx + Metlex hand-off ---
 
-const { notifyTradeClosed, notifyClose, __setSender } = await import("../src/notify/telegram.js");
+const { notifyTradeClosed, notifyClose, notifyAutoEntry, __setSender } = await import("../src/notify/telegram.js");
 const METLEX_URL = "https://www.metlex.io/pnl-cards";
 
 function captureSender() {
@@ -272,4 +272,33 @@ test("close alerts pass editMessageId through to edit the sent alert", async () 
   assert.equal(sent[0].extra.parse_mode, "HTML");
   assert.equal(sent[1].extra.editMessageId, 8);
   assert.deepEqual(sent[2].extra, {});
+});
+
+test("notifyAutoEntry: live and paper text", () => {
+  const sent = captureSender();
+  const args = {
+    profile: "degen",
+    pair: "AAA-SOL",
+    pool: "PoolX",
+    sizeSol: 0.5,
+    rangePct: 49.6,
+    binStep: 100,
+    baseFeePct: 2,
+    feeTvl30mPct: 1.234,
+    volatilityPct: 3.06,
+    mcapUsd: 1500000,
+  };
+  notifyAutoEntry(args);
+  notifyAutoEntry({ ...args, paper: true });
+  __setSender(null);
+  assert.equal(
+    sent[0].text,
+    [
+      "🤖 Auto entry · degen · AAA-SOL",
+      "Size 0.5 SOL · range −50% · bin 100 · fee 2%",
+      "Fee/TVL 30m 1.23% · volatility 3.1% · MC $1500000.00",
+      "Pool: PoolX",
+    ].join("\n")
+  );
+  assert.ok(sent[1].text.startsWith("📝 PAPER 🤖 Auto entry · degen · AAA-SOL\n"));
 });
