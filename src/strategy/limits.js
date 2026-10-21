@@ -19,7 +19,7 @@ export function canOpen({ p, open, closed, mint, now, g }) {
   if (open.filter((t) => t.profile === p.name).length >= p.maxOpen) return { ok: false, reason: "max_open" };
   if (open.some((t) => t.baseMint === mint)) return { ok: false, reason: "token_open" };
   if (now < cooldownUntil(closed, mint, g)) return { ok: false, reason: "cooldown" };
-  return { ok: true, reason: "ok" };
+  return { ok: true, reason: null };
 }
 
 // PnL hari ini (WIB) dalam SOL; USD dikonversi pakai solUsd, dilewati bila tidak ada harga.
@@ -29,7 +29,7 @@ export function todayAutoPnlSol(closed, solUsd, now) {
   for (const t of closed) {
     if (!(t.closedAt >= start)) continue;
     if (fin(t.closePnlSol)) sum += t.closePnlSol;
-    else if (fin(t.closePnlUsd) && solUsd > 0) sum += t.closePnlUsd / solUsd;
+    else if (fin(t.closePnlUsd) && Number.isFinite(solUsd) && solUsd > 0) sum += t.closePnlUsd / solUsd;
   }
   return sum;
 }

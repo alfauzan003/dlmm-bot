@@ -10,7 +10,7 @@ test("canOpen order", () => {
   assert.equal(canOpen({ p: { ...p, on: false }, open: [], closed: [], mint: "M", now: 0, g }).reason, "profile_off");
   assert.equal(canOpen({ p, open: [{ profile: "degen", baseMint: "X" }], closed: [], mint: "M", now: 0, g }).reason, "max_open");
   assert.equal(canOpen({ p: { ...p, maxOpen: 2 }, open: [{ profile: "multihour", baseMint: "M" }], closed: [], mint: "M", now: 0, g }).reason, "token_open");
-  assert.equal(canOpen({ p, open: [], closed: [], mint: "M", now: 0, g }).ok, true);
+  assert.deepEqual(canOpen({ p, open: [], closed: [], mint: "M", now: 0, g }), { ok: true, reason: null });
 });
 
 test("cooldown from closed trades: 2h after win, 12h after loss", () => {
@@ -19,8 +19,9 @@ test("cooldown from closed trades: 2h after win, 12h after loss", () => {
   assert.equal(cooldownUntil(win, "M", g), 120 * 60000);
   assert.equal(cooldownUntil(loss, "M", g), 720 * 60000);
   assert.equal(cooldownUntil([], "M", g), 0);
+  assert.equal(cooldownUntil([{ baseMint: "M", closedAt: 0, closePnlUsd: -1 }], "M", g), 720 * 60000);
   assert.equal(canOpen({ p, open: [], closed: win, mint: "M", now: 119 * 60000, g }).reason, "cooldown");
-  assert.equal(canOpen({ p, open: [], closed: win, mint: "M", now: 120 * 60000, g }).ok, true);
+  assert.deepEqual(canOpen({ p, open: [], closed: win, mint: "M", now: 120 * 60000, g }), { ok: true, reason: null });
 });
 
 test("cooldown uses the latest close for the mint", () => {
