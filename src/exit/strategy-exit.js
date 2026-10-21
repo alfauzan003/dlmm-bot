@@ -38,12 +38,17 @@ export async function runStrategyExits(positions, { deps = {}, now = Date.now() 
       const legs = (trade.positions || []).filter((addr) => !isLegClosed(addr)).map((addr) => live.get(addr)).filter(Boolean);
       if (legs.length === 0) continue;
       const flipSet = new Set(trade.flipLegs || []);
-      const main = legs.find((l) => !flipSet.has(l.position)) ?? legs[0];
+      // activeBin null (RPC kosong) dibaca sebagai bin 0 → jangan evaluasi tanpa bin aktif yang valid.
+      const known = legs.filter((l) => Number.isFinite(l.activeBin));
+      const main = known.find((l) => !flipSet.has(l.position)) ?? known[0];
+      if (!main) continue;
       const p = trade.strategy.params;
       const view = {
         activeBin: main.activeBin,
         xIsSol: main.xIsSol === true,
-        flipLegs: legs.filter((l) => flipSet.has(l.position)).map((l) => ({ lowerBin: l.lowerBin, upperBin: l.upperBin })),
+        flipLegs: legs
+          .filter((l) => flipSet.has(l.position) && Number.isFinite(l.lowerBin) && Number.isFinite(l.upperBin))
+          .map((l) => ({ lowerBin: l.lowerBin, upperBin: l.upperBin })),
         volumes: await loadVolumes(trade, main, p, now, fetchCandles),
       };
 

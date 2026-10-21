@@ -19,6 +19,7 @@ const { runStrategyExits } = await import("../src/exit/strategy-exit.js");
 const { createTrade, getTrade, setTradeStrategyState, addTradeLeg, tryLockTrade, unlockTrade } = await import(
   "../src/state/trades.js"
 );
+const { trackPosition, recordClose } = await import("../src/state/positions.js");
 const { setToggle } = await import("../src/state/settings.js");
 
 test.after(() => {
@@ -222,4 +223,55 @@ test("a failing trade does not stop the others", async () => {
   const ids = await runStrategyExits([leg(-5), leg(-5, { position: "L2" })], { deps: { closeTrade }, now: 15 * 60000 });
   assert.deepEqual(calls, [a.id, b.id]);
   assert.deepEqual(ids, [b.id]);
+});
+
+test("a live leg with unknown activeBin never closes and writes no state", async () => {
+  const trade = newTrade();
+  setTradeStrategyState(trade.id, { aboveSince: null, belowSince: 0 });
+  const spy = spyClose();
+  for (const activeBin of [null, undefined, NaN]) {
+    await runStrategyExits([leg(activeBin)], { deps: { closeTrade: spy.closeTrade }, now: 60 * 60000 });
+  }
+  assert.equal(spy.calls.length, 0);
+  assert.deepEqual(getTrade(trade.id).strategyState, { aboveSince: null, belowSince: 0 });
+});
+
+test("a flip leg with a null bound is ignored", async () => {
+  const trade = newTrade();
+  addTradeLeg(trade.id, "F", { flip: true });
+  const spy = spyClose();
+  const flip = { position: "F", pool: "PoolA", baseMint: "MintA", activeBin: 70, lowerBin: null, upperBin: 60, xIsSol: false };
+  await runStrategyExits([leg(70), flip], { deps: { closeTrade: spy.closeTrade }, now: 1000 });
+  assert.equal(spy.calls.length, 0, "no cycle_done from a half-known flip leg");
+});
+
+test("main leg selection ignores flip legs when a non-flip leg exists", async () => {
+  const trade = newTrade();
+  addTradeLeg(trade.id, "F", { flip: true });
+  const spy = spyClose();
+  // Flip leg di depan array dengan bin aktif di bawah range; leg utama masih di dalam range.
+  const flip = { position: "F", pool: "PoolA", baseMint: "MintA", activeBin: -5, lowerBin: 40, upperBin: 60, xIsSol: false };
+  await runStrategyExits([flip, leg(50)], { deps: { closeTrade: spy.closeTrade }, now: 60 * 60000 });
+  assert.equal(spy.calls.length, 0);
+  assert.equal(getTrade(trade.id).strategyState, undefined, "evaluated from the main leg (in range)");
+});
+
+test("legs closed in state are skipped; a trade whose only live leg is closed is not evaluated", async () => {
+  const trade = newTrade();
+  setTradeStrategyState(trade.id, { aboveSince: null, belowSince: 0 });
+  trackPosition("L1", "PoolA", "AAA-SOL", "MintA", null, "bidask:double");
+  recordClose("L1", "manual", 0);
+  const spy = spyClose();
+  await runStrategyExits([leg(-5)], { deps: { closeTrade: spy.closeTrade }, now: 15 * 60000 });
+  assert.equal(spy.calls.length, 0);
+
+  // Leg kedua yang masih terbuka dipakai; leg yang tertutup diabaikan.
+  fs.rmSync(process.env.STATE_FILE, { force: true });
+  const t2 = newTrade({ positions: ["L1", "L2"] });
+  setTradeStrategyState(t2.id, { aboveSince: null, belowSince: 0 });
+  trackPosition("L1", "PoolA", "AAA-SOL", "MintA", null, "bidask:double");
+  recordClose("L1", "manual", 0);
+  await runStrategyExits([leg(50), leg(-5, { position: "L2" })], { deps: { closeTrade: spy.closeTrade }, now: 15 * 60000 });
+  assert.equal(spy.calls.length, 1, "closed L1 (in range) ignored, live L2 (below) drives the exit");
+  assert.equal(spy.calls[0].reason, "range_broken");
 });
