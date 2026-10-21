@@ -4,6 +4,7 @@ import { binsForPct } from "../src/strategy/screen.js";
 import {
   bidAskWeights,
   barPath,
+  binOf,
   createSimPosition,
   moveActive,
   accrueFees,
@@ -124,7 +125,7 @@ test("TP from profile exit fires", () => {
   const bars = [flat(0, 1), chop, flat(600, 1), flat(900, 1)];
   const r = simulateTrade({ bars, entryIndex: 1, p: { ...base, tpPct: 0.5 }, pool, solUsdAt: () => 100, sim });
   assert.equal(r.exitReason, "tp");
-  assert.equal(r.exitIndex, 2);
+  assert.equal(r.exitIndex, 1); // fee bar chop masuk di titik terakhirnya, sebelum cek exit
   assert.ok(r.feesSol > 0.005);
 });
 
@@ -159,4 +160,42 @@ test("no range when rangeMin cannot fit → null", () => {
     }),
     null
   );
+});
+
+test("flipped round trip without volume pays exactly 2·positions + 3 tx", () => {
+  const bars = [flat(0, 1), flat(300, 1), flat(600, 0.75), flat(900, 1.1)];
+  const r = simulateTrade({ bars, entryIndex: 1, p: base, pool, solUsdAt: () => 100, sim });
+  assert.equal(r.flipped, true);
+  assert.equal(r.feesSol, 0);
+  // Replikasi: dump ke 0.75 (flip), naik ke 1.1, tutup di 1.1.
+  const pos = createSimPosition({ depositSol: 1, rangePct: base.rangePct, binStep: 100, p0: 1 });
+  moveActive(pos, binOf(0.75, 1, 100));
+  flipSimPosition(pos);
+  moveActive(pos, binOf(1.1, 1, 100));
+  let sol = 0;
+  let token = 0;
+  for (const b of pos.bins.values()) {
+    sol += b.sol;
+    token += b.token;
+  }
+  const positions = Math.ceil(pos.n / 70);
+  const value = sol + token * 1.1 * (1 - sim.swapCostPct / 100) - sim.txCostSol * (2 * positions + 3);
+  assert.ok(Math.abs(r.pnlSol - (value - 1)) < 1e-12);
+});
+
+test("mid-bar stop earns only the visited share of that bar's volume", () => {
+  // Bar hijau 1 -> 0.97 -> 1 -> 1: kunjungan [0,-1,-2,-3,-2,-1,0] = 7; stop di titik 1 -> 4 kunjungan.
+  const chop = { time: 300, open: 1, high: 1, low: 0.97, close: 1, volume: 1e6 };
+  const bars = [flat(0, 1), chop, flat(600, 1)];
+  // Likuiditas pool = likuiditas kita per bin -> porsi kita 50% di tiap bin, fee sebanding jumlah kunjungan.
+  const ref = createSimPosition({ depositSol: 1, rangePct: base.rangePct, binStep: 100, p0: 1 });
+  const poolLiqSolAt = (k) => ref.bins.get(k).sol;
+  const run = (stopAtSec) =>
+    simulateTrade({ bars, entryIndex: 1, p: base, pool, solUsdAt: () => 100, sim, poolLiqSolAt, stopAtSec });
+  const part = run(375);
+  const full = run(525);
+  assert.equal(part.exitReason, "stop");
+  assert.equal(full.exitReason, "stop");
+  assert.ok(full.feesSol > 0);
+  assert.ok(Math.abs(part.feesSol / full.feesSol - 4 / 7) < 1e-12);
 });

@@ -169,23 +169,29 @@ export function simulateTrade({ bars, entryIndex, p, pool, solUsdAt, sim, poolLi
     // Total kunjungan bin sepanjang bar, untuk membagi volume bila trade tutup di tengah bar.
     let totalVisits = 1;
     for (let j = 0, from = pos.active; j < ks.length; from = ks[j++]) totalVisits += Math.abs(ks[j] - from);
-    const visits = [pos.active];
-    const view = { activeBin: 0, xIsSol: false, flipLegs: [], volumes: bars.slice(0, i).map((b) => b.volume) };
+    let visits = [pos.active];
+    // Fee untuk kunjungan sejauh ini, volume diskalakan dengan porsi kunjungan bar.
+    const accrue = () => {
+      accrueFees(pos, { visits, volumeSol: (volumeSol * visits.length) / totalVisits, lpFeeRate, poolLiqSolAt: liqAt });
+      visits = [];
+    };
+    const volumes = p.lowVolumeBars > 0 ? bars.slice(Math.max(0, i - p.lowVolumeBars), i).map((b) => b.volume) : [];
+    const view = { activeBin: 0, xIsSol: false, flipLegs: [], volumes };
 
     for (let j = 0; j < path.length; j++) {
       const price = path[j];
       const t = bar.time + POINT_SEC * j;
+      const last = j === path.length - 1;
       visits.push(...pathVisits(pos.active, ks[j]).slice(1));
       moveActive(pos, ks[j]);
-      if (
-        !flipped &&
-        pos.n > 1 &&
-        (-pos.active / (pos.n - 1)) * 100 >= p.flipPct &&
-        flipSimPosition(pos).binCount > 0
-      ) {
-        flipped = true;
-        trade.flipLegs = ["sim"];
+      if (!flipped && pos.n > 1 && (-pos.active / (pos.n - 1)) * 100 >= p.flipPct) {
+        accrue(); // kunjungan sebelum flip dihitung dengan distribusi lama
+        if (flipSimPosition(pos).binCount > 0) {
+          flipped = true;
+          trade.flipLegs = ["sim"];
+        }
       }
+      if (last) accrue(); // fee bar masuk sebelum cek exit di titik terakhir
       const costs = sim.txCostSol * (positions + (flipped ? 2 : 0));
       const pnlPct = ((positionValueSol(pos, price) + pos.feesSol - costs - deposit) / deposit) * 100;
       const te = evaluateTradeExit(trade, pnlPct);
@@ -196,15 +202,10 @@ export function simulateTrade({ bars, entryIndex, p, pool, solUsdAt, sim, poolLi
       const se = evaluateStrategyExit({ trade, view, p, now: t * 1000 });
       trade.strategyState = se.state;
 
-      const last = j === path.length - 1;
       let reason = te.reason ?? se.reason;
       if (!reason && stopAtSec != null && t >= stopAtSec) reason = "stop";
       if (!reason && last && i === bars.length - 1) reason = "end_of_data";
-      if (reason || last) {
-        // Fee bar: volume dibagi rata per kunjungan bin, hanya kunjungan sampai titik ini.
-        const vol = (volumeSol * visits.length) / totalVisits;
-        accrueFees(pos, { visits, volumeSol: vol, lpFeeRate, poolLiqSolAt: liqAt });
-      }
+      if (reason && !last) accrue(); // tutup di tengah bar: hanya porsi kunjungan sejauh ini
       if (reason) return finish(price, reason, i, t * 1000);
     }
   }
