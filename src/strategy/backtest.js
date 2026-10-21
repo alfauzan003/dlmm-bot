@@ -93,3 +93,99 @@ function summarize(trades) {
     exitMix,
   };
 }
+
+// Ruang pencarian optimizer; trail/volatility berupa pasangan [a, b] yang dipecah jadi dua field.
+export const SEARCH_SPACE = {
+  common: {
+    entryTiming: ["pullback", "immediate"],
+    minPumpPct: [10, 15, 20, 30, 50],
+    minPullbackPct: [3, 5, 8, 12],
+    maxPullbackPct: [20, 30, 40],
+    rangeMode: ["fixed", "support"],
+    rangePct: [25, 35, 45, 55, 65],
+    supportBufferPct: [0, 5, 10],
+    flipPct: [40, 50, 60, 70, 80],
+    tpPct: [0, 3, 5, 8, 10, 15, 20],
+    slPct: [0, 10, 15, 20, 30],
+    trail: [[0, 0], [5, 2], [5, 3], [10, 3]],
+    oorAboveMin: [5, 10, 20, 30, 60],
+    oorBelowMin: [5, 15, 30, 60, 120],
+    minFeeTvl30mPct: [0.1, 0.2, 0.5, 1],
+    volatility: [[1, 4], [2, 4], [2, 6], [3, 8], [0, 100]],
+  },
+  degen: { maxHoldMin: [60, 120, 240] },
+  multihour: { maxHoldMin: [360, 720, 1440, 2880] },
+};
+
+const PAIR_FIELDS = { trail: ["trailStartPct", "trailDistancePct"], volatility: ["volatilityMinPct", "volatilityMaxPct"] };
+export const MIN_TRADES = 20;
+const TOP_TRAIN = 50;
+const TOP_REPORT = 10;
+
+// RNG ber-seed (hasil deterministik per --seed).
+export function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function sampleParams(space, rng) {
+  const out = {};
+  for (const [key, options] of Object.entries(space)) {
+    const pick = options[Math.floor(rng() * options.length)];
+    if (PAIR_FIELDS[key]) PAIR_FIELDS[key].forEach((f, k) => (out[f] = pick[k]));
+    else out[key] = pick;
+  }
+  return out;
+}
+
+// mean% - 0.5 * |rata-rata 10% terburuk|; -Infinity bila trade kurang dari minTrades.
+export function scoreTrades(trades, { minTrades = MIN_TRADES } = {}) {
+  if (trades.length < minTrades) return -Infinity;
+  const { meanPct, worst10Pct } = summarize(trades);
+  return meanPct - 0.5 * Math.abs(worst10Pct);
+}
+
+const byScoreDesc = (a, b) => (a < b ? 1 : a > b ? -1 : 0);
+
+// Random search + walk-forward: train = bagian awal rentang waktu bar, validate = sisanya.
+// results[].params = profil lengkap (baseP + sampel); train/validate = { score, ...totals }.
+export function optimize({ dataset, barsByPool, baseP, g, solUsdAt, samples, seed, trainFrac = 0.7, minTrades = MIN_TRADES, space }) {
+  const pools = [];
+  let first = Infinity;
+  let last = -Infinity;
+  for (const { row, token } of dataset.pools) {
+    const bars = barsByPool instanceof Map ? barsByPool.get(row.address) : barsByPool[row.address];
+    if (!bars?.length) continue;
+    pools.push({ row, token, bars });
+    first = Math.min(first, bars[0].time);
+    last = Math.max(last, bars[bars.length - 1].time);
+  }
+  if (!pools.length) return { cutoffSec: null, results: [] };
+  const cutoffSec = first + trainFrac * (last - first);
+  const sampleSpace = space ?? { ...SEARCH_SPACE.common, ...SEARCH_SPACE[baseP.name] };
+  const rng = mulberry32(seed);
+  const scored = [];
+  for (let s = 0; s < samples; s++) {
+    const params = { ...baseP, ...sampleParams(sampleSpace, rng) };
+    const trades = pools.flatMap(({ row, token, bars }) => replayPool({ row, token, bars, p: params, g, solUsdAt }));
+    const side = (list) => {
+      const { accepted, totals } = portfolioPass(list, params, g);
+      return { score: scoreTrades(accepted, { minTrades }), ...totals };
+    };
+    const train = side(trades.filter((t) => t.entryTime < cutoffSec * 1000));
+    if (train.score === -Infinity) continue;
+    scored.push({ params, train, validate: side(trades.filter((t) => t.entryTime >= cutoffSec * 1000)) });
+  }
+  const results = scored
+    .sort((a, b) => byScoreDesc(a.train.score, b.train.score))
+    .slice(0, TOP_TRAIN)
+    .sort((a, b) => byScoreDesc(a.validate.score, b.validate.score) || byScoreDesc(a.train.score, b.train.score))
+    .slice(0, TOP_REPORT);
+  return { cutoffSec, results };
+}

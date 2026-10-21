@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { historicalScreen, replayPool, portfolioPass } from "../src/strategy/backtest.js";
+import { historicalScreen, replayPool, portfolioPass, SEARCH_SPACE, mulberry32, sampleParams, scoreTrades, optimize } from "../src/strategy/backtest.js";
 import { buildAutoEntry, buildProfile } from "../src/strategy/params.js";
 
 const g = buildAutoEntry({});
@@ -166,4 +166,75 @@ test("totals of an empty list", () => {
   assert.equal(totals.trades, 0);
   assert.equal(totals.winRate, 0);
   assert.deepEqual(totals.exitMix, {});
+});
+
+test("mulberry32 is deterministic", () => {
+  const a = mulberry32(1);
+  const b = mulberry32(1);
+  assert.equal(a(), b());
+  assert.notEqual(mulberry32(1)(), mulberry32(2)());
+});
+
+test("sampleParams draws only from the space and expands pairs", () => {
+  const s = sampleParams({ ...SEARCH_SPACE.common, ...SEARCH_SPACE.degen }, mulberry32(7));
+  assert.ok(SEARCH_SPACE.common.flipPct.includes(s.flipPct));
+  assert.ok(SEARCH_SPACE.degen.maxHoldMin.includes(s.maxHoldMin));
+  assert.ok("trailStartPct" in s && "trailDistancePct" in s && "volatilityMinPct" in s && "volatilityMaxPct" in s);
+  assert.ok(!("trail" in s) && !("volatility" in s));
+});
+
+test("scoreTrades", () => {
+  const t = (pct) => ({ pnlPct: pct, pnlSol: pct / 100, exitTime: 0, holdMin: 1, flipped: false, exitReason: "tp" });
+  assert.equal(scoreTrades([t(1)], { minTrades: 2 }), -Infinity);
+  const list = [...Array(9).fill(t(2)), t(-10)];
+  assert.ok(Math.abs(scoreTrades(list, { minTrades: 10 }) - (0.8 - 5)) < 1e-9);
+});
+
+test("optimize splits by time and ranks by validation", () => {
+  const a = cycle(0);
+  const b = cycle(a[a.length - 1].time);
+  const c = cycle(b[b.length - 1].time);
+  const bars = [...a, ...b, ...c, ...cycle(c[c.length - 1].time)];
+  const row = { ...rowFixture, tvlUsd: 100 };
+  const barsByPool = new Map([["POOL", bars]]);
+  const args = {
+    dataset: { pools: [{ row, token: goodToken }] },
+    barsByPool,
+    baseP: profile,
+    g: { ...g, cooldownMin: 0, cooldownLossMin: 0 },
+    solUsdAt,
+    samples: 5,
+    seed: 3,
+    minTrades: 1,
+    space: { flipPct: [40, 60], slPct: [0, 10] },
+  };
+  const { cutoffSec, results } = optimize(args);
+  const span = bars[bars.length - 1].time - bars[0].time;
+  assert.equal(cutoffSec, bars[0].time + 0.7 * span);
+  assert.ok(results.length > 0 && results.length <= 10);
+  for (const r of results) {
+    assert.ok(r.train.trades > 0 && r.validate.trades >= 0);
+    assert.ok(r.train.score > -Infinity);
+    assert.ok([40, 60].includes(r.params.flipPct));
+    assert.equal(r.params.name, "degen");
+  }
+  assert.ok(results.some((r) => r.validate.trades > 0)); // sisi validate memang berisi trade
+  for (let k = 1; k < results.length; k++) assert.ok(results[k - 1].validate.score >= results[k].validate.score);
+  assert.deepEqual(optimize(args), { cutoffSec, results }); // deterministik per seed
+});
+
+test("optimize returns no results when no sample reaches minTrades", () => {
+  const bars = twoCycles();
+  const out = optimize({
+    dataset: { pools: [{ row: rowFixture, token: goodToken }] },
+    barsByPool: { POOL: bars },
+    baseP: profile,
+    g,
+    solUsdAt,
+    samples: 3,
+    seed: 1,
+    minTrades: 20,
+    space: { flipPct: [60] },
+  });
+  assert.deepEqual(out.results, []);
 });

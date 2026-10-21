@@ -1,16 +1,19 @@
-// Backtest bid-ask flip. Perintah: fetch (kumpulkan dataset ke BACKTEST_DIR/<profile>/).
+// Backtest bid-ask flip. Perintah: fetch (kumpulkan dataset ke BACKTEST_DIR/<profile>/), run (optimizer + laporan).
 // Pakai: node scripts/backtest-flip.js fetch --profile <degen|multihour> --days 5 --max-pools 200
+//        node scripts/backtest-flip.js run   --profile <degen|multihour> --samples 400 --seed 1
 import fs from "fs";
 import path from "path";
 import config from "../src/config/index.js";
 import { BACKTEST_DIR } from "../src/core/paths.js";
-import { PROFILES } from "../src/strategy/params.js";
+import { PROFILES, PROFILE_FIELDS, profileToConf } from "../src/strategy/params.js";
+import { optimize, MIN_TRADES } from "../src/strategy/backtest.js";
 import {
   fetchPoolRows,
   fetchOhlcvRange,
   fetchTokens,
   findSolUsdPoolInfo,
   solUsdSeries,
+  solUsdAtFn,
 } from "../src/strategy/sources.js";
 
 const DATAPI_POOLS = "https://dlmm.datapi.meteora.ag/pools";
@@ -103,14 +106,112 @@ async function cmdFetch(args) {
   );
 }
 
+const LIMITS = [
+  "5m granularity misses intra-bar chop.",
+  "Our real fee share is unknown historically (to be calibrated later).",
+  "Dynamic fees are ignored (conservative).",
+  "SOL/USD drift inside a trade is ignored.",
+  "Survivorship bias: the pool universe is today's pools; token filters (organic score, holders, top holders) use today's snapshot.",
+];
+const HEADERS = [
+  "#", "train score", "train n", "val score", "val n", "win %", "mean %", "median %", "worst10 %",
+  "total SOL", "max DD SOL", "avg hold min", "flip %", "top exits", "changed params",
+];
+
+const fmt = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : "n/a");
+const topExits = (mix) =>
+  Object.entries(mix).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => `${k}:${n}`).join(" ") || "-";
+const changedParams = (p, base) =>
+  PROFILE_FIELDS.filter((f) => p[f.field] !== base[f.field]).map((f) => `${f.field}=${p[f.field]}`).join(" ") || "-";
+
+// Metrik (win rate dst.) diambil dari sisi validate = di luar sampel.
+function resultRow(r, rank, base) {
+  const v = r.validate;
+  return [
+    rank, fmt(r.train.score), r.train.trades, fmt(v.score), v.trades,
+    fmt(v.winRate * 100, 1), fmt(v.meanPct), fmt(v.medianPct), fmt(v.worst10Pct),
+    fmt(v.totalSol, 3), fmt(v.maxDrawdownSol, 3), fmt(v.avgHoldMin, 0), fmt(v.flipRate * 100, 0),
+    topExits(v.exitMix), changedParams(r.params, base),
+  ];
+}
+
+function mdTable(rows) {
+  const line = (cells) => `| ${cells.join(" | ")} |`;
+  return [line(HEADERS), line(HEADERS.map(() => "---")), ...rows.map(line)].join("\n");
+}
+
+async function cmdRun(args) {
+  const profile = args.profile;
+  if (!PROFILES.includes(profile)) throw new Error(`--profile harus salah satu: ${PROFILES.join(", ")}`);
+  const samples = Math.floor(Number(args.samples ?? 400));
+  const seed = Number(args.seed ?? 1);
+  if (!(samples > 0) || !Number.isFinite(seed)) throw new Error("--samples harus > 0 dan --seed harus angka");
+
+  const dir = path.join(BACKTEST_DIR, profile);
+  const dataset = readJson(path.join(dir, "dataset.json"));
+  if (!dataset) throw new Error(`dataset tidak ada di ${dir} — jalankan fetch dulu`);
+  const barsByPool = new Map();
+  for (const { row } of dataset.pools) {
+    const bars = readJson(path.join(dir, "bars", `${row.address}.json`));
+    if (Array.isArray(bars) && bars.length > 0) barsByPool.set(row.address, bars);
+  }
+  const baseP = config.autoEntry.profiles[profile];
+  console.log(`[${profile}] ${barsByPool.size} pool, ${samples} sampel, seed ${seed}`);
+
+  const { cutoffSec, results } = optimize({
+    dataset,
+    barsByPool,
+    baseP,
+    g: config.autoEntry,
+    solUsdAt: solUsdAtFn(dataset.solUsd),
+    samples,
+    seed,
+    minTrades: MIN_TRADES,
+  });
+
+  const date = new Date().toISOString().slice(0, 10);
+  const reportFile = path.join(dir, `report-${date}.md`);
+  const head = [
+    `# Backtest report — ${profile} — ${date}`,
+    "",
+    `Dataset: ${barsByPool.size} pools, ${dataset.days} days, fetched ${new Date(dataset.fetchedAt).toISOString()}. Samples: ${samples}, seed: ${seed}.`,
+    cutoffSec == null
+      ? ""
+      : `Train/validate cutoff: ${new Date(cutoffSec * 1000).toISOString()} (older 70% = train, newest 30% = validate). Metrics columns are from the validate side; ranked by validate score.`,
+    "",
+  ];
+  const limits = ["## Known limits", "", ...LIMITS.map((l) => `- ${l}`), ""];
+
+  if (results.length === 0) {
+    const msg = `No parameter set reached ${MIN_TRADES} trades — fetch more pools or days.`;
+    console.log(msg);
+    fs.writeFileSync(reportFile, [...head, msg, "", ...limits].join("\n"));
+    console.log(`report -> ${reportFile}`);
+    return;
+  }
+
+  const rows = results.map((r, k) => resultRow(r, k + 1, baseP));
+  console.log(HEADERS.join(" | "));
+  for (const r of rows) console.log(r.join(" | "));
+  fs.writeFileSync(reportFile, [...head, "## Top parameter sets", "", mdTable(rows), "", ...limits].join("\n"));
+  const bestFile = path.join(dir, "best.conf");
+  fs.writeFileSync(bestFile, profileToConf(results[0].params));
+  console.log(`report -> ${reportFile}`);
+  console.log(`best   -> ${bestFile}`);
+  console.log("Not applied — paste best.conf into strat.conf or set the keys in /settings → 🧩 Strategy.");
+}
+
 const [cmd] = process.argv.slice(2);
 const args = parseArgs(process.argv.slice(3));
-if (cmd === "fetch") {
-  cmdFetch(args).catch((err) => {
-    console.error(`fetch gagal: ${err.message}`);
+if (cmd === "fetch" || cmd === "run") {
+  (cmd === "fetch" ? cmdFetch : cmdRun)(args).catch((err) => {
+    console.error(`${cmd} gagal: ${err.message}`);
     process.exit(1);
   });
 } else {
-  console.error("Pakai: node scripts/backtest-flip.js fetch --profile <degen|multihour> --days 5 --max-pools 200");
+  console.error(
+    "Pakai: node scripts/backtest-flip.js fetch --profile <degen|multihour> --days 5 --max-pools 200\n" +
+      "       node scripts/backtest-flip.js run   --profile <degen|multihour> --samples 400 --seed 1"
+  );
   process.exit(1);
 }
