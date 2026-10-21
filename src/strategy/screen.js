@@ -3,7 +3,7 @@ import { WSOL_MINT } from "../core/constants.js";
 
 const DATAPI_POOLS = "https://dlmm.datapi.meteora.ag/pools";
 const HOUR_MS = 3600000;
-const BIN_PER_POSITION = 70; // sama dengan DEFAULT_BIN_PER_POSITION
+export const BIN_PER_POSITION = 70; // sama dengan DEFAULT_BIN_PER_POSITION
 
 // Jumlah bin (termasuk bin aktif) untuk range -pct%; sama dengan pctToBinRange di lp/range.js.
 export function binsForPct(pct, binStep) {
