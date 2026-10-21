@@ -25,6 +25,7 @@ export function createTrade({
   origin,
   exit,
   autoFlip = null,
+  strategy = null,
 }) {
   const state = readState();
   const trades = ensureTrades(state);
@@ -59,6 +60,8 @@ export function createTrade({
   };
   // Auto flip { pct }: flip otomatis saat harga melewati pct% sisi SOL range (sekali, lalu mati).
   if (autoFlip) trade.autoFlip = { ...autoFlip };
+  // Strategi auto entry: { profile, params, entry } (hanya trade origin auto).
+  if (strategy) trade.strategy = strategy;
   trades[String(id)] = trade;
   writeState(state);
   return trade;
@@ -105,13 +108,14 @@ export function setTradeExit(id, partialExit) {
   return t;
 }
 
-// Ubah metadata trade (origin, exit, depositSol). Exit baru me-reset peak & arming.
-export function updateTradeMeta(id, { origin, exit, depositSol } = {}) {
+// Ubah metadata trade (origin, exit, depositSol, strategy). Exit baru me-reset peak & arming.
+export function updateTradeMeta(id, { origin, exit, depositSol, strategy } = {}) {
   const state = readState();
   const t = state.trades?.[String(id)];
   if (!t) return null;
   if (origin !== undefined) t.origin = origin;
   if (depositSol !== undefined) t.depositSol = depositSol;
+  if (strategy !== undefined) t.strategy = strategy;
   if (exit !== undefined) {
     t.exit = exit;
     t.trailArmed = false;
@@ -128,6 +132,26 @@ export function setTradeAutoFlip(id, autoFlip) {
   if (!t) return null;
   if (autoFlip) t.autoFlip = { ...autoFlip };
   else delete t.autoFlip;
+  writeState(state);
+  return t;
+}
+
+// Status strategi auto (lazy: baru ada setelah di-set). Tidak ditulis ke trade tertutup.
+export function setTradeStrategyState(id, strategyState) {
+  const state = readState();
+  const t = state.trades?.[String(id)];
+  if (!t || t.closed === true) return null;
+  t.strategyState = strategyState;
+  writeState(state);
+  return t;
+}
+
+// Tandai trade sudah dicatat ke strategy log (lazy).
+export function markTradeStrategyLogged(id) {
+  const state = readState();
+  const t = state.trades?.[String(id)];
+  if (!t) return null;
+  t.strategyLogged = true;
   writeState(state);
   return t;
 }

@@ -30,6 +30,8 @@ const {
   setTradeAutoFlip,
   setTradePanda,
   updateTradePanda,
+  setTradeStrategyState,
+  markTradeStrategyLogged,
 } = await import("../src/state/trades.js");
 
 const EXIT = {
@@ -300,4 +302,43 @@ test("setTradePanda toggles exit.panda and resets progress", () => {
   assert.deepEqual(after.exit.tp, EXIT.tp);
   assert.equal(setTradePanda(999, true), null);
   assert.equal(updateTradePanda(999, { armed: true }), null);
+});
+
+test("createTrade stores strategy only when given", () => {
+  reset();
+  const a = newTrade(["P1"], { strategy: { profile: "degen" } });
+  assert.equal(getTrade(a.id).strategy.profile, "degen");
+  const b = newTrade(["P2"]);
+  assert.equal("strategy" in getTrade(b.id), false);
+});
+
+test("updateTradeMeta sets strategy when not undefined", () => {
+  reset();
+  const t = newTrade(["P1"]);
+  updateTradeMeta(t.id, { origin: "auto" });
+  assert.equal("strategy" in getTrade(t.id), false);
+  updateTradeMeta(t.id, { strategy: { profile: "safe" } });
+  assert.equal(getTrade(t.id).strategy.profile, "safe");
+});
+
+test("setTradeStrategyState persists and ignores closed or missing trades", () => {
+  reset();
+  const t = newTrade(["P1"]);
+  assert.equal("strategyState" in getTrade(t.id), false);
+  setTradeStrategyState(t.id, { phase: "flipped" });
+  assert.deepEqual(getTrade(t.id).strategyState, { phase: "flipped" });
+  assert.equal(setTradeStrategyState(999, {}), null);
+  recordClose("P1", { reason: "tp", pnlUsd: 1 });
+  settleTradeIfDone(t.id);
+  assert.equal(setTradeStrategyState(t.id, { phase: "x" }), null);
+  assert.deepEqual(getTrade(t.id).strategyState, { phase: "flipped" });
+});
+
+test("markTradeStrategyLogged sets the flag lazily", () => {
+  reset();
+  const t = newTrade(["P1"]);
+  assert.equal("strategyLogged" in getTrade(t.id), false);
+  assert.equal(markTradeStrategyLogged(t.id).strategyLogged, true);
+  assert.equal(getTrade(t.id).strategyLogged, true);
+  assert.equal(markTradeStrategyLogged(999), null);
 });

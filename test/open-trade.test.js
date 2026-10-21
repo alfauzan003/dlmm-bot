@@ -482,3 +482,32 @@ test("bid_ask open without an auto flip default has no autoFlip", async () => {
   const res = await withLive(() => executeOpen(plan, { deps }));
   assert.equal("autoFlip" in getTrade(res.trade.id), false);
 });
+
+test("meta overrides origin, exit, autoFlip and strategy of the created trade", async () => {
+  reset();
+  setAutoFlipDefault(30);
+  const exit = { tp: { on: true, pct: 9 }, sl: { on: false }, trail: { on: false } };
+  const strategy = { profile: "degen", params: { a: 1 }, entry: { signal: "x" } };
+  const { deps } = fakeDeps();
+  const plan = await planOpen({ ...base, shape: "bid_ask", deps });
+  const res = await withLive(() =>
+    executeOpen(plan, { deps, meta: { origin: "auto", exit, autoFlip: { pct: 70 }, strategy } })
+  );
+  assert.equal(res.success, true);
+  const trade = getTrade(res.trade.id);
+  assert.equal(trade.origin, "auto");
+  assert.deepEqual(trade.exit, exit);
+  assert.equal(trade.autoFlip.pct, 70);
+  assert.deepEqual(trade.strategy, strategy);
+});
+
+test("meta.autoFlip null turns auto flip off even with a default", async () => {
+  reset();
+  setAutoFlipDefault(30);
+  const { deps } = fakeDeps();
+  const plan = await planOpen({ ...base, shape: "bid_ask", deps });
+  const res = await withLive(() => executeOpen(plan, { deps, meta: { origin: "auto", autoFlip: null } }));
+  assert.equal(res.success, true);
+  assert.equal("autoFlip" in getTrade(res.trade.id), false);
+  assert.equal("strategy" in getTrade(res.trade.id), false);
+});

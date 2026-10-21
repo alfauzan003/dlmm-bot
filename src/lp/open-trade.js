@@ -257,7 +257,8 @@ async function landedLegs(connection, legs) {
   return out;
 }
 
-export async function executeOpen(plan, { onProgress = () => {}, deps } = {}) {
+// meta (opsional, mis. auto entry): { origin, exit, autoFlip (null = mati), strategy }.
+export async function executeOpen(plan, { onProgress = () => {}, deps, meta = {} } = {}) {
   const progress = async (text) => {
     try {
       await onProgress(text);
@@ -274,7 +275,7 @@ export async function executeOpen(plan, { onProgress = () => {}, deps } = {}) {
   addEntryInProgressMint(plan.baseMint);
   addEntryInProgressPool(plan.poolAddress);
   try {
-    return await openLive(plan, progress, withDeps(deps));
+    return await openLive(plan, progress, withDeps(deps), meta);
   } catch (err) {
     log.error(`Open ${plan.pair} error: ${err.message}`);
     return { success: false, error: err.message };
@@ -284,7 +285,7 @@ export async function executeOpen(plan, { onProgress = () => {}, deps } = {}) {
   }
 }
 
-async function openLive(plan, progress, d) {
+async function openLive(plan, progress, d, meta = {}) {
   const sdk = await d.loadSdk();
   const connection = d.getConnection();
   const wallet = d.getWallet();
@@ -411,7 +412,9 @@ async function openLive(plan, progress, d) {
 
   // Catat posisi lalu trade tanpa await di antaranya (loop exit tidak sempat mengadopsi sebagai external).
   const positions = opened.map((l) => l.keypair.publicKey.toString());
-  const exit = exitPresetForNewTrade();
+  const origin = meta.origin ?? "manual";
+  const exit = meta.exit ?? exitPresetForNewTrade();
+  const autoFlip = meta.autoFlip !== undefined ? meta.autoFlip : autoFlipForNewTrade(plan.shape);
   // Mode dari shape pilihan pengguna (satu mode untuk semua leg).
   const mode = legMode(plan.shape, plan.solOnly);
   for (const addr of positions) {
@@ -426,12 +429,14 @@ async function openLive(plan, progress, d) {
     // activeBin = bin aktif saat buka (dasar % sisi SOL yang dilewati untuk auto flip).
     range: { below: plan.below, above: plan.above, lowerBin, upperBin, activeBin: activeId },
     depositSol: plan.depositSol,
-    origin: "manual",
+    origin,
     exit,
-    autoFlip: autoFlipForNewTrade(plan.shape),
+    autoFlip,
+    strategy: meta.strategy ?? null,
   });
-  if (trade.origin !== "manual") {
-    trade = updateTradeMeta(trade.id, { origin: "manual", exit, depositSol: plan.depositSol }) ?? trade;
+  if (trade.origin !== origin) {
+    trade =
+      updateTradeMeta(trade.id, { origin, exit, depositSol: plan.depositSol, strategy: meta.strategy }) ?? trade;
   }
   log.info(
     `📌 OPEN ${plan.pair} — ${plan.depositSol} SOL ${plan.shape} (${positions.length} posisi) → trade #${trade.id}`
