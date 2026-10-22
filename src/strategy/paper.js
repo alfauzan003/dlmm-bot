@@ -34,6 +34,23 @@ function withDeps(deps = {}) {
 const read = () => readJsonArray(PAPER_FILE);
 const write = (list) => fs.writeFileSync(PAPER_FILE, JSON.stringify(list, null, 2));
 
+// Ubah satu trade (baca-tulis sinkron); null bila id tidak ada.
+function patchTrade(id, patch) {
+  const list = read();
+  const cur = list.find((x) => x.id === id);
+  if (!cur) return null;
+  Object.assign(cur, patch);
+  write(list);
+  return cur;
+}
+
+const warned = new Set(); // id trade yang sudah diperingatkan (data buruk), sekali per trade
+function warnOnce(id, msg) {
+  if (warned.has(id)) return;
+  warned.add(id);
+  log.warn(`Paper ${id}: ${msg} — tick dilewati`);
+}
+
 // open: true = hanya terbuka, false = hanya tertutup, kosong = semua.
 export function listPaperTrades({ open } = {}) {
   const all = read();
@@ -53,7 +70,9 @@ async function readPoolLiq(d, row, rangePct) {
     const activeId = (await pool.getActiveBin()).binId;
     const { lowerBin, upperBin } = pctToBinRange({ activeBin: activeId, binStep: row.binStep, below: rangePct, above: 0, baseIsX });
     const { bins } = await pool.getBinsBetweenLowerAndUpperBound(lowerBin, upperBin);
-    const decimals = await d.getMintDecimals(row.baseMint);
+    // Desimal dari objek pool; getMintDecimals mengembalikan 9 saat RPC error, jadi hanya cadangan.
+    const poolDec = (baseIsX ? pool.tokenX : pool.tokenY)?.mint?.decimals;
+    const decimals = Number.isInteger(poolDec) ? poolDec : await d.getMintDecimals(row.baseMint);
     const out = {};
     for (const b of bins) {
       const x = num(b.xAmount);
@@ -104,6 +123,7 @@ export async function openPaperTrade({ profile, p, row, rangePct, entry, deps })
     closePnlPct: null,
     flipped: false,
     holdMin: null,
+    bars: [], // candle 5m tertutup sejak entryBarTime (riwayat milik trade ini)
   };
   list.push(trade);
   write(list);
@@ -148,6 +168,28 @@ export function paperLogRow(t) {
   };
 }
 
+// Gabung bar baru ke riwayat (per time; bar baru menimpa), urut naik, hanya time >= entryBarTime.
+function mergeBars(stored, fresh, entryBarTime) {
+  const byTime = new Map();
+  for (const b of [...stored, ...fresh]) if (b.time >= entryBarTime) byTime.set(b.time, b);
+  return [...byTime.values()].sort((a, b) => a.time - b.time);
+}
+
+// Seri untuk simulasi: slot 5m yang hilang diisi bar datar di close sebelumnya, volume 0.
+// null bila bar entry belum ada (tunggu).
+export function fillGaps(bars, entryBarTime) {
+  if (bars.length === 0 || bars[0].time !== entryBarTime) return null;
+  const out = [bars[0]];
+  for (const b of bars.slice(1)) {
+    const prev = out[out.length - 1];
+    for (let time = prev.time + BAR_SEC; time < b.time; time += BAR_SEC) {
+      out.push({ time, open: prev.close, high: prev.close, low: prev.close, close: prev.close, volume: 0 });
+    }
+    out.push(b);
+  }
+  return out;
+}
+
 // Majukan semua paper trade terbuka dengan candle 5m tertutup; mengembalikan yang ditutup tick ini.
 export async function tickPaperTrades({ deps, now } = {}) {
   const d = withDeps(deps);
@@ -168,12 +210,22 @@ export async function tickPaperTrades({ deps, now } = {}) {
   const closed = [];
   for (const trade of open) {
     try {
-      const limit = Math.max(0, Math.ceil((t / 1000 - trade.entryBarTime) / BAR_SEC)) + 2;
+      const stored = Array.isArray(trade.bars) ? trade.bars : [];
+      // Bar entry belum tersimpan: ambil lagi dari entry; kalau sudah, cukup sejak bar terakhir.
+      const hasEntry = stored.length > 0 && stored[0].time === trade.entryBarTime;
+      const lastTime = hasEntry ? stored[stored.length - 1].time : trade.entryBarTime - BAR_SEC;
+      const limit = Math.max(0, Math.ceil((t / 1000 - lastTime) / BAR_SEC)) + 2;
       const candles = await d.fetchCandles(trade.baseMint, trade.pool, { resolution: "5m", limit });
-      const bars = closedBars(Array.isArray(candles) ? candles : [], t)
-        .filter((b) => b.time >= trade.entryBarTime)
-        .sort((a, b) => a.time - b.time);
-      if (bars.length === 0) continue;
+      const fresh = closedBars(Array.isArray(candles) ? candles : [], t);
+      const merged = mergeBars(stored, fresh, trade.entryBarTime);
+      // Simpan riwayat walau belum bisa disimulasi: cache pendek tidak boleh menghilangkan bar lama.
+      if (fresh.length > 0) patchTrade(trade.id, { bars: merged });
+      const bars = fillGaps(merged, trade.entryBarTime);
+      if (!bars) continue;
+      if (!(bars[0].open > 0)) {
+        warnOnce(trade.id, `bar entry tanpa harga (open=${bars[0].open})`);
+        continue;
+      }
       const m = trade.poolMeta;
       const fallback = ((m.tvlUsd / solUsd) * g.sim.poolDepthFactor) / g.sim.poolSpreadBins;
       const res = simulateTrade({
@@ -187,6 +239,10 @@ export async function tickPaperTrades({ deps, now } = {}) {
         poolLiqSolAt: (k) => trade.poolLiq?.[k] ?? fallback,
       });
       if (!res || res.exitReason == null || res.exitReason === "end_of_data") continue;
+      if (!Number.isFinite(res.pnlSol) || !Number.isFinite(res.pnlPct)) {
+        warnOnce(trade.id, "hasil simulasi tidak valid (PnL bukan angka)");
+        continue;
+      }
 
       // Baca ulang sebelum tulis: scan bisa menambah trade selama await di atas.
       const list = read();

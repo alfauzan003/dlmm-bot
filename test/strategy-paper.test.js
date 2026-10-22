@@ -20,7 +20,7 @@ const { buildAutoEntry } = await import("../src/strategy/params.js");
 const { setToggle } = await import("../src/state/settings.js");
 const tg = await import("../src/notify/telegram.js");
 const { PAPER_FILE } = await import("../src/core/paths.js");
-const { openPaperTrade, tickPaperTrades, listPaperTrades, paperLogRow } = await import("../src/strategy/paper.js");
+const { openPaperTrade, tickPaperTrades, listPaperTrades, paperLogRow, fillGaps } = await import("../src/strategy/paper.js");
 const { runScan, _resetRunnerForTest } = await import("../src/strategy/runner.js");
 
 const NOW = 1_800_000_000_000; // kelipatan 300000 ms
@@ -224,6 +224,74 @@ test("tick closes on a strategy exit and logs + notifies once", async () => {
   assert.deepEqual(again, []);
   assert.equal(tick.calls.close.length, 1, "no second notify");
   assert.equal(tick.calls.log.length, 1, "no second log row");
+});
+
+test("a fetch with only the latest bars still simulates from the stored entry bar", async () => {
+  const { deps } = makeDeps({ now: () => OPENED });
+  await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  const all = dumpBars();
+  // tick 1: belum cukup untuk exit (entry + 1 bar), riwayat tersimpan
+  const t1 = makeDeps({ now: () => ENTRY_BAR * 1000 + 2 * 300_000, fetchCandles: async () => all.slice(0, 2) });
+  assert.deepEqual(await tickPaperTrades({ deps: t1.deps }), []);
+  assert.equal(listPaperTrades()[0].bars.length, 2);
+  // tick 2: cache pendek hanya mengembalikan bar terakhir; bar entry diambil dari riwayat
+  const t2 = makeDeps({ fetchCandles: async () => all.slice(-3) });
+  const closed = await tickPaperTrades({ deps: t2.deps });
+  assert.equal(closed.length, 1);
+  assert.equal(closed[0].closeReason, "range_broken");
+  assert.equal(listPaperTrades()[0].bars[0].time, ENTRY_BAR);
+  // p0 = open bar entry (1): kerugian besar, bukan nilai dari bar lanjutan
+  assert.ok(closed[0].closePnlPct < 0);
+});
+
+test("bars missing at the entry are not simulated until the entry bar arrives", async () => {
+  const { deps } = makeDeps({ now: () => OPENED });
+  await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  const all = dumpBars();
+  const late = makeDeps({ fetchCandles: async () => all.slice(3) });
+  assert.deepEqual(await tickPaperTrades({ deps: late.deps }), []);
+  assert.equal(listPaperTrades({ open: true }).length, 1);
+  const full = makeDeps({ fetchCandles: async () => all });
+  assert.equal((await tickPaperTrades({ deps: full.deps })).length, 1);
+});
+
+test("a gap between stored bars is filled with a flat zero-volume bar", async () => {
+  const { deps } = makeDeps({ now: () => OPENED });
+  await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  const all = dumpBars();
+  const withGap = all.filter((b) => b.time !== ENTRY_BAR + 300); // bar 1 hilang
+  const tick = makeDeps({ fetchCandles: async () => withGap });
+  const closed = await tickPaperTrades({ deps: tick.deps });
+  assert.equal(closed.length, 1);
+  // bar isian: datar di close sebelumnya, volume 0; hanya bar nyata yang disimpan
+  const filled = fillGaps(withGap, ENTRY_BAR);
+  assert.equal(filled.length, all.length);
+  assert.deepEqual(filled[1], { time: ENTRY_BAR + 300, open: 1, high: 1, low: 1, close: 1, volume: 0 });
+  assert.equal(fillGaps(withGap.slice(1), ENTRY_BAR), null);
+  // riwayat yang disimpan hanya bar nyata (bar isian tidak disimpan)
+  assert.equal(listPaperTrades()[0].bars.length, withGap.length);
+});
+
+test("a first bar with open = 0 does not close the trade", async () => {
+  const { deps } = makeDeps({ now: () => OPENED });
+  await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  const bad = dumpBars();
+  bad[0] = { ...bad[0], open: 0 };
+  const tick = makeDeps({ fetchCandles: async () => bad });
+  assert.deepEqual(await tickPaperTrades({ deps: tick.deps }), []);
+  assert.equal(listPaperTrades({ open: true }).length, 1);
+  assert.equal(tick.calls.close.length, 0);
+});
+
+test("token decimals come from the pool object, not getMintDecimals", async () => {
+  const pool = { ...fakePool(), tokenX: { mint: { decimals: 6 } }, tokenY: { mint: { decimals: 9 } } };
+  const { deps } = makeDeps({
+    now: () => OPENED,
+    getPoolInfo: async () => ({ pool, baseIsX: true }),
+    getMintDecimals: async () => 9, // nilai default salah saat RPC error
+  });
+  const t = await openPaperTrade({ profile: "degen", p: degen(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  assert.equal(t.poolLiq["0"], 4); // 2e6 / 1e6 token * 0.5 + 3 SOL
 });
 
 test("paperLogRow carries the closed trade fields", async () => {
