@@ -2,6 +2,7 @@
 // Setiap fungsi menerima deps { fetchJson, sleep, now } agar tes tidak menyentuh jaringan.
 import { PublicKey } from "@solana/web3.js";
 import config from "../config/index.js";
+import log from "../core/logger.js";
 import { WSOL_MINT, USDC_MINT } from "../core/constants.js";
 import { getConnection } from "../solana/connection.js";
 import { toPoolRow } from "./screen.js";
@@ -88,7 +89,8 @@ export async function fetchRecentBars(pool, limit, { deps, now } = {}) {
     const nowSec = Math.floor((now ?? d.now()) / 1000);
     const bars = await fetchOhlcvRange(pool, nowSec - (limit + 1) * OHLCV_BAR_SEC, nowSec, { deps });
     return bars.slice(-(limit + 1));
-  } catch {
+  } catch (err) {
+    log.warn(`Meteora OHLCV ${String(pool).slice(0, 8)} gagal: ${err.message}`);
     return [];
   }
 }

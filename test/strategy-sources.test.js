@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import config from "../src/config/index.js";
+import log from "../src/core/logger.js";
 import { WSOL_MINT, USDC_MINT } from "../src/core/constants.js";
 import {
   fetchOhlcvRange,
@@ -230,7 +231,8 @@ test("fetchRecentBars requests the last (limit + 1) bars through pacing and keep
   assert.equal(bars[bars.length - 1].time, nowSec - 300);
 });
 
-test("fetchRecentBars returns [] when the request fails", async () => {
+test("fetchRecentBars returns [] when the request fails and logs a warning", async (t) => {
+  const warn = t.mock.method(log, "warn", () => {});
   resetMeteoraPace();
   const deps = {
     sleep: async () => {},
@@ -238,5 +240,8 @@ test("fetchRecentBars returns [] when the request fails", async () => {
       throw new Error("HTTP 429");
     },
   };
-  assert.deepEqual(await fetchRecentBars("POOL", 10, { deps }), []);
+  assert.deepEqual(await fetchRecentBars("POOLADDRESS123", 10, { deps }), []);
+  assert.equal(warn.mock.callCount(), 1);
+  const msg = warn.mock.calls[0].arguments[0];
+  assert.ok(msg.includes("POOLADDR") && !msg.includes("POOLADDRE") && msg.includes("HTTP 429"), msg);
 });

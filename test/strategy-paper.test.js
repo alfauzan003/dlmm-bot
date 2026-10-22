@@ -327,6 +327,13 @@ test("openPaperTrade stores baseIsX", async () => {
   assert.equal(b.baseIsX, false);
 });
 
+test("stored baseIsX falls back to the pool info when the row has none", async () => {
+  const { deps } = makeDeps({ now: () => OPENED, getPoolInfo: async () => ({ pool: fakePool(), baseIsX: false }) });
+  const { baseIsX: _omit, ...rowNoSide } = ROW;
+  const t = await openPaperTrade({ profile: "degen", p: degen(), row: rowNoSide, rangePct: 50, entry: ENTRY, deps });
+  assert.equal(t.baseIsX, false);
+});
+
 test("SOL-as-X trade: raw token-per-SOL bars are inverted before they are stored and simulated", async () => {
   const { deps } = makeDeps({ now: () => OPENED });
   await openPaperTrade({ profile: "degen", p: noSl(), row: { ...ROW, baseIsX: false }, rangePct: 50, entry: ENTRY, deps });

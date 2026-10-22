@@ -146,3 +146,8 @@ test("toSolPerToken drops bars with non-positive or non-finite prices", () => {
   assert.deepEqual(toSolPerToken([ok, ...bad], false).map((b) => b.time), [0]);
   assert.deepEqual(toSolPerToken([ok, ...bad], true).map((b) => b.time), [0]);
 });
+
+test("toSolPerToken fails closed when baseIsX is not a boolean", () => {
+  const bars = [{ time: 0, open: 2, high: 4, low: 1, close: 2.5, volume: 7 }];
+  for (const v of [undefined, null, 0, "true"]) assert.deepEqual(toSolPerToken(bars, v), [], String(v));
+});

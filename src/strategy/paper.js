@@ -67,10 +67,11 @@ const num = (v) => Number(v?.toString?.() ?? v);
 // dan harga bin aktif (SOL per token). Gagal -> {} / null (sim memakai estimasi TVL).
 async function readPoolLiq(d, row, rangePct) {
   let entryPrice = null;
+  let baseIsX = row.baseIsX;
   try {
     const info = await d.getPoolInfo(row.address);
     const { pool } = info;
-    const baseIsX = row.baseIsX ?? info.baseIsX;
+    baseIsX = row.baseIsX ?? info.baseIsX;
     const active = await pool.getActiveBin();
     const activeId = active.binId;
     entryPrice = poolPriceSolPerToken(active, baseIsX);
@@ -89,17 +90,17 @@ async function readPoolLiq(d, row, rangePct) {
       if (!Number.isFinite(sol)) continue;
       out[baseIsX ? b.binId - activeId : activeId - b.binId] = sol;
     }
-    return { poolLiq: out, entryPrice };
+    return { poolLiq: out, entryPrice, baseIsX };
   } catch (err) {
     log.warn(`Paper: likuiditas pool ${row.address.slice(0, 8)} gagal dibaca: ${err.message} — pakai estimasi TVL`);
-    return { poolLiq: {}, entryPrice };
+    return { poolLiq: {}, entryPrice, baseIsX };
   }
 }
 
 export async function openPaperTrade({ profile, p, row, rangePct, entry, deps }) {
   const d = withDeps(deps);
   const openedAt = d.now();
-  const { poolLiq, entryPrice } = await readPoolLiq(d, row, rangePct);
+  const { poolLiq, entryPrice, baseIsX } = await readPoolLiq(d, row, rangePct);
   const pair = row.name || `${row.baseMint.slice(0, 4)}-SOL`;
   // Baca-tulis sinkron: id unik walau scan dan tick berjalan bergantian.
   const list = read();
@@ -110,7 +111,7 @@ export async function openPaperTrade({ profile, p, row, rangePct, entry, deps })
     pool: row.address,
     pair,
     baseMint: row.baseMint,
-    baseIsX: row.baseIsX, // arah candle Meteora (Y per X): SOL = Y bila true
+    baseIsX, // arah candle Meteora (Y per X): SOL = Y bila true
     openedAt,
     entryBarTime: Math.floor(openedAt / (BAR_SEC * 1000)) * BAR_SEC + BAR_SEC,
     p: { ...p }, // snapshot parameter profil saat entry (seperti trade.strategy.params)

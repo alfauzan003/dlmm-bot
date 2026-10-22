@@ -347,6 +347,13 @@ test("token-as-X pool: the same raw bars are not inverted (control)", async () =
   assert.equal(calls.executeOpen.length, 0, "inverted series shows a dump, not a pump");
 });
 
+test("an empty bar list is labelled no_candles", async () => {
+  const { deps, calls } = makeDeps({ fetchRecentBars: async () => [] });
+  await runScan({ deps });
+  assert.equal(calls.executeOpen.length, 0);
+  assert.equal(getScreenSnapshot()[0].signal, "no_candles");
+});
+
 test("DRY_RUN never calls planOpen/executeOpen", async () => {
   const { deps, calls } = makeDeps({ dryRun: true, openPaperTrade: null });
   await runScan({ deps });

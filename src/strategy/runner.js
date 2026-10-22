@@ -221,7 +221,11 @@ export async function scanProfile(name, { deps } = {}) {
     let bars;
     try {
       const raw = await d.fetchRecentBars(row.address, barsNeeded(p) + 1);
-      bars = closedBars(toSolPerToken(raw || [], row.baseIsX), now);
+      if (!raw?.length) {
+        snap.signal = "no_candles";
+        continue;
+      }
+      bars = closedBars(toSolPerToken(raw, row.baseIsX), now);
     } catch (err) {
       log.warn(`Auto entry ${name}: candle ${pair} gagal: ${err.message}`);
       snap.signal = "no_candles";

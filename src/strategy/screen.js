@@ -104,8 +104,9 @@ export function closedBars(candles, nowMs, barSec = 300) {
 }
 
 // OHLCV pool Meteora = token Y per token X. SOL sebagai Y (baseIsX) sudah SOL per token; SOL sebagai X dibalik
-// (high/low bertukar). Bar dengan harga <= 0 / tidak finite dibuang.
+// (high/low bertukar). Bar dengan harga <= 0 / tidak finite dibuang. baseIsX bukan boolean -> [] (fail closed).
 export function toSolPerToken(bars, baseIsX) {
+  if (typeof baseIsX !== "boolean") return [];
   const valid = (b) => [b.open, b.high, b.low, b.close].every((v) => Number.isFinite(v) && v > 0);
   const kept = bars.filter(valid);
   if (baseIsX) return kept;
