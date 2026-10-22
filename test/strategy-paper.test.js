@@ -244,15 +244,46 @@ test("a fetch with only the latest bars still simulates from the stored entry ba
   assert.ok(closed[0].closePnlPct < 0);
 });
 
-test("bars missing at the entry are not simulated until the entry bar arrives", async () => {
-  const { deps } = makeDeps({ now: () => OPENED });
-  await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+// Pool tanpa harga bin aktif -> entryPrice null.
+const noPricePool = () => {
+  const pool = fakePool();
+  pool.getActiveBin = async () => ({ binId: 100 });
+  return pool;
+};
+
+test("without entryPrice, a missing entry bar waits until it arrives", async () => {
+  const { deps } = makeDeps({ now: () => OPENED, getPoolInfo: async () => ({ pool: noPricePool(), baseIsX: true }) });
+  const t = await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  assert.equal(t.entryPrice, null);
   const all = dumpBars();
   const late = makeDeps({ fetchCandles: async () => all.slice(3) });
   assert.deepEqual(await tickPaperTrades({ deps: late.deps }), []);
   assert.equal(listPaperTrades({ open: true }).length, 1);
   const full = makeDeps({ fetchCandles: async () => all });
   assert.equal((await tickPaperTrades({ deps: full.deps })).length, 1);
+});
+
+test("an entry bar that is never reported is filled at entryPrice and the trade closes", async () => {
+  const { deps } = makeDeps({ now: () => OPENED });
+  const t = await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  assert.equal(t.entryPrice, 1);
+  const noEntry = dumpBars().slice(1); // bar entry tidak pernah dilaporkan
+  const tick = makeDeps({ fetchCandles: async () => noEntry });
+  const closed = await tickPaperTrades({ deps: tick.deps });
+  assert.equal(closed.length, 1);
+  assert.equal(closed[0].closeReason, "range_broken");
+  assert.ok(closed[0].closePnlPct < 0);
+  assert.equal(listPaperTrades()[0].bars[0].time, ENTRY_BAR + 300, "only real bars are stored");
+});
+
+test("fillGaps leading fill needs a valid entryPrice and a closed slot", () => {
+  const real = [{ time: ENTRY_BAR + 600, open: 2, high: 2, low: 2, close: 2, volume: 5 }];
+  assert.equal(fillGaps(real, ENTRY_BAR, { entryPrice: null }), null);
+  assert.equal(fillGaps(real, ENTRY_BAR, { entryPrice: 0 }), null);
+  const filled = fillGaps(real, ENTRY_BAR, { entryPrice: 1, nowSec: ENTRY_BAR + 900 });
+  assert.deepEqual(filled.map((b) => [b.time - ENTRY_BAR, b.open, b.volume]), [[0, 1, 0], [300, 1, 0], [600, 2, 5]]);
+  assert.equal(fillGaps([], ENTRY_BAR, { entryPrice: 1, nowSec: ENTRY_BAR + 299 }), null);
+  assert.equal(fillGaps([], ENTRY_BAR, { entryPrice: 1, nowSec: ENTRY_BAR + 300 }).length, 1);
 });
 
 test("a gap between stored bars is filled with a flat zero-volume bar", async () => {
