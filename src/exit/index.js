@@ -25,6 +25,7 @@ import { runAutoFlips } from "./auto-flip.js";
 import { runStrategyExits } from "./strategy-exit.js";
 import { kickEvilPanda } from "./evil-panda.js";
 import { tickPaperTrades } from "../strategy/paper.js";
+import { logSettledAutoTrades } from "../strategy/log.js";
 import { syncTrades, setLivePositions, settleTradesForPositions, settleOpenTrades } from "./trade-loop.js";
 
 let cycleCount = 0;
@@ -39,6 +40,18 @@ async function tickPaper() {
   } catch (err) {
     log.error(`Paper tick error: ${err.message}`);
   }
+}
+
+// Catat trade auto yang selesai ke strategy log, di latar belakang (fetch candle bisa lama); satu run sekaligus.
+let strategyLogBusy = false;
+function kickStrategyLog() {
+  if (strategyLogBusy) return;
+  strategyLogBusy = true;
+  logSettledAutoTrades()
+    .catch((err) => log.error(`Strategy log error: ${err.message}`))
+    .finally(() => {
+      strategyLogBusy = false;
+    });
 }
 
 // Posisi yang tidak lagi terbaca on-chain selama `missingCycleThreshold`
@@ -108,6 +121,7 @@ export async function mainLoop() {
   while (true) {
     cycleCount++;
     log.debug(`[detail] exit cycle #${cycleCount}`);
+    kickStrategyLog();
 
     await runSafetySweep();
 

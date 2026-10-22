@@ -15,6 +15,7 @@ import { poolPriceSolPerToken } from "../entry/price-guard.js";
 import { closedBars, toSolPerToken } from "./screen.js";
 import { fetchRecentBars } from "./sources.js";
 import { simulateTrade } from "./sim.js";
+import { appendStrategyLog, paperLogRow } from "./log.js";
 
 const BAR_SEC = 300;
 
@@ -26,7 +27,7 @@ function withDeps(deps = {}) {
     getSolUsd: () => getPrice(WSOL_MINT),
     notifyEntry: tg.notifyAutoEntry,
     notifyClose: tg.notifyPaperClose,
-    log: () => {}, // Task 17: appendStrategyLog
+    log: (trade) => appendStrategyLog(paperLogRow(trade)),
     now: Date.now,
     ...deps,
   };
@@ -157,26 +158,6 @@ export async function openPaperTrade({ profile, p, row, rangePct, entry, deps })
   return trade;
 }
 
-export function paperLogRow(t) {
-  return {
-    kind: "paper_close",
-    id: t.id,
-    profile: t.profile,
-    pool: t.pool,
-    pair: t.pair,
-    baseMint: t.baseMint,
-    openedAt: t.openedAt,
-    closedAt: t.closedAt,
-    closeReason: t.closeReason,
-    closePnlSol: t.closePnlSol,
-    closePnlPct: t.closePnlPct,
-    holdMin: t.holdMin,
-    flipped: t.flipped,
-    rangePct: t.rangePct,
-    entry: t.entry,
-  };
-}
-
 // Gabung bar baru ke riwayat (per time; bar baru menimpa), urut naik, hanya time >= entryBarTime.
 function mergeBars(stored, fresh, entryBarTime) {
   const byTime = new Map();
@@ -289,7 +270,7 @@ export async function tickPaperTrades({ deps, now } = {}) {
         log.warn(`Paper: alert close gagal: ${err.message}`);
       }
       try {
-        d.log(paperLogRow(cur));
+        d.log(cur);
       } catch (err) {
         log.warn(`Paper: log close gagal: ${err.message}`);
       }

@@ -20,7 +20,8 @@ const { buildAutoEntry } = await import("../src/strategy/params.js");
 const { setToggle } = await import("../src/state/settings.js");
 const tg = await import("../src/notify/telegram.js");
 const { PAPER_FILE } = await import("../src/core/paths.js");
-const { openPaperTrade, tickPaperTrades, listPaperTrades, paperLogRow, fillGaps } = await import("../src/strategy/paper.js");
+const { openPaperTrade, tickPaperTrades, listPaperTrades, fillGaps } = await import("../src/strategy/paper.js");
+const { paperLogRow } = await import("../src/strategy/log.js");
 const { runScan, _resetRunnerForTest } = await import("../src/strategy/runner.js");
 
 const NOW = 1_800_000_000_000; // kelipatan 300000 ms
@@ -384,9 +385,10 @@ test("paperLogRow carries the closed trade fields", async () => {
   await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
   await tickPaperTrades({ deps: makeDeps({ fetchRecentBars: async () => dumpBars() }).deps });
   const row = paperLogRow(listPaperTrades()[0]);
-  assert.equal(row.id, "P1");
-  assert.equal(row.closeReason, "range_broken");
+  assert.equal(row.mode, "paper");
+  assert.equal(row.exitReason, "range_broken");
   assert.equal(row.profile, "degen");
+  assert.equal(row.predicted, null);
 });
 
 test("notifyPaperClose text", () => {
