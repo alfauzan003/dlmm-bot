@@ -114,6 +114,22 @@ test("replayPool does not overlap trades and respects cooldown", () => {
   for (let k = 1; k < two.length; k++) assert.ok(two[k].entryTime > two[k - 1].exitTime);
 });
 
+test("replayPool inverts SOL-as-X bars (token per SOL) before screening", () => {
+  const raw = twoCycles().map((b) => ({ ...b, open: 1 / b.open, high: 1 / b.low, low: 1 / b.high, close: 1 / b.close }));
+  const args = { token: goodToken, p: profile, g: { ...g, cooldownMin: 0, cooldownLossMin: 0 }, solUsdAt };
+  const want = replayPool({ ...args, row: rowFixture, bars: twoCycles() });
+  const got = replayPool({ ...args, row: { ...rowFixture, baseIsX: false }, bars: raw });
+  assert.ok(want.length >= 2);
+  assert.equal(got.length, want.length);
+  got.forEach((t, k) => {
+    assert.equal(t.entryTime, want[k].entryTime);
+    assert.equal(t.exitReason, want[k].exitReason);
+    assert.ok(Math.abs(t.pnlPct - want[k].pnlPct) < 1e-6);
+  });
+  // tanpa normalisasi deret terbalik tidak memberi sinyal pump
+  assert.equal(replayPool({ ...args, row: rowFixture, bars: raw }).length, 0);
+});
+
 test("portfolioPass enforces maxOpen and the daily brake", () => {
   const t = (entry, exit, pnlSol) => ({ entryTime: entry, exitTime: exit, pnlSol, pnlPct: pnlSol * 100, holdMin: 5, flipped: false, exitReason: "sl" });
   const { accepted } = portfolioPass(

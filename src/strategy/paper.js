@@ -8,12 +8,12 @@ import { WSOL_MINT } from "../core/constants.js";
 import { readJsonArray } from "../state/store.js";
 import { getPoolInfo } from "../entry/pool-info.js";
 import { getMintDecimals } from "../solana/balances.js";
-import { fetchCandles } from "../market/candles.js";
 import { getPrice } from "../market/jupiter-price.js";
 import * as tg from "../notify/telegram.js";
 import { pctToBinRange } from "../lp/range.js";
 import { poolPriceSolPerToken } from "../entry/price-guard.js";
-import { closedBars } from "./screen.js";
+import { closedBars, toSolPerToken } from "./screen.js";
+import { fetchRecentBars } from "./sources.js";
 import { simulateTrade } from "./sim.js";
 
 const BAR_SEC = 300;
@@ -22,7 +22,7 @@ function withDeps(deps = {}) {
   return {
     getPoolInfo,
     getMintDecimals,
-    fetchCandles,
+    fetchRecentBars,
     getSolUsd: () => getPrice(WSOL_MINT),
     notifyEntry: tg.notifyAutoEntry,
     notifyClose: tg.notifyPaperClose,
@@ -45,6 +45,7 @@ function patchTrade(id, patch) {
   return cur;
 }
 
+const warnedNoOrientation = new Set(); // id trade lama tanpa baseIsX, sekali per trade
 const warned = new Set(); // id trade yang sudah diperingatkan (data buruk), sekali per trade
 function warnOnce(id, msg) {
   if (warned.has(id)) return;
@@ -109,6 +110,7 @@ export async function openPaperTrade({ profile, p, row, rangePct, entry, deps })
     pool: row.address,
     pair,
     baseMint: row.baseMint,
+    baseIsX: row.baseIsX, // arah candle Meteora (Y per X): SOL = Y bila true
     openedAt,
     entryBarTime: Math.floor(openedAt / (BAR_SEC * 1000)) * BAR_SEC + BAR_SEC,
     p: { ...p }, // snapshot parameter profil saat entry (seperti trade.strategy.params)
@@ -231,8 +233,12 @@ export async function tickPaperTrades({ deps, now } = {}) {
       const hasEntry = stored.length > 0 && stored[0].time === trade.entryBarTime;
       const lastTime = hasEntry ? stored[stored.length - 1].time : trade.entryBarTime - BAR_SEC;
       const limit = Math.max(0, Math.ceil((t / 1000 - lastTime) / BAR_SEC)) + 2;
-      const candles = await d.fetchCandles(trade.baseMint, trade.pool, { resolution: "5m", limit });
-      const fresh = closedBars(Array.isArray(candles) ? candles : [], t);
+      if (trade.baseIsX == null && !warnedNoOrientation.has(trade.id)) {
+        warnedNoOrientation.add(trade.id);
+        log.warn(`Paper ${trade.id}: tanpa baseIsX (file lama) — dianggap token = X`);
+      }
+      const raw = await d.fetchRecentBars(trade.pool, limit);
+      const fresh = closedBars(toSolPerToken(Array.isArray(raw) ? raw : [], trade.baseIsX ?? true), t);
       const merged = mergeBars(stored, fresh, trade.entryBarTime);
       // Simpan riwayat walau belum bisa disimulasi: cache pendek tidak boleh menghilangkan bar lama.
       if (fresh.length > 0) patchTrade(trade.id, { bars: merged });

@@ -4,6 +4,7 @@ import config from "../src/config/index.js";
 import { WSOL_MINT, USDC_MINT } from "../src/core/constants.js";
 import {
   fetchOhlcvRange,
+  fetchRecentBars,
   fetchTokens,
   fetchPoolRows,
   findSolUsdPool,
@@ -199,4 +200,43 @@ test("countPoolLps counts distinct owners, caches per pool, null on error", asyn
 
   const failing = { getProgramAccounts: async () => Promise.reject(new Error("rpc down")) };
   assert.equal(await countPoolLps(USDC_MINT, { deps: { now: () => 1_000, getConnection: () => failing } }), null);
+});
+
+test("fetchRecentBars requests the last (limit + 1) bars through pacing and keeps that many", async () => {
+  resetMeteoraPace();
+  const gap = 60000 / config.meteoraMaxPerMin;
+  const nowMs = 1_800_000_000_000;
+  const nowSec = nowMs / 1000;
+  const urls = [];
+  const sleeps = [];
+  const deps = {
+    now: () => nowMs,
+    sleep: async (ms) => sleeps.push(ms),
+    fetchJson: async (url) => {
+      urls.push(url);
+      // 15 bar mentah, lebih banyak dari limit + 1 = 11
+      return { data: Array.from({ length: 15 }, (_, i) => ({ timestamp: nowSec - 300 * (15 - i), open: 1, high: 1, low: 1, close: 1, volume: 1 })) };
+    },
+  };
+  await fetchPoolRows("http://x", { deps }); // request sebelumnya -> request OHLCV harus menunggu
+  const bars = await fetchRecentBars("POOL", 10, { deps, now: nowMs });
+  assert.equal(urls.length, 2);
+  assert.ok(urls[1].includes("/pools/POOL/ohlcv?timeframe=5m"));
+  const q = new URL(urls[1]).searchParams;
+  assert.equal(Number(q.get("end_time")), nowSec);
+  assert.equal(Number(q.get("start_time")), nowSec - 6900); // 11 * 300 s < min range 6900 s -> mundur
+  assert.deepEqual(sleeps, [gap]);
+  assert.equal(bars.length, 11);
+  assert.equal(bars[bars.length - 1].time, nowSec - 300);
+});
+
+test("fetchRecentBars returns [] when the request fails", async () => {
+  resetMeteoraPace();
+  const deps = {
+    sleep: async () => {},
+    fetchJson: async () => {
+      throw new Error("HTTP 429");
+    },
+  };
+  assert.deepEqual(await fetchRecentBars("POOL", 10, { deps }), []);
 });

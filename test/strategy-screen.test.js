@@ -12,6 +12,7 @@ import {
   binsForPct,
   passesTokenFilters,
   closedBars,
+  toSolPerToken,
   volatilityPct,
   passesVolatility,
 } from "../src/strategy/screen.js";
@@ -131,4 +132,17 @@ test("closedBars drops the forming bar; volatility needs 6 bars", () => {
   assert.equal(passesVolatility(null, { volatilityMinPct: 0, volatilityMaxPct: 100 }), false);
   assert.equal(passesVolatility(4, { volatilityMinPct: 2, volatilityMaxPct: 4 }), true);
   assert.equal(passesVolatility(4.1, { volatilityMinPct: 2, volatilityMaxPct: 4 }), false);
+});
+
+test("toSolPerToken inverts SOL-as-X bars (high/low swap), keeps volume, identity for token-as-X", () => {
+  const bars = [{ time: 0, open: 2, high: 4, low: 1, close: 2.5, volume: 7 }];
+  assert.deepEqual(toSolPerToken(bars, true), bars);
+  assert.deepEqual(toSolPerToken(bars, false), [{ time: 0, open: 0.5, high: 1, low: 0.25, close: 0.4, volume: 7 }]);
+});
+
+test("toSolPerToken drops bars with non-positive or non-finite prices", () => {
+  const ok = { time: 0, open: 1, high: 1, low: 1, close: 1, volume: 1 };
+  const bad = [{ ...ok, time: 300, open: 0 }, { ...ok, time: 600, close: NaN }, { ...ok, time: 900, low: -1 }, { ...ok, time: 1200, high: Infinity }];
+  assert.deepEqual(toSolPerToken([ok, ...bad], false).map((b) => b.time), [0]);
+  assert.deepEqual(toSolPerToken([ok, ...bad], true).map((b) => b.time), [0]);
 });

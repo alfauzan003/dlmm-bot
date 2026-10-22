@@ -103,6 +103,15 @@ export function closedBars(candles, nowMs, barSec = 300) {
   return candles.filter((c) => (c.time + barSec) * 1000 <= nowMs);
 }
 
+// OHLCV pool Meteora = token Y per token X. SOL sebagai Y (baseIsX) sudah SOL per token; SOL sebagai X dibalik
+// (high/low bertukar). Bar dengan harga <= 0 / tidak finite dibuang.
+export function toSolPerToken(bars, baseIsX) {
+  const valid = (b) => [b.open, b.high, b.low, b.close].every((v) => Number.isFinite(v) && v > 0);
+  const kept = bars.filter(valid);
+  if (baseIsX) return kept;
+  return kept.map((b) => ({ time: b.time, open: 1 / b.open, high: 1 / b.low, low: 1 / b.high, close: 1 / b.close, volume: b.volume }));
+}
+
 // Rata-rata (high-low)/open*100 dari n bar terakhir; null bila bar kurang.
 export function volatilityPct(bars, n = 6) {
   if (bars.length < n) return null;

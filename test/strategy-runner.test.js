@@ -98,7 +98,7 @@ function makeDeps(over = {}) {
       calls.fetchTokens.push(mints);
       return new Map([[MINT, TOKEN]]);
     },
-    fetchCandles: async () => makeBars(),
+    fetchRecentBars: async () => makeBars(),
     countPoolLps: async () => 50,
     listOpenTrades: () => [],
     listClosedTrades: () => [],
@@ -262,7 +262,7 @@ test("token / candle failures skip without throwing", async () => {
   const a = makeDeps({ fetchTokens: async () => Promise.reject(new Error("jup down")) });
   await runScan({ deps: a.deps });
   assert.equal(a.calls.executeOpen.length, 0);
-  const b = makeDeps({ fetchCandles: async () => Promise.reject(new Error("ohlcv down")) });
+  const b = makeDeps({ fetchRecentBars: async () => Promise.reject(new Error("ohlcv down")) });
   await runScan({ deps: b.deps });
   assert.equal(b.calls.executeOpen.length, 0);
 });
@@ -311,7 +311,7 @@ test("failures: cooldown then block after ENTRY_MAX_FAILURES", async () => {
 });
 
 test("snapshot lists candidates with signal reason", async () => {
-  const { deps, calls } = makeDeps({ fetchCandles: async () => makeBars({ lastGreen: true }) });
+  const { deps, calls } = makeDeps({ fetchRecentBars: async () => makeBars({ lastGreen: true }) });
   await runScan({ deps });
   assert.equal(calls.planOpen.length, 0);
   const snap = getScreenSnapshot();
@@ -322,6 +322,29 @@ test("snapshot lists candidates with signal reason", async () => {
   assert.equal(snap[0].feeTvl30mPct, 1.5);
   assert.ok(snap[0].volatilityPct > 2);
   assert.equal(snap[0].signal, "not_red");
+});
+
+// Bar mentah Meteora untuk pool SOL = X: token per SOL (kebalikan SOL per token).
+const rawSolAsX = () => makeBars().map((b) => ({ ...b, open: 1 / b.open, high: 1 / b.low, low: 1 / b.high, close: 1 / b.close }));
+
+test("SOL-as-X pool: raw token-per-SOL bars are inverted before the signal", async () => {
+  const fetched = [];
+  const { deps, calls } = makeDeps({
+    fetchPoolRows: async () => [{ ...ROW, baseIsX: false }],
+    fetchRecentBars: async (pool, limit) => {
+      fetched.push({ pool, limit });
+      return rawSolAsX();
+    },
+  });
+  await runScan({ deps });
+  assert.deepEqual(fetched, [{ pool: POOL, limit: barsNeeded(config.autoEntry.profiles.degen) + 1 }]);
+  assert.equal(calls.executeOpen.length, 1, "pump + pullback seen after normalization");
+});
+
+test("token-as-X pool: the same raw bars are not inverted (control)", async () => {
+  const { deps, calls } = makeDeps({ fetchRecentBars: async () => rawSolAsX() });
+  await runScan({ deps });
+  assert.equal(calls.executeOpen.length, 0, "inverted series shows a dump, not a pump");
 });
 
 test("DRY_RUN never calls planOpen/executeOpen", async () => {

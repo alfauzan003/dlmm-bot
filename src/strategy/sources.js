@@ -80,6 +80,19 @@ export async function fetchOhlcvRange(pool, startSec, endSec, { deps } = {}) {
     .filter((b) => Object.values(b).every(Number.isFinite) && !seen.has(b.time) && seen.add(b.time));
 }
 
+// limit + 1 bar 5m terakhir pool (orientasi mentah Meteora: Y per X, bar terakhir bisa masih terbentuk).
+// Hanya OHLCV pool Meteora (tanpa fallback GMGN/USD); [] bila gagal.
+export async function fetchRecentBars(pool, limit, { deps, now } = {}) {
+  const d = withDeps(deps);
+  try {
+    const nowSec = Math.floor((now ?? d.now()) / 1000);
+    const bars = await fetchOhlcvRange(pool, nowSec - (limit + 1) * OHLCV_BAR_SEC, nowSec, { deps });
+    return bars.slice(-(limit + 1));
+  } catch {
+    return [];
+  }
+}
+
 // Info token Jupiter (organic score, audit, dst) per mint; batch 100, cache 5 menit.
 export async function fetchTokens(mints, { deps } = {}) {
   const d = withDeps(deps);

@@ -1,5 +1,5 @@
 // Replay backtest Auto Entry (murni, tanpa I/O): screener + sinyal + simulator per pool, lalu batas portofolio.
-import { passesPoolFilters, passesTokenFilters, coversMinRange, volatilityPct, passesVolatility } from "./screen.js";
+import { passesPoolFilters, passesTokenFilters, coversMinRange, volatilityPct, passesVolatility, toSolPerToken } from "./screen.js";
 import { entrySignal, barsNeeded } from "./signal.js";
 import { simulateTrade } from "./sim.js";
 import { brakeHit } from "./limits.js";
@@ -22,7 +22,8 @@ export function historicalScreen(row, bars, i, p) {
 }
 
 // Replay satu pool; trade tidak tumpang tindih, jeda cooldown (bar 5m) setelah bar exit.
-export function replayPool({ row, token, bars, p, g, solUsdAt }) {
+export function replayPool({ row, token, bars: rawBars, p, g, solUsdAt }) {
+  const bars = toSolPerToken(rawBars, row.baseIsX); // dataset tersimpan = orientasi mentah Meteora
   if (!passesTokenFilters(token, g).ok || !coversMinRange(row.binStep, p)) return [];
   const need = barsNeeded(p);
   const pool = { binStep: row.binStep, baseFeePct: row.baseFeePct, protocolFeePct: row.protocolFeePct, tvlUsd: row.tvlUsd };

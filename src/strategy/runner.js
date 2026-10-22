@@ -7,7 +7,6 @@ import { isOn, setToggle } from "../state/settings.js";
 import { listOpenTrades, listClosedTrades } from "../state/trades.js";
 import { recordAction, getEntryInProgressMints, isEntryInProgressPool } from "../entry/runtime.js";
 import { planOpen, executeOpen, SOL_BUFFER } from "../lp/open-trade.js";
-import { fetchCandles } from "../market/candles.js";
 import { getPrice } from "../market/jupiter-price.js";
 import { WSOL_MINT } from "../core/constants.js";
 import { periodStart } from "../lp/pnl-stats.js";
@@ -23,10 +22,11 @@ import {
   closedBars,
   volatilityPct,
   passesVolatility,
+  toSolPerToken,
 } from "./screen.js";
 import { entrySignal, pickRangePct, barsNeeded } from "./signal.js";
 import { canOpen, todayAutoPnlSol, brakeHit } from "./limits.js";
-import { fetchPoolRows, fetchTokens, countPoolLps } from "./sources.js";
+import { fetchPoolRows, fetchTokens, fetchRecentBars, countPoolLps } from "./sources.js";
 import { openPaperTrade, listPaperTrades } from "./paper.js";
 
 // Runtime-only (reset saat restart): kegagalan entry per base mint, catatan dry run, snapshot.
@@ -47,7 +47,7 @@ function withDeps(deps = {}) {
   return {
     fetchPoolRows,
     fetchTokens,
-    fetchCandles,
+    fetchRecentBars,
     countPoolLps,
     planOpen,
     executeOpen,
@@ -220,8 +220,8 @@ export async function scanProfile(name, { deps } = {}) {
     // 4. Candle 5m tertutup -> volatilitas -> sinyal -> LP -> range.
     let bars;
     try {
-      const candles = await d.fetchCandles(row.baseMint, row.address, { resolution: "5m", limit: barsNeeded(p) + 1 });
-      bars = closedBars(candles || [], now);
+      const raw = await d.fetchRecentBars(row.address, barsNeeded(p) + 1);
+      bars = closedBars(toSolPerToken(raw || [], row.baseIsX), now);
     } catch (err) {
       log.warn(`Auto entry ${name}: candle ${pair} gagal: ${err.message}`);
       snap.signal = "no_candles";
