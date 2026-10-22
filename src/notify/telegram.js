@@ -241,6 +241,18 @@ export function notifyAutoEntry({
   );
 }
 
+// Alert close paper trade (DRY_RUN).
+export function notifyPaperClose(trade) {
+  const sgn = (v, d) => `${v >= 0 ? "+" : ""}${Number(v).toFixed(d)}`;
+  send(
+    [
+      `📝 PAPER close · ${trade.profile} · ${trade.pair}`,
+      `Reason: ${exitLabel(trade.closeReason)}`,
+      `PnL: ${sgn(trade.closePnlPct, 2)}% (${sgn(trade.closePnlSol, 4)} SOL) · ${Math.round(trade.holdMin)}m${trade.flipped ? " · flipped" : ""}`,
+    ].join("\n")
+  );
+}
+
 function emoji(v) {
   if (v == null || v === 0) return "";
   return v > 0 ? "🟢" : "🔴";

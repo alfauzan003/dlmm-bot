@@ -27,6 +27,7 @@ import {
 import { entrySignal, pickRangePct, barsNeeded } from "./signal.js";
 import { canOpen, todayAutoPnlSol, brakeHit } from "./limits.js";
 import { fetchPoolRows, fetchTokens, countPoolLps } from "./sources.js";
+import { openPaperTrade, listPaperTrades } from "./paper.js";
 
 // Runtime-only (reset saat restart): kegagalan entry per base mint, catatan dry run, snapshot.
 const failures = new Map(); // mint -> { count, until }
@@ -50,7 +51,9 @@ function withDeps(deps = {}) {
     countPoolLps,
     planOpen,
     executeOpen,
-    openPaperTrade: null,
+    openPaperTrade: (a) =>
+      openPaperTrade({ profile: a.profile, p: a.p, row: a.row, rangePct: a.rangePct, entry: a.strategy.entry, deps: deps.paper }),
+    listPaperTrades,
     listOpenTrades,
     listClosedTrades,
     getSolBalance: async () => (await getConnection().getBalance(getWallet().publicKey)) / 1e9,
@@ -75,9 +78,14 @@ function failureBlocked(mint, now) {
 
 const isAuto = (t) => t?.origin === "auto" && t.strategy;
 
-// Ref close trade auto sejak sinceMs. DRY_RUN: kosong sampai paper trade ada.
+// Ref close trade auto sejak sinceMs. DRY_RUN: dari paper trade.
 function closedRefs(d, sinceMs) {
-  if (d.dryRun) return [];
+  if (d.dryRun) {
+    return d
+      .listPaperTrades({ open: false })
+      .filter((t) => t.closedAt >= sinceMs)
+      .map((t) => ({ baseMint: t.baseMint, closedAt: t.closedAt, closePnlSol: t.closePnlSol }));
+  }
   return d
     .listClosedTrades({ sinceMs })
     .filter(isAuto)
@@ -89,17 +97,16 @@ function closedRefs(d, sinceMs) {
     }));
 }
 
-// Ref trade auto untuk canOpen. DRY_RUN: kosong sampai paper trade ada.
+// Ref trade auto untuk canOpen. DRY_RUN: dari paper trade.
 function tradeRefs(d, now, g) {
-  if (d.dryRun) return { open: [], closed: [] };
   const sinceMs = now - Math.max(g.cooldownMin, g.cooldownLossMin) * 60000;
-  return {
-    open: d
-      .listOpenTrades()
-      .filter(isAuto)
-      .map((t) => ({ profile: t.strategy.profile, baseMint: t.baseMint })),
-    closed: closedRefs(d, sinceMs),
-  };
+  const open = d.dryRun
+    ? d.listPaperTrades({ open: true }).map((t) => ({ profile: t.profile, baseMint: t.baseMint }))
+    : d
+        .listOpenTrades()
+        .filter(isAuto)
+        .map((t) => ({ profile: t.strategy.profile, baseMint: t.baseMint }));
+  return { open, closed: closedRefs(d, sinceMs) };
 }
 
 // Rem rugi harian: true bila batas kena -> scan berhenti. Gagal hitung PnL = fail open (scan lanjut);

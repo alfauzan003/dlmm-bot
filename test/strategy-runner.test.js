@@ -325,7 +325,7 @@ test("snapshot lists candidates with signal reason", async () => {
 });
 
 test("DRY_RUN never calls planOpen/executeOpen", async () => {
-  const { deps, calls } = makeDeps({ dryRun: true });
+  const { deps, calls } = makeDeps({ dryRun: true, openPaperTrade: null });
   await runScan({ deps });
   await runScan({ deps });
   assert.equal(calls.planOpen.length, 0);

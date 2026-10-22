@@ -24,11 +24,22 @@ import { runSafetySweep, sweepClosedPosition } from "./sweep.js";
 import { runAutoFlips } from "./auto-flip.js";
 import { runStrategyExits } from "./strategy-exit.js";
 import { kickEvilPanda } from "./evil-panda.js";
+import { tickPaperTrades } from "../strategy/paper.js";
 import { syncTrades, setLivePositions, settleTradesForPositions, settleOpenTrades } from "./trade-loop.js";
 
 let cycleCount = 0;
 let lastStatusSent = 0;
 let lastSummaryAt = 0;
+
+// Paper trade DRY_RUN: majukan sekali per siklus (juga tanpa posisi live).
+async function tickPaper() {
+  if (!config.dryRun) return;
+  try {
+    await tickPaperTrades();
+  } catch (err) {
+    log.error(`Paper tick error: ${err.message}`);
+  }
+}
 
 // Posisi yang tidak lagi terbaca on-chain selama `missingCycleThreshold`
 // siklus berturut-turut dianggap sudah ditutup manual: tandai closed,
@@ -121,6 +132,7 @@ export async function mainLoop() {
     settleTradesForPositions(missing);
 
     if (positions.length === 0) {
+      await tickPaper();
       setLivePositions([]);
       // Leg terakhir bisa tertutup tick lalu: selesaikan trade-nya sekarang.
       settleOpenTrades();
@@ -190,6 +202,7 @@ export async function mainLoop() {
     } catch (err) {
       log.error(`Strategy exit error: ${err.message}`);
     }
+    await tickPaper();
     // Evil Panda per trade (bar 15m yang baru tutup), di latar belakang supaya antrean GMGN tidak menahan loop.
     kickEvilPanda(positions);
 
