@@ -96,8 +96,8 @@ export function buildConfig(e) {
     gmgnFallbackToMeteora: bool(e.GMGN_FALLBACK_TO_METEORA, false),
     meteoraMaxPerMin: num(e.METEORA_MAX_PER_MIN, 120),
 
-    // Sinyal entry: GMGN 15m (arah+garis) + Jupiter (harga real-time).
-    // Satu request batch untuk semua pool. Limit price/v3 ≈ 10 req/10s (~1 req/s);
+    // Jeda antar-poll client harga Jupiter bersama (market/jupiter-price.js).
+    // Satu request batch untuk semua mint. Limit price/v3 ≈ 10 req/10s (~1 req/s);
     // pakai key khusus harga + interval 2s (≈5 req/10s) agar aman dari 429.
     jupiterPollIntervalSec: Math.max(1, num(e.JUPITER_POLL_INTERVAL_SEC, 2)),
 

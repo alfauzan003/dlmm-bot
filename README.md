@@ -208,7 +208,7 @@ close (`AUTO_COOLDOWN_MIN`, longer after a loss: `AUTO_COOLDOWN_LOSS_MIN`), and 
 **Daily loss brake**: once auto trades closed since 00:00 WIB lose `AUTO_DAILY_LOSS_LIMIT_SOL` or more, Auto Entry is
 switched OFF and you get one Telegram alert. Open trades keep their exits. Turn Auto Entry back on in `/settings`.
 
-**DRY_RUN**: nothing is ever sent. The screener runs and logs what it would open.
+**DRY_RUN**: nothing is ever sent. Auto Entry opens paper trades instead (see [Paper mode](#paper-mode-dry_run)).
 
 **Backtester**: picks starting values per profile from Meteora 5m candles. It never changes your config; paste the
 result into `strat.conf` or set the keys in `/settings` → `🧩 Strategy`.
@@ -221,6 +221,33 @@ node scripts/backtest-flip.js run --profile <degen|multihour> --samples 400
 `fetch` downloads the dataset to `data/backtest/<profile>/` (the first run can take a while). `run` searches
 parameter sets (older 70% of the days to train, newest 30% to validate) and writes
 `data/backtest/<profile>/report-<date>.md` and `best.conf`. The simulator assumptions are the `SIM_*` keys.
+
+### Paper mode (DRY_RUN)
+
+With `DRY_RUN=true` no transaction or swap is sent, but Auto Entry keeps running: every entry it would make opens a
+**paper trade** instead. A paper trade is simulated on real pool data: the pool's active bin and liquidity at entry,
+then the live Meteora 5m candles, with the same profile exits as a live auto trade.
+
+- Paper trades are saved in `paper-trades.json` (not `state.json`). In DRY_RUN the limits (`MAX_OPEN`, one trade per
+  token, cooldowns) count paper trades.
+- Telegram sends an alert marked `📝 PAPER` when a paper trade opens and when it closes.
+- The daily loss brake counts paper PnL. A paper loss of `AUTO_DAILY_LOSS_LIMIT_SOL` or more switches the real Auto
+  Entry toggle OFF; turn it back on in `/settings`.
+
+### Learning log
+
+Every finished auto trade adds one JSON row to `strategy-log.jsonl`: live trades a few minutes after the close (once
+the final PnL is known) and paper trades when they close. A row holds the mode (`live` / `paper`), profile, pool,
+parameters, entry metrics and actual range, PnL, hold time, flip and exit reason. Live rows also hold the simulator's
+predicted PnL at several pool depth factors.
+
+```bash
+node scripts/strategy-report.js [--profile <name>] [--since YYYY-MM-DD]
+```
+
+The report shows win rate, mean / median PnL, flip rate, hold time and exit mix per mode and profile, and buckets by
+range % and flip %. `--since` is a WIB date. Once there are live trades with predictions it also prints a suggested
+`SIM_POOL_DEPTH_FACTOR`: the depth factor whose predictions were closest to the real results.
 
 ## Settings and toggles
 
@@ -292,6 +319,9 @@ These are created while the bot runs and are git-ignored. Do not edit them while
 | `wallet.key`                            | Imported wallet key (overrides `.env`)                 |
 | `decision-log.json`, `pnl-history.json` | Logs and caches                                        |
 | `logs/`                                 | Process logs (PM2)                                     |
+| `paper-trades.json`                     | Paper trades (DRY_RUN Auto Entry)                      |
+| `strategy-log.jsonl`                    | Learning log: one row per finished auto trade          |
+| `data/backtest/`                        | Backtest datasets, reports and `best.conf`             |
 
 ## Scripts
 
@@ -303,6 +333,7 @@ These are created while the bot runs and are git-ignored. Do not edit them while
 | `npm run format` / `format:check`                     | Prettier                               |
 | `npm run pm2` / `pm2:stop` / `pm2:logs` / `pm2:monit` | Run and watch under PM2                |
 | `npm run pm2:logrotate`                               | Install and configure PM2 log rotation |
+| `node scripts/strategy-report.js`                     | Learning log report (see above)        |
 
 To run it long-term, use PM2 (`npm install -g pm2`, then `npm run pm2`).
 After changing or updating dependencies, run `npm install` again so the patch is reapplied.
