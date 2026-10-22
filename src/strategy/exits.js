@@ -28,8 +28,8 @@ export function evaluateStrategyExit({ trade, view, p, now }) {
     const legsTop = Math.max(...view.flipLegs.flatMap((l) => [tokenPos(l.lowerBin, xIsSol), tokenPos(l.upperBin, xIsSol)]));
     if (pos > legsTop) return done("cycle_done");
   }
-  if (above && now - aboveSince >= p.oorAboveMin * MIN_MS) return done("pumped_away");
-  if (below && now - belowSince >= p.oorBelowMin * MIN_MS) return done("range_broken");
+  if (p.oorAboveMin > 0 && above && now - aboveSince >= p.oorAboveMin * MIN_MS) return done("pumped_away");
+  if (p.oorBelowMin > 0 && below && now - belowSince >= p.oorBelowMin * MIN_MS) return done("range_broken");
   if (p.lowVolumeBars > 0 && p.minVolume5mUsd > 0 && view.volumes.length >= p.lowVolumeBars
     && view.volumes.slice(-p.lowVolumeBars).every((v) => v < p.minVolume5mUsd)) return done("volume_died");
   if (p.maxHoldMin > 0 && now - trade.openedAt >= p.maxHoldMin * MIN_MS) return done("max_hold");

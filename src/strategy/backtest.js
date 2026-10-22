@@ -48,17 +48,19 @@ export function replayPool({ row, token, bars: rawBars, p, g, solUsdAt }) {
   return trades;
 }
 
-// Batas portofolio: maks p.maxOpen trade terbuka sekaligus dan rem rugi harian (hari WIB, berdasar entryTime).
+// Batas portofolio: maks p.maxOpen trade terbuka sekaligus dan rem rugi harian (hari WIB). Rem hanya menghitung
+// PnL terealisasi: trade diterima yang sudah exit (exitTime <= entry kandidat) pada hari WIB yang sama dengan entry kandidat.
 export function portfolioPass(trades, p, g) {
   const accepted = [];
-  const dayPnl = new Map();
   for (const t of [...trades].sort((a, b) => a.entryTime - b.entryTime)) {
     const open = accepted.filter((a) => a.entryTime <= t.entryTime && t.entryTime < a.exitTime).length;
     if (open >= p.maxOpen) continue;
     const day = periodStart("today", t.entryTime);
-    if (brakeHit(dayPnl.get(day) ?? 0, g)) continue;
+    const realized = accepted
+      .filter((a) => a.exitTime <= t.entryTime && periodStart("today", a.exitTime) === day)
+      .reduce((s, a) => s + a.pnlSol, 0);
+    if (brakeHit(realized, g)) continue;
     accepted.push(t);
-    dayPnl.set(day, (dayPnl.get(day) ?? 0) + t.pnlSol);
   }
   return { accepted, totals: summarize(accepted) };
 }

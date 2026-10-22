@@ -150,6 +150,18 @@ test("portfolioPass resets the brake on the next WIB day", () => {
   assert.equal(accepted[1].entryTime, base + DAY);
 });
 
+test("portfolioPass brake counts only realized PnL (exited before the candidate's entry)", () => {
+  const t = (entry, exit, pnlSol) => ({ entryTime: entry, exitTime: exit, pnlSol, pnlPct: pnlSol * 100, holdMin: 1, flipped: false, exitReason: "sl" });
+  const base = Date.UTC(2026, 0, 10, 0, 0, 0); // 07:00 WIB
+  const lim = { ...g, dailyLossLimitSol: 0.5 };
+  // rugi -0.6 masih terbuka saat kandidat masuk -> kandidat tetap diterima
+  const open = portfolioPass([t(base, base + 5000, -0.6), t(base + 1000, base + 2000, 1)], { ...profile, maxOpen: 5 }, lim);
+  assert.deepEqual(open.accepted.map((x) => x.entryTime), [base, base + 1000]);
+  // sudah exit sebelum kandidat masuk -> rem menahan kandidat
+  const done = portfolioPass([t(base, base + 5000, -0.6), t(base + 5000, base + 6000, 1)], { ...profile, maxOpen: 5 }, lim);
+  assert.deepEqual(done.accepted.map((x) => x.entryTime), [base]);
+});
+
 test("totals", () => {
   const pcts = [-10, -5, -2, 0, 1, 2, 3, 4, 5, 10];
   const reasons = ["sl", "sl", "sl", "tp", "tp", "tp", "tp", "end_of_data", "end_of_data", "tp"];

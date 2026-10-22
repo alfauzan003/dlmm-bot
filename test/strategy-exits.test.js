@@ -68,3 +68,13 @@ test("max_hold and first-match order", () => {
     view: V({ activeBin: 3, volumes: [1, 1, 1] }), p: P, now: 120 * M });
   assert.equal(both.reason, "pumped_away");
 });
+
+test("OOR timers at 0 are off (never pumped_away / range_broken)", () => {
+  const off = { ...P, oorAboveMin: 0, oorBelowMin: 0, maxHoldMin: 0 };
+  const above = T({ strategyState: { aboveSince: 0, belowSince: null } });
+  assert.equal(evaluateStrategyExit({ trade: above, view: V({ activeBin: 3 }), p: off, now: 60 * M }).reason, null);
+  const below = T({ strategyState: { aboveSince: null, belowSince: 0 } });
+  assert.equal(evaluateStrategyExit({ trade: below, view: V({ activeBin: -51 }), p: off, now: 60 * M }).reason, null);
+  // timer tetap dicatat (state) walau exit-nya off
+  assert.equal(evaluateStrategyExit({ trade: T(), view: V({ activeBin: 3 }), p: off, now: M }).state.aboveSince, M);
+});
