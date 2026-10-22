@@ -4,16 +4,14 @@ import fs from "fs";
 import config from "../config/index.js";
 import log from "../core/logger.js";
 import { PAPER_FILE } from "../core/paths.js";
-import { WSOL_MINT } from "../core/constants.js";
 import { readJsonArray } from "../state/store.js";
 import { getPoolInfo } from "../entry/pool-info.js";
 import { getMintDecimals } from "../solana/balances.js";
-import { getPrice } from "../market/jupiter-price.js";
 import * as tg from "../notify/telegram.js";
 import { pctToBinRange } from "../lp/range.js";
 import { poolPriceSolPerToken } from "../entry/price-guard.js";
 import { closedBars, toSolPerToken } from "./screen.js";
-import { fetchRecentBars } from "./sources.js";
+import { fetchRecentBars, getSolUsdForced } from "./sources.js";
 import { simulateTrade } from "./sim.js";
 import { appendStrategyLog, paperLogRow } from "./log.js";
 
@@ -24,7 +22,7 @@ function withDeps(deps = {}) {
     getPoolInfo,
     getMintDecimals,
     fetchRecentBars,
-    getSolUsd: () => getPrice(WSOL_MINT),
+    getSolUsd: () => getSolUsdForced(),
     notifyEntry: tg.notifyAutoEntry,
     notifyClose: tg.notifyPaperClose,
     log: (trade) => appendStrategyLog(paperLogRow(trade)),

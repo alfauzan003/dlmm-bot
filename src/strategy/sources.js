@@ -5,6 +5,7 @@ import config from "../config/index.js";
 import log from "../core/logger.js";
 import { WSOL_MINT, USDC_MINT } from "../core/constants.js";
 import { getConnection } from "../solana/connection.js";
+import { getPrices } from "../market/jupiter-price.js";
 import { toPoolRow } from "./screen.js";
 
 const METEORA_BASE = "https://dlmm.datapi.meteora.ag";
@@ -19,6 +20,7 @@ const POSITION_OWNER_OFFSET = 40; // discriminator 8 + lb_pair 32 (positionOwner
 const tokenCache = new Map(); // mint -> { at, token }
 const lpCache = new Map(); // pool -> { at, count }
 let meteoraLastAt = -Infinity; // jam pacing bersama semua request datapi Meteora
+let lastSolUsd = null; // harga SOL (USD) baik terakhir dari getSolUsdForced
 
 export function resetMeteoraPace() {
   meteoraLastAt = -Infinity;
@@ -93,6 +95,18 @@ export async function fetchRecentBars(pool, limit, { deps, now } = {}) {
     log.warn(`Meteora OHLCV ${String(pool).slice(0, 8)} gagal: ${err.message}`);
     return [];
   }
+}
+
+// Harga SOL (USD) untuk strategi: fetch force (lewati pacing poll Jupiter), fallback harga baik terakhir; null bila belum pernah ada.
+export async function getSolUsdForced({ deps } = {}) {
+  const get = deps?.getPrices ?? getPrices;
+  try {
+    const v = Number((await get([WSOL_MINT], { force: true })).get(WSOL_MINT));
+    if (v > 0) lastSolUsd = v;
+  } catch (err) {
+    log.warn(`Harga SOL gagal: ${err.message}`);
+  }
+  return lastSolUsd;
 }
 
 // Info token Jupiter (organic score, audit, dst) per mint; batch 100, cache 5 menit.

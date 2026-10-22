@@ -123,50 +123,82 @@ test("cycle_done uses live flip legs", async () => {
   assert.equal(spy.calls[0].reason, "cycle_done");
 });
 
-test("volume_died reads closed 5m bars only", async () => {
-  const now = 10_000_000;
-  newTrade({ params: { ...PARAMS, lowVolumeBars: 2, minVolume5mUsd: 100 } });
+const SLOT_MS = 300_000;
+const slotSec = (ms) => Math.floor(ms / SLOT_MS) * 300; // awal slot 5m (detik) yang memuat ms
+
+test("volume_died: missing (zero-volume) closed slots count as 0, forming bar ignored", async () => {
+  const trade = newTrade({ params: { ...PARAMS, lowVolumeBars: 2, minVolume5mUsd: 100 } });
+  const now = trade.openedAt + 30 * 60000;
+  const cur = slotSec(now);
   const fetched = [];
-  const t0 = Math.floor(now / 1000);
-  const fetchCandles = async (mint, pool, opts) => {
-    fetched.push({ mint, pool, opts });
+  const fetchRecentBars = async (pool, limit) => {
+    fetched.push({ pool, limit });
+    // Meteora tidak mengirim bar bervolume 0: dua slot tertutup terakhir hilang, bar lama masih ramai.
     return [
-      { time: t0 - 900, volume: 5 },
-      { time: t0 - 600, volume: 10 },
-      { time: t0 - 300, volume: 20 },
-      { time: t0 - 100, volume: 99999 }, // masih terbentuk => dibuang
+      { time: cur - 1200, volume: 5000 },
+      { time: cur - 900, volume: 5000 },
+      { time: cur, volume: 99999 }, // masih terbentuk => diabaikan
     ];
   };
   const spy = spyClose();
-  await runStrategyExits([leg(50)], { deps: { closeTrade: spy.closeTrade, fetchCandles }, now });
-  assert.deepEqual(fetched, [{ mint: "MintA", pool: "PoolA", opts: { resolution: "5m", limit: 4 } }]);
+  await runStrategyExits([leg(50)], { deps: { closeTrade: spy.closeTrade, fetchRecentBars }, now });
+  assert.deepEqual(fetched, [{ pool: "PoolA", limit: 4 }]);
   assert.equal(spy.calls[0]?.reason, "volume_died");
 });
 
-test("candle fetch failure does not throw and gives no volume exit", async () => {
-  newTrade({ params: { ...PARAMS, lowVolumeBars: 2, minVolume5mUsd: 100 } });
+test("volume_died: active closed slots keep the trade open", async () => {
+  const trade = newTrade({ params: { ...PARAMS, lowVolumeBars: 2, minVolume5mUsd: 100 } });
+  const now = trade.openedAt + 30 * 60000;
+  const cur = slotSec(now);
+  const fetchRecentBars = async () => [
+    { time: cur - 600, volume: 50 },
+    { time: cur - 300, volume: 500 },
+  ];
+  const spy = spyClose();
+  await runStrategyExits([leg(50)], { deps: { closeTrade: spy.closeTrade, fetchRecentBars }, now });
+  assert.equal(spy.calls.length, 0);
+});
+
+test("volume_died: slots that start before openedAt are never counted", async () => {
+  const trade = newTrade({ params: { ...PARAMS, lowVolumeBars: 2, minVolume5mUsd: 100 } });
+  const firstSlot = Math.ceil(trade.openedAt / SLOT_MS) * SLOT_MS; // slot pertama yang mulai >= openedAt
+  const bars = [];
+  for (let t = slotSec(trade.openedAt) - 3600; t <= slotSec(trade.openedAt) + 3600; t += 300) bars.push({ time: t, volume: 5 });
+  const fetchRecentBars = async () => bars;
+  const spy = spyClose();
+  // Baru satu slot tertutup sejak open (slot sebelumnya mulai sebelum openedAt) -> belum cukup 2 slot.
+  await runStrategyExits([leg(50)], { deps: { closeTrade: spy.closeTrade, fetchRecentBars }, now: firstSlot + SLOT_MS + 1000 });
+  assert.equal(spy.calls.length, 0);
+  // Slot kedua tertutup -> exit.
+  await runStrategyExits([leg(50)], { deps: { closeTrade: spy.closeTrade, fetchRecentBars }, now: firstSlot + 2 * SLOT_MS + 1000 });
+  assert.equal(spy.calls[0]?.reason, "volume_died");
+});
+
+test("bar fetch failure or empty result does not throw and gives no volume exit", async () => {
+  const trade = newTrade({ params: { ...PARAMS, lowVolumeBars: 2, minVolume5mUsd: 100 } });
   const spy = spyClose();
   const failing = [
+    async () => [],
     async () => null,
     async () => {
       throw new Error("boom");
     },
   ];
-  for (const fetchCandles of failing) {
-    const ids = await runStrategyExits([leg(50)], { deps: { closeTrade: spy.closeTrade, fetchCandles }, now: 10_000_000 });
+  for (const fetchRecentBars of failing) {
+    const ids = await runStrategyExits([leg(50)], { deps: { closeTrade: spy.closeTrade, fetchRecentBars }, now: trade.openedAt + 30 * 60000 });
     assert.deepEqual(ids, []);
   }
   assert.equal(spy.calls.length, 0);
 });
 
-test("no candle fetch when lowVolumeBars is 0", async () => {
+test("no bar fetch when lowVolumeBars is 0", async () => {
   newTrade();
   let fetches = 0;
   const spy = spyClose();
   await runStrategyExits([leg(50)], {
     deps: {
       closeTrade: spy.closeTrade,
-      fetchCandles: async () => {
+      fetchRecentBars: async () => {
         fetches++;
         return [];
       },

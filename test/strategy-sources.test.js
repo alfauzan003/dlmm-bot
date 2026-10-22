@@ -13,6 +13,7 @@ import {
   solUsdAtFn,
   resetMeteoraPace,
   countPoolLps,
+  getSolUsdForced,
 } from "../src/strategy/sources.js";
 
 test("fetchOhlcvRange paginates windows and dedupes", async () => {
@@ -244,4 +245,26 @@ test("fetchRecentBars returns [] when the request fails and logs a warning", asy
   assert.equal(warn.mock.callCount(), 1);
   const msg = warn.mock.calls[0].arguments[0];
   assert.ok(msg.includes("POOLADDR") && !msg.includes("POOLADDRE") && msg.includes("HTTP 429"), msg);
+});
+
+test("getSolUsdForced forces past Jupiter pacing and falls back to the last good price", async () => {
+  const calls = [];
+  let price = null;
+  const getPrices = async (mints, opts) => {
+    calls.push({ mints, opts });
+    if (price === "throw") throw new Error("down");
+    return new Map(price == null ? [] : [[WSOL_MINT, price]]);
+  };
+  const deps = { getPrices };
+  assert.equal(await getSolUsdForced({ deps }), null, "no price yet");
+  price = 150;
+  assert.equal(await getSolUsdForced({ deps }), 150);
+  price = null;
+  assert.equal(await getSolUsdForced({ deps }), 150, "pacing/backoff -> last good");
+  price = 0;
+  assert.equal(await getSolUsdForced({ deps }), 150, "non-positive is not a price");
+  price = "throw";
+  assert.equal(await getSolUsdForced({ deps }), 150);
+  assert.deepEqual(calls[0], { mints: [WSOL_MINT], opts: { force: true } });
+  assert.ok(calls.every((c) => c.opts.force === true));
 });

@@ -4,11 +4,9 @@ import fs from "fs";
 import config from "../config/index.js";
 import log from "../core/logger.js";
 import { STRATEGY_LOG_FILE } from "../core/paths.js";
-import { WSOL_MINT } from "../core/constants.js";
 import { listClosedTrades, markTradeStrategyLogged } from "../state/trades.js";
 import { getPoolInfo } from "../entry/pool-info.js";
-import { getPrice } from "../market/jupiter-price.js";
-import { fetchOhlcvRange } from "./sources.js";
+import { fetchOhlcvRange, getSolUsdForced } from "./sources.js";
 import { toSolPerToken } from "./screen.js";
 import { simulateTrade } from "./sim.js";
 
@@ -65,7 +63,7 @@ function withDeps(deps = {}) {
   return {
     listClosedTrades,
     markLogged: markTradeStrategyLogged,
-    getSolUsd: () => getPrice(WSOL_MINT),
+    getSolUsd: () => getSolUsdForced(),
     getBaseIsX: async (pool) => (await getPoolInfo(pool)).baseIsX,
     fetchOhlcvRange,
     append: appendStrategyLog,

@@ -471,16 +471,29 @@ test("daily brake: converts USD-only losses with the SOL price", async () => {
   assert.equal(brake.length, 1);
 });
 
-test("daily brake: price lookup fails and only USD-only losses exist -> no brake", async () => {
-  const brake = [];
+test("daily brake: no SOL price and USD-only losses today -> scan skipped (fail closed), toggle stays on", async () => {
+  for (const getSolUsd of [async () => Promise.reject(new Error("price down")), async () => null]) {
+    const brake = [];
+    const { deps, calls } = makeDeps({
+      listClosedTrades: () => [brakeLoss({ closePnlUsd: -1000 })],
+      getSolUsd,
+      notifyDailyBrake: (a) => brake.push(a),
+    });
+    await runScan({ deps });
+    assert.equal(isOn("autoEntry"), true);
+    assert.equal(brake.length, 0);
+    assert.equal(calls.fetchPoolRows.length, 0);
+    assert.equal(calls.executeOpen.length, 0);
+  }
+});
+
+test("daily brake: no SOL price but only SOL-denominated closes -> scan goes ahead", async () => {
   const { deps, calls } = makeDeps({
-    listClosedTrades: () => [brakeLoss({ closePnlUsd: -1000 })],
-    getSolUsd: async () => Promise.reject(new Error("price down")),
-    notifyDailyBrake: (a) => brake.push(a),
+    listClosedTrades: () => [brakeLoss({ closePnlSol: -0.1, closePnlUsd: -10 })],
+    getSolUsd: async () => null,
   });
   await runScan({ deps });
   assert.equal(isOn("autoEntry"), true);
-  assert.equal(brake.length, 0);
   assert.equal(calls.fetchPoolRows.length, 1);
 });
 

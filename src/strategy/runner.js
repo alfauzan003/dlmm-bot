@@ -7,8 +7,6 @@ import { isOn, setToggle } from "../state/settings.js";
 import { listOpenTrades, listClosedTrades } from "../state/trades.js";
 import { recordAction, getEntryInProgressMints, isEntryInProgressPool } from "../entry/runtime.js";
 import { planOpen, executeOpen, SOL_BUFFER } from "../lp/open-trade.js";
-import { getPrice } from "../market/jupiter-price.js";
-import { WSOL_MINT } from "../core/constants.js";
 import { periodStart } from "../lp/pnl-stats.js";
 import { getConnection } from "../solana/connection.js";
 import { getWallet } from "../solana/wallet.js";
@@ -26,7 +24,7 @@ import {
 } from "./screen.js";
 import { entrySignal, pickRangePct, barsNeeded } from "./signal.js";
 import { canOpen, todayAutoPnlSol, brakeHit } from "./limits.js";
-import { fetchPoolRows, fetchTokens, fetchRecentBars, countPoolLps } from "./sources.js";
+import { fetchPoolRows, fetchTokens, fetchRecentBars, countPoolLps, getSolUsdForced } from "./sources.js";
 import { openPaperTrade, listPaperTrades } from "./paper.js";
 
 // Runtime-only (reset saat restart): kegagalan entry per base mint, catatan dry run, snapshot.
@@ -61,7 +59,7 @@ function withDeps(deps = {}) {
     notifyEntryFailed: tg.notifyEntryFailed,
     notifyEntryAborted: tg.notifyEntryAborted,
     notifyDailyBrake: tg.notifyDailyBrake,
-    getSolUsd: () => getPrice(WSOL_MINT),
+    getSolUsd: () => getSolUsdForced(),
     setToggle,
     isOn,
     now: Date.now,
@@ -109,8 +107,9 @@ function tradeRefs(d, now, g) {
   return { open, closed: closedRefs(d, sinceMs) };
 }
 
-// Rem rugi harian: true bila batas kena -> scan berhenti. Gagal hitung PnL = fail open (scan lanjut);
-// begitu batas kena, selalu true walau aksi (matikan toggle / alert) gagal.
+// Rem rugi harian: true bila batas kena -> scan berhenti. Gagal hitung PnL = fail open (scan lanjut), kecuali
+// ada close USD-only hari ini tanpa harga SOL -> true (scan ini dilewati, fail closed); begitu batas kena,
+// selalu true walau aksi (matikan toggle / alert) gagal.
 async function dailyBrake(deps) {
   const d = withDeps(deps);
   const g = config.autoEntry;
@@ -123,8 +122,13 @@ async function dailyBrake(deps) {
       try {
         solUsd = await d.getSolUsd();
       } catch (err) {
-        log.warn(`Auto entry: harga SOL gagal: ${err.message} — close USD-only dilewati di rem harian`);
+        log.warn(`Auto entry: harga SOL gagal: ${err.message}`);
       }
+    }
+    const usdOnly = closed.some((t) => !Number.isFinite(t.closePnlSol) && Number.isFinite(t.closePnlUsd));
+    if (usdOnly && !(Number(solUsd) > 0)) {
+      log.warn("Auto entry: harga SOL tidak ada untuk close USD-only — rem harian tidak bisa dihitung, scan dilewati");
+      return true;
     }
     pnl = todayAutoPnlSol(closed, solUsd, now);
     if (!brakeHit(pnl, g)) return false;

@@ -3,23 +3,32 @@
 // terlepas dari toggle Auto Entry. Parameter = snapshot saat entry (trade.strategy.params).
 import log from "../core/logger.js";
 import { closeTrade as defaultCloseTrade } from "../lp/close-trade.js";
-import { fetchCandles as defaultFetchCandles } from "../market/candles.js";
 import { getTrackedPosition } from "../state/positions.js";
 import { listOpenTrades, setTradeStrategyState, tradeLock } from "../state/trades.js";
 import { evaluateStrategyExit } from "../strategy/exits.js";
-import { closedBars } from "../strategy/screen.js";
+import { fetchRecentBars as defaultFetchRecentBars } from "../strategy/sources.js";
 
 const isLegClosed = (addr) => getTrackedPosition(addr)?.closed === true;
 
-// Volume 5m bar yang sudah tutup; gagal fetch → [] (tidak pernah melempar).
-async function loadVolumes(trade, leg, p, now, fetchCandles) {
+const BAR_SEC = 300;
+
+// Volume slot 5m tertutup terakhir (maks lowVolumeBars, urut waktu), hanya slot yang mulai >= openedAt.
+// Meteora tidak mengirim bar bervolume 0 -> slot tanpa bar = 0. Fetch gagal/kosong -> [] (tidak pernah melempar).
+async function loadVolumes(trade, p, now, fetchRecentBars) {
   if (!(p.lowVolumeBars > 0)) return [];
   try {
-    const candles = await fetchCandles(leg.baseMint ?? trade.baseMint, leg.pool ?? trade.pool, {
-      resolution: "5m",
-      limit: p.lowVolumeBars + 2,
-    });
-    return Array.isArray(candles) ? closedBars(candles, now).map((c) => c.volume) : [];
+    const bars = await fetchRecentBars(trade.pool, p.lowVolumeBars + 2);
+    if (!Array.isArray(bars) || bars.length === 0) return [];
+    const volumeAt = new Map(bars.map((b) => [b.time, b.volume]));
+    const current = Math.floor(now / 1000 / BAR_SEC) * BAR_SEC;
+    const out = [];
+    for (let k = p.lowVolumeBars; k >= 1; k--) {
+      const start = current - BAR_SEC * k;
+      if (start * 1000 < trade.openedAt) continue;
+      const v = Number(volumeAt.get(start));
+      out.push(Number.isFinite(v) ? v : 0);
+    }
+    return out;
   } catch {
     return [];
   }
@@ -28,7 +37,7 @@ async function loadVolumes(trade, leg, p, now, fetchCandles) {
 // Satu siklus: evaluasi tiap trade auto terbuka; mengembalikan id trade yang berhasil ditutup.
 export async function runStrategyExits(positions, { deps = {}, now = Date.now() } = {}) {
   const close = deps.closeTrade ?? defaultCloseTrade;
-  const fetchCandles = deps.fetchCandles ?? defaultFetchCandles;
+  const fetchRecentBars = deps.fetchRecentBars ?? defaultFetchRecentBars;
   const live = new Map((positions || []).filter((p) => p?.position).map((p) => [p.position, p]));
   const closed = [];
 
@@ -49,7 +58,7 @@ export async function runStrategyExits(positions, { deps = {}, now = Date.now() 
         flipLegs: legs
           .filter((l) => flipSet.has(l.position) && Number.isFinite(l.lowerBin) && Number.isFinite(l.upperBin))
           .map((l) => ({ lowerBin: l.lowerBin, upperBin: l.upperBin })),
-        volumes: await loadVolumes(trade, main, p, now, fetchCandles),
+        volumes: await loadVolumes(trade, p, now, fetchRecentBars),
       };
 
       const { reason, state } = evaluateStrategyExit({ trade, view, p, now });
