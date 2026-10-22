@@ -60,6 +60,11 @@ test("accrueFees uses our share of each visited bin", () => {
 
 test("pathVisits", () => {
   assert.deepEqual(pathVisits(2, -1), [2, 1, 0, -1]);
+  // bukan integer -> [] (tanpa loop tak berujung)
+  assert.deepEqual(pathVisits(0, 1.5), []);
+  assert.deepEqual(pathVisits(0.5, 3), []);
+  assert.deepEqual(pathVisits(NaN, 3), []);
+  assert.deepEqual(pathVisits(0, Infinity), []);
   assert.deepEqual(pathVisits(0, 0), [0]);
 });
 

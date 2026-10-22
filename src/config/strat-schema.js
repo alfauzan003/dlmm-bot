@@ -41,6 +41,8 @@ const OVERRIDES = {
   AUTO_SCAN_INTERVAL_SEC: { min: 15 },
   AUTO_ORGANIC_SCORE_MIN: { min: 0, max: 100 },
   AUTO_TOP_HOLDERS_MAX_PCT: { min: 0, max: 100 },
+  AUTO_CANDIDATES_PER_SCAN: { min: 1, int: true },
+  SIM_POOL_SPREAD_BINS: { gt: 0, int: true },
 };
 
 // Aturan per pola nama. OVERRIDES menang.
@@ -49,6 +51,8 @@ const PATTERNS = [
   [/^(DEGEN|MULTI)_FLIP_PCT$/, { min: 1, max: 100 }],
   [/^(DEGEN|MULTI)_RANGE_(MIN_|MAX_)?PCT$/, { gt: 0, max: 99 }],
   [/^(DEGEN|MULTI)_(MAX_OPEN|LOW_VOLUME_BARS|MIN_LPS|MIN_HOLDERS|MIN_BIN_STEP)$/, { min: 0, int: true }],
+  [/^(DEGEN|MULTI)_SIZE_SOL$/, { gt: 0 }],
+  [/^(DEGEN|MULTI)_PUMP_LOOKBACK_MIN$/, { gt: 0 }],
   [/^(DEGEN|MULTI)_.*_(PCT|USD|MIN|H|SOL)$/, { min: 0 }],
   [/_(ATTEMPTS|RETRY)$/, { int: true }],
 ];

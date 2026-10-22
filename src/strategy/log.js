@@ -49,7 +49,7 @@ export function paperLogRow(t) {
     pair: t.pair,
     mint: t.baseMint,
     params: t.p,
-    entry: t.entry,
+    entry: { ...t.entry, rangePct: t.rangePct },
     pnlPct: t.closePnlPct,
     pnlSol: t.closePnlSol,
     holdMin: t.holdMin,
@@ -173,7 +173,7 @@ function bucketBy(rows, keyOf, labelOf) {
   return [...map.entries()].sort((a, b) => a[0] - b[0]).map(([k, list]) => ({ bucket: labelOf(k), ...bucketStats(list) }));
 }
 
-// Ringkasan: grup mode+profil, bucket rangePct (10 poin) / flipPct, dan faktor kedalaman dengan MAE terendah (hanya live).
+// Ringkasan: grup mode+profil, bucket rangePct aktual entry (10 poin) / flipPct, dan faktor kedalaman dengan MAE terendah (hanya live).
 export function summarizeRows(rows) {
   const valid = rows.filter((r) => Number.isFinite(r.pnlPct));
   const byGroup = new Map();
@@ -200,7 +200,7 @@ export function summarizeRows(rows) {
     };
   });
   const buckets = {
-    rangePct: bucketBy(valid, (r) => Math.floor(Number(r.params?.rangePct) / 10) * 10, (k) => `${k}-${k + 9}`),
+    rangePct: bucketBy(valid, (r) => Math.floor(Number(r.entry?.rangePct) / 10) * 10, (k) => `${k}-${k + 9}`),
     flipPct: bucketBy(valid, (r) => Number(r.params?.flipPct), (k) => String(k)),
   };
 

@@ -148,6 +148,20 @@ test("auto entry profile keys: enums, ranges, whole numbers, restart key", () =>
   assert.equal(RESTART_KEYS.has("AUTO_SCAN_INTERVAL_SEC"), true);
 });
 
+test("auto entry sizes, lookbacks, spread bins and candidates per scan must be positive", () => {
+  const keys = ["DEGEN_SIZE_SOL", "MULTI_SIZE_SOL", "DEGEN_PUMP_LOOKBACK_MIN", "MULTI_PUMP_LOOKBACK_MIN", "SIM_POOL_SPREAD_BINS", "AUTO_CANDIDATES_PER_SCAN"];
+  const s = parseStratText(["# ===== Auto Entry =====", ...keys.map((k) => `${k}=5`)].join("\n"));
+  for (const k of keys) {
+    assert.equal(validateValue(k, "0", s).ok, false, `${k}=0`);
+    assert.equal(validateValue(k, "5", s).ok, true, `${k}=5`);
+  }
+  assert.equal(validateValue("DEGEN_SIZE_SOL", "0.1", s).ok, true);
+  assert.equal(validateValue("DEGEN_PUMP_LOOKBACK_MIN", "0.5", s).ok, true);
+  assert.equal(validateValue("SIM_POOL_SPREAD_BINS", "1.5", s).ok, false);
+  assert.equal(validateValue("AUTO_CANDIDATES_PER_SCAN", "1.5", s).ok, false);
+  assert.equal(validateValue("AUTO_CANDIDATES_PER_SCAN", "1", s).ok, true);
+});
+
 test("loadStratSchema on a missing file is empty", () => {
   assert.deepEqual(loadStratSchema("does-not-exist.conf"), { sections: [], entries: {} });
 });

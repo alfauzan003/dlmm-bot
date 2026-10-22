@@ -71,6 +71,7 @@ export function accrueFees(pos, { visits, volumeSol, lpFeeRate, poolLiqSolAt }) 
 }
 
 export function pathVisits(fromK, toK) {
+  if (!Number.isInteger(fromK) || !Number.isInteger(toK)) return []; // cegah loop tak berujung
   const out = [];
   const step = toK >= fromK ? 1 : -1;
   for (let k = fromK; k !== toK + step; k += step) out.push(k);

@@ -70,6 +70,8 @@ const MODULES = [
   "../src/strategy/backtest.js",
   "../src/strategy/exits.js",
   "../src/strategy/limits.js",
+  "../src/strategy/log.js",
+  "../src/strategy/paper.js",
   "../src/strategy/params.js",
   "../src/strategy/runner.js",
   "../src/strategy/screen.js",

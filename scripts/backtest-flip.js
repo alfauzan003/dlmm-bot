@@ -191,11 +191,16 @@ async function cmdRun(args) {
   }
 
   const rows = results.map((r, k) => resultRow(r, k + 1, baseP));
+  // Skor validate rank 1 -Infinity = sisi validate kurang dari MIN_TRADES trade: hasil hanya in-sample.
+  const notValidated = results[0].validate.score === -Infinity;
+  const nvMsg = `NOT VALIDATED — validation side had fewer than ${MIN_TRADES} trades; rank 1 is the best in-sample set`;
   console.log(HEADERS.join(" | "));
   for (const r of rows) console.log(r.join(" | "));
-  fs.writeFileSync(reportFile, [...head, "## Top parameter sets", "", mdTable(rows), "", ...limits].join("\n"));
+  if (notValidated) console.log(nvMsg);
+  const nvHead = notValidated ? [`**${nvMsg}**`, ""] : [];
+  fs.writeFileSync(reportFile, [...head, ...nvHead, "## Top parameter sets", "", mdTable(rows), "", ...limits].join("\n"));
   const bestFile = path.join(dir, "best.conf");
-  fs.writeFileSync(bestFile, profileToConf(results[0].params));
+  fs.writeFileSync(bestFile, (notValidated ? "# NOT VALIDATED (in-sample only)\n" : "") + profileToConf(results[0].params));
   console.log(`report -> ${reportFile}`);
   console.log(`best   -> ${bestFile}`);
   console.log("Not applied — paste best.conf into strat.conf or set the keys in /settings → 🧩 Strategy.");
