@@ -26,7 +26,11 @@ async function refreshAlert(settled, finals, msgId, { swapInfo, notify }) {
 // Tutup semua leg satu trade (tanpa alert per-leg), swap base token sekali,
 // lalu selesaikan trade dan kirim satu alert. Leg yang gagal membuat trade
 // tetap terbuka (bisa dicoba lagi); leg yang sudah tertutup dilewati.
-export async function closeTrade(trade, { reason, swap = true, positionsByAddr = new Map(), deps = {} } = {}) {
+// detail (opsional) = penjelasan alasan close, disimpan di trade.closeDetail dan tampil di alert.
+export async function closeTrade(
+  trade,
+  { reason, detail = null, swap = true, positionsByAddr = new Map(), deps = {} } = {}
+) {
   const close = deps.handleClose ?? handleClose;
   const notify = deps.notifyTradeClosed ?? notifyTradeClosed;
 
@@ -65,7 +69,7 @@ export async function closeTrade(trade, { reason, swap = true, positionsByAddr =
       return { success: false, trade: getTrade(t.id), failed, swapInfo };
     }
 
-    const settled = settleTradeIfDone(t.id, { fallbackReason: reason });
+    const settled = settleTradeIfDone(t.id, { fallbackReason: reason, closeDetail: detail });
     const msgId = settled ? Promise.resolve(notify(settled, { swapInfo })) : null;
     // Alert di atas memakai PnL live; perbarui setelah PnL final Meteora semua leg masuk (latar belakang).
     const finalPnl = settled && finals.length > 0 ? refreshAlert(settled, finals, msgId, { swapInfo, notify }) : null;

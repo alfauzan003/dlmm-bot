@@ -555,3 +555,76 @@ test("daily brake: a throwing setToggle still stops the scan and still alerts", 
   assert.equal(calls.fetchPoolRows.length, 0);
   assert.equal(calls.executeOpen.length, 0);
 });
+
+test("digest: sent after the first scan, then once per TG_STATUS_INTERVAL", async () => {
+  const sent = [];
+  const { deps, setNow } = makeDeps({
+    fetchRecentBars: async () => makeBars({ lastGreen: true }),
+    notifyDigest: (text) => sent.push(text),
+  });
+  config.tgStatusInterval = 40;
+  await runScan({ deps });
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /Auto Entry digest · first scan · LIVE/);
+  assert.match(sent[0], /degen — 1 scan\(s\)/);
+  assert.match(sent[0], /avg\/scan: 1 pools → 1 pass → 1 tokens → 1 checked/);
+  assert.match(sent[0], /• AAA-SOL — not_red: pump [\d.]+% · pullback [\d.]+% · last bar not red/);
+
+  setNow(NOW + 39 * 60_000);
+  await runScan({ deps });
+  assert.equal(sent.length, 1, "not due yet");
+  setNow(NOW + 40 * 60_000);
+  await runScan({ deps });
+  assert.equal(sent.length, 2);
+  assert.match(sent[1], /last 40m/);
+  assert.match(sent[1], /degen — 2 scan\(s\)/);
+  assert.match(sent[1], /verdicts: not_red 2/);
+});
+
+test("digest counts pool filter drops and pool list errors", async () => {
+  const sent = [];
+  const small = makeDeps({ fetchPoolRows: async () => [{ ...ROW, tvlUsd: 1 }], notifyDigest: (t) => sent.push(t) });
+  await runScan({ deps: small.deps });
+  assert.match(sent[0], /1 pools → 0 pass → 0 tokens → 0 checked/);
+  assert.match(sent[0], /verdicts: none/);
+
+  _resetRunnerForTest();
+  const down = makeDeps({
+    fetchPoolRows: async () => {
+      throw new Error("HTTP 500");
+    },
+    notifyDigest: (t) => sent.push(t),
+  });
+  await runScan({ deps: down.deps });
+  assert.match(sent[1], /degen — 1 scan\(s\), 1 error\(s\)/);
+  assert.match(sent[1], /last error: pool list failed: HTTP 500/);
+});
+
+test("snapshot carries the reason detail; entry alert and trade meta carry why entry / why range", async () => {
+  const red = makeDeps({ fetchRecentBars: async () => makeBars({ lastGreen: true }), notifyDigest: () => {} });
+  await runScan({ deps: red.deps });
+  assert.match(getScreenSnapshot()[0].detail, /last bar not red/);
+
+  _resetRunnerForTest();
+  const { deps, calls } = makeDeps({ notifyDigest: () => {} });
+  await runScan({ deps });
+  assert.equal(calls.notify.length, 1);
+  assert.match(calls.notify[0].signalDetail, /last bar red/);
+  assert.match(calls.notify[0].rangeWhy, /^(fixed|support mode)/);
+  const entry = calls.executeOpen[0].opts.meta.strategy.entry;
+  assert.equal(entry.rangeWhy, calls.notify[0].rangeWhy);
+  assert.equal(entry.signalWhy, calls.notify[0].signalDetail);
+  assert.equal(getScreenSnapshot()[0].signal, "opened");
+});
+
+test("Auto Entry OFF resets the digest window", async () => {
+  const sent = [];
+  const { deps } = makeDeps({ fetchRecentBars: async () => makeBars({ lastGreen: true }), notifyDigest: (t) => sent.push(t) });
+  await runScan({ deps });
+  setToggle("autoEntry", false);
+  await runScan({ deps });
+  setToggle("autoEntry", true);
+  await runScan({ deps });
+  assert.equal(sent.length, 2);
+  assert.match(sent[1], /first scan/);
+});

@@ -164,9 +164,12 @@ export function notifyTradeClosed(trade, { swapInfo = null, editMessageId } = {}
     `🔒 Trade #${trade.id} closed — ${esc(trade.pair)}`,
     "",
     `Reason: ${esc(exitLabel(trade.closeReason))}`,
-    `PnL: ${trade.closePnlUsd > 0 ? "+" : ""}${fmtUsd(trade.closePnlUsd)} (${fmtPct(trade.closePnlPct)})`,
-    `Duration: ${fmtDuration(trade.closedAt - trade.openedAt)}`,
   ];
+  if (trade.closeDetail) lines.push(`Why: ${esc(trade.closeDetail)}`);
+  lines.push(
+    `PnL: ${trade.closePnlUsd > 0 ? "+" : ""}${fmtUsd(trade.closePnlUsd)} (${fmtPct(trade.closePnlPct)})`,
+    `Duration: ${fmtDuration(trade.closedAt - trade.openedAt)}`
+  );
   if (swapInfo && swapInfo.success === false) {
     lines.push(`⚠️ Swap failed${swapInfo.error ? `: ${esc(swapInfo.error)}` : " — swap manually"}`);
   }
@@ -217,7 +220,7 @@ export function notifyDailyBrake({ pnlSol, limitSol }) {
   send(`🛑 Daily loss limit hit (${pnlSol.toFixed(3)} SOL ≤ −${limitSol} SOL) — Auto Entry turned OFF. Open trades keep their exits.`);
 }
 
-// Alert entry Auto Entry (live atau paper).
+// Alert entry Auto Entry (live atau paper). signalDetail / rangeWhy = alasan entry dan lebar range.
 export function notifyAutoEntry({
   profile,
   pair,
@@ -229,28 +232,47 @@ export function notifyAutoEntry({
   feeTvl30mPct,
   volatilityPct,
   mcapUsd,
+  signalDetail = null,
+  rangeWhy = null,
   paper = false,
 }) {
-  send(
-    [
-      `${paper ? "📝 PAPER " : ""}🤖 Auto entry · ${profile} · ${pair}`,
-      `Size ${sizeSol} SOL · range −${rangePct.toFixed(0)}% · bin ${binStep} · fee ${baseFeePct}%`,
-      `Fee/TVL 30m ${feeTvl30mPct.toFixed(2)}% · volatility ${volatilityPct.toFixed(1)}% · MC ${fmtUsd(mcapUsd)}`,
-      `Pool: ${pool}`,
-    ].join("\n")
-  );
+  const lines = [
+    `${paper ? "📝 PAPER " : ""}🤖 Auto entry · ${profile} · ${pair}`,
+    `Size ${sizeSol} SOL · range −${rangePct.toFixed(0)}% · bin ${binStep} · fee ${baseFeePct}%`,
+    `Fee/TVL 30m ${feeTvl30mPct.toFixed(2)}% · volatility ${volatilityPct.toFixed(1)}% · MC ${fmtUsd(mcapUsd)}`,
+  ];
+  if (signalDetail) lines.push(`Why entry: ${signalDetail}`);
+  if (rangeWhy) lines.push(`Why range: ${rangeWhy}`);
+  lines.push(`Pool: ${pool}`);
+  send(lines.join("\n"));
 }
 
 // Alert close paper trade (DRY_RUN).
 export function notifyPaperClose(trade) {
   const sgn = (v, d) => `${v >= 0 ? "+" : ""}${Number(v).toFixed(d)}`;
+  const lines = [`📝 PAPER close · ${trade.profile} · ${trade.pair}`, `Reason: ${exitLabel(trade.closeReason)}`];
+  if (trade.closeDetail) lines.push(`Why: ${trade.closeDetail}`);
+  lines.push(
+    `PnL: ${sgn(trade.closePnlPct, 2)}% (${sgn(trade.closePnlSol, 4)} SOL) · ${Math.round(trade.holdMin)}m${trade.flipped ? " · flipped" : ""}`
+  );
+  send(lines.join("\n"));
+}
+
+// Runner Auto Entry baru jalan: tanda bot hidup.
+export function notifyRunnerStarted({ mode, scanSec, profiles, autoEntryOn, digestMin }) {
   send(
     [
-      `📝 PAPER close · ${trade.profile} · ${trade.pair}`,
-      `Reason: ${exitLabel(trade.closeReason)}`,
-      `PnL: ${sgn(trade.closePnlPct, 2)}% (${sgn(trade.closePnlSol, 4)} SOL) · ${Math.round(trade.holdMin)}m${trade.flipped ? " · flipped" : ""}`,
+      `🤖 Auto Entry runner started · ${mode}`,
+      `Scan every ${scanSec}s · profiles: ${profiles.join(", ") || "none"}`,
+      `Auto Entry toggle: ${autoEntryOn ? "ON" : "OFF"}${autoEntryOn ? "" : " — turn it on in /settings to start scanning"}`,
+      `Digest: after the first scan, then every ${digestMin}m`,
     ].join("\n")
   );
+}
+
+// Digest berkala keputusan scan Auto Entry (teks dari strategy/scan-report.js).
+export function notifyAutoDigest(text) {
+  send(text);
 }
 
 function emoji(v) {

@@ -45,3 +45,16 @@ export function evaluateTradeExit(trade, pnlPct) {
 
   return { reason, peakPnlPct, trailArmed };
 }
+
+const sgn = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+
+// Penjelasan singkat (untuk log / alert) kenapa evaluateTradeExit memberi `reason`.
+export function tradeExitDetail(reason, trade, pnlPct, peakPnlPct) {
+  const { tp, sl, trail } = trade.exit || {};
+  if (!Number.isFinite(pnlPct)) return null;
+  if (reason === "sl") return `PnL ${sgn(pnlPct)} ≤ SL −${sl.pct}%`;
+  if (reason === "tp") return `PnL ${sgn(pnlPct)} ≥ TP ${tp.pct}%`;
+  if (reason === "trail")
+    return `peak ${sgn(peakPnlPct)}, now ${sgn(pnlPct)} ≤ peak − ${trail.distancePct}% (armed at ${trail.startPct}%)`;
+  return null;
+}

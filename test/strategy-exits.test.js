@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildProfile } from "../src/strategy/params.js";
-import { STRATEGY_EXIT_REASONS, tokenPos, evaluateStrategyExit } from "../src/strategy/exits.js";
+import { STRATEGY_EXIT_REASONS, tokenPos, evaluateStrategyExit, strategyExitDetail } from "../src/strategy/exits.js";
 
 const P = { ...buildProfile({}, "degen"), oorAboveMin: 10, oorBelowMin: 15, lowVolumeBars: 3, minVolume5mUsd: 1000, maxHoldMin: 120 };
 const T = (o = {}) => ({ range: { lowerBin: -50, upperBin: 0 }, openedAt: 0, ...o });
@@ -77,4 +77,14 @@ test("OOR timers at 0 are off (never pumped_away / range_broken)", () => {
   assert.equal(evaluateStrategyExit({ trade: below, view: V({ activeBin: -51 }), p: off, now: 60 * M }).reason, null);
   // timer tetap dicatat (state) walau exit-nya off
   assert.equal(evaluateStrategyExit({ trade: T(), view: V({ activeBin: 3 }), p: off, now: M }).state.aboveSince, M);
+});
+
+test("strategyExitDetail explains each strategy exit", () => {
+  const d = (reason, o = {}) => strategyExitDetail(reason, { trade: T(), view: V(), p: P, now: 20 * M, state: {}, ...o });
+  assert.match(d("cycle_done"), /above the flip range/);
+  assert.equal(d("pumped_away", { state: { aboveSince: 9 * M } }), "price above range (no dip, SOL unused) for 11m ≥ 10m");
+  assert.equal(d("range_broken", { state: { belowSince: 4 * M } }), "price below range for 16m ≥ 15m");
+  assert.equal(d("volume_died", { view: V({ volumes: [420.4, 310, 150] }) }), "last 3 5m bars $420 / $310 / $150 < $1000");
+  assert.equal(d("max_hold", { now: 121 * M }), "held 121m ≥ 120m");
+  assert.equal(d(null), null);
 });

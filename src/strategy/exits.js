@@ -35,3 +35,20 @@ export function evaluateStrategyExit({ trade, view, p, now }) {
   if (p.maxHoldMin > 0 && now - trade.openedAt >= p.maxHoldMin * MIN_MS) return done("max_hold");
   return done(null);
 }
+
+const mins = (ms) => `${Math.round(ms / MIN_MS)}m`;
+const usd = (v) => `$${Math.round(Number(v) || 0)}`;
+
+// Penjelasan singkat (untuk log / alert) kenapa evaluateStrategyExit memberi `reason`; state = hasilnya.
+export function strategyExitDetail(reason, { trade, view, p, now, state }) {
+  if (reason === "cycle_done") return "price rose above the flip range — tokens sold back to SOL";
+  if (reason === "pumped_away")
+    return `price above range (no dip, SOL unused) for ${mins(now - state.aboveSince)} ≥ ${p.oorAboveMin}m`;
+  if (reason === "range_broken") return `price below range for ${mins(now - state.belowSince)} ≥ ${p.oorBelowMin}m`;
+  if (reason === "volume_died") {
+    const vols = view.volumes.slice(-p.lowVolumeBars).map(usd).join(" / ");
+    return `last ${p.lowVolumeBars} 5m bars ${vols} < ${usd(p.minVolume5mUsd)}`;
+  }
+  if (reason === "max_hold") return `held ${mins(now - trade.openedAt)} ≥ ${p.maxHoldMin}m`;
+  return null;
+}

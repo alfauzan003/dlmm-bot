@@ -16,7 +16,7 @@ import {
 import { closeTrade } from "../lp/close-trade.js";
 import { notifyClosedButLive } from "../notify/telegram.js";
 import { isEntryInProgressPool } from "../entry/runtime.js";
-import { aggregateTradePnl, evaluateTradeExit } from "./trade-exit.js";
+import { aggregateTradePnl, evaluateTradeExit, tradeExitDetail } from "./trade-exit.js";
 
 // Logika per-tick berbasis trade untuk loop exit (dipanggil dari exit/index.js).
 
@@ -194,9 +194,10 @@ export async function runTradeExits(positions, { deps = {} } = {}) {
 
     // closeTrade mengunci trade sendiri (busy bila sudah terkunci).
     handled.add(trade.id);
-    log.info(`${label}: ${second.reason} terkonfirmasi (PnL ${freshAgg.pnlPct.toFixed(2)}%) → close trade`);
+    const detail = tradeExitDetail(second.reason, trade, freshAgg.pnlPct, second.peakPnlPct);
+    log.info(`${label}: ${second.reason} terkonfirmasi (${detail ?? `PnL ${freshAgg.pnlPct.toFixed(2)}%`}) → close trade`);
     try {
-      await close(trade, { reason: second.reason, swap: true, positionsByAddr });
+      await close(trade, { reason: second.reason, detail, swap: true, positionsByAddr });
     } catch (err) {
       log.error(`${label}: close trade error: ${err.message}`);
     }

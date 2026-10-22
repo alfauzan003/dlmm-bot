@@ -342,3 +342,12 @@ test("markTradeStrategyLogged sets the flag lazily", () => {
   assert.equal(getTrade(t.id).strategyLogged, true);
   assert.equal(markTradeStrategyLogged(999), null);
 });
+
+test("settle stores closeDetail when given", () => {
+  reset();
+  const t = newTrade(["A"]);
+  recordClose("A", "range_broken", 5, { pnlUsd: -1 });
+  const done = settleTradeIfDone(t.id, { fallbackReason: "range_broken", closeDetail: "price below range for 16m ≥ 15m" });
+  assert.equal(done.closeDetail, "price below range for 16m ≥ 15m");
+  assert.equal(getTrade(t.id).closeDetail, "price below range for 16m ≥ 15m");
+});

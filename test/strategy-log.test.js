@@ -180,6 +180,7 @@ test("paperLogRow maps a closed paper trade", () => {
     holdMin: 12,
     flipped: false,
     closeReason: "range_broken",
+    closeDetail: "price below range for 16m ≥ 15m",
   });
   assert.deepEqual(row, {
     ts: 123,
@@ -195,6 +196,7 @@ test("paperLogRow maps a closed paper trade", () => {
     holdMin: 12,
     flipped: false,
     exitReason: "range_broken",
+    exitDetail: "price below range for 16m ≥ 15m",
     predicted: null,
   });
 });

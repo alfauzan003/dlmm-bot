@@ -5,7 +5,7 @@ import log from "../core/logger.js";
 import { closeTrade as defaultCloseTrade } from "../lp/close-trade.js";
 import { getTrackedPosition } from "../state/positions.js";
 import { listOpenTrades, setTradeStrategyState, tradeLock } from "../state/trades.js";
-import { evaluateStrategyExit } from "../strategy/exits.js";
+import { evaluateStrategyExit, strategyExitDetail } from "../strategy/exits.js";
 import { fetchRecentBars as defaultFetchRecentBars } from "../strategy/sources.js";
 
 const isLegClosed = (addr) => getTrackedPosition(addr)?.closed === true;
@@ -68,8 +68,9 @@ export async function runStrategyExits(positions, { deps = {}, now = Date.now() 
       }
       if (!reason) continue;
 
-      log.info(`${trade.pair} #${trade.id}: ${reason} → close trade`);
-      const res = await close(trade, { reason, swap: true, positionsByAddr: live });
+      const detail = strategyExitDetail(reason, { trade, view, p, now, state });
+      log.info(`${trade.pair} #${trade.id}: ${reason}${detail ? ` (${detail})` : ""} → close trade`);
+      const res = await close(trade, { reason, detail, swap: true, positionsByAddr: live });
       if (res?.success) closed.push(trade.id);
     } catch (err) {
       log.warn(`Strategy exit #${trade.id} ${trade.pair}: ${err?.message ?? err}`);

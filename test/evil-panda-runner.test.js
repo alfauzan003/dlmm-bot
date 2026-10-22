@@ -90,6 +90,7 @@ test("fires on the RSI spike and closes with evil_panda_rsi", async () => {
   assert.equal(calls.closeTrade.length, 1);
   assert.equal(calls.closeTrade[0].opts.reason, "evil_panda_rsi");
   assert.equal(calls.closeTrade[0].opts.swap, true);
+  assert.match(calls.closeTrade[0].opts.detail, /^closed 15m bar: RSI [\d.]+ > \d+ while armed/);
   assert.ok(calls.closeTrade[0].opts.positionsByAddr.get("PosA").pnlKnown);
   assert.ok(handled.has(t.id));
   const p = getTrade(t.id).panda;
@@ -253,6 +254,7 @@ test("live mode closes on a live RSI spike while price is still below the Supert
   assert.deepEqual(calls.getPrices[0], { mints: ["MintA"], opts: { force: true } });
   assert.equal(calls.closeTrade.length, 1);
   assert.equal(calls.closeTrade[0].opts.reason, "evil_panda_rsi");
+  assert.match(calls.closeTrade[0].opts.detail, /^live price 114: RSI [\d.]+ > \d+ while armed/);
   assert.deepEqual(getTrade(t.id).panda, { seenAbove: true, armed: true, lastBar: LATEST });
 });
 

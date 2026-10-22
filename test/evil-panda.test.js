@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { closedBars, livePandaSignal, liveRow, pandaRows, stepPanda } from "../src/exit/evil-panda.js";
+import { closedBars, livePandaSignal, liveRow, pandaExitDetail, pandaRows, stepPanda } from "../src/exit/evil-panda.js";
 
 const BAR = 900;
 const PARAMS = {
@@ -171,4 +171,17 @@ test("livePandaSignal fires only while armed and still below the Supertrend", ()
   assert.equal(livePandaSignal(undefined, spike, PARAMS), null);
   assert.equal(livePandaSignal(armed, row(3, "bullish", { rsi: 99 }), PARAMS), null);
   assert.equal(livePandaSignal(armed, row(3, "bearish", { rsi: 50 }), PARAMS), null);
+});
+
+test("pandaExitDetail names the source, the spike and the threshold", () => {
+  assert.equal(
+    pandaExitDetail({ signal: "rsi", time: 0 }, row(0, "bearish", { rsi: 93.456 }), PARAMS),
+    "closed 15m bar: RSI 93.5 > 90 while armed (price broke below 15m Supertrend)"
+  );
+  assert.equal(
+    pandaExitDetail({ signal: "macd", time: 0, price: 0.000012346 }, row(0, "bearish", { prevHist: -0.5, hist: 0.25 }), PARAMS),
+    "live price 0.00001235: MACD histogram turned positive (-0.5 → 0.25) while armed (price broke below 15m Supertrend)"
+  );
+  assert.match(pandaExitDetail({ signal: "bb", time: 0 }, row(0, "bearish", { close: 1.2, upper: 1.1 }), PARAMS), /^closed 15m bar: close 1\.2 > upper Bollinger 1\.1/);
+  assert.match(pandaExitDetail({ signal: "rsi", time: 0 }, null, PARAMS), /RSI \? > 90/);
 });

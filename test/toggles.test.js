@@ -40,13 +40,17 @@ process.env.STRAT_FILE = STRAT;
 
 const { setToggle } = await import("../src/state/settings.js");
 const { runScan } = await import("../src/strategy/runner.js");
+const tg = await import("../src/notify/telegram.js");
 
 test.beforeEach(() => {
   fs.rmSync(SETTINGS, { force: true });
   fs.writeFileSync(STATE, JSON.stringify({ positions: {} }));
+  // runScan mengirim digest Telegram: jangan pernah ke bot sungguhan.
+  tg.__setSender(async () => null);
 });
 
 test.after(() => {
+  tg.__setSender(null);
   fs.rmSync(TMP, { recursive: true, force: true });
 });
 

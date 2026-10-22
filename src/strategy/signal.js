@@ -39,16 +39,49 @@ export function entrySignal(bars, p) {
   return { enter: true, reason: "signal", metrics };
 }
 
-// Lebar range (% turun dari harga) dibatasi min/max, lalu muat di maxPositions·70 bin; null jika min tak muat.
-export function pickRangePct(bars, p, binStep) {
+const f1 = (v) => `${v.toFixed(1)}%`;
+
+// Seperti pickRangePct, plus `why`: langkah-langkah yang menghasilkan pct (untuk log / alert).
+export function explainRangePct(bars, p, binStep) {
   let pct = p.rangePct;
+  const steps = [];
   if (p.rangeMode === "support" && bars.length) {
     const n = Math.ceil(p.supportLookbackMin / BAR_MIN);
     const support = Math.min(...bars.slice(-n).map((b) => b.low));
     const close = bars[bars.length - 1].close;
-    pct = support >= close ? p.rangeMinPct : (1 - support / close) * 100 + p.supportBufferPct;
+    if (support >= close) {
+      pct = p.rangeMinPct;
+      steps.push(`support mode: lowest low ${p.supportLookbackMin}m ≥ close → min ${f1(pct)}`);
+    } else {
+      const dist = (1 - support / close) * 100;
+      pct = dist + p.supportBufferPct;
+      steps.push(
+        `support mode: lowest low ${p.supportLookbackMin}m ${support.toPrecision(4)} vs close ${close.toPrecision(4)} → ${f1(dist)} + buffer ${p.supportBufferPct}% = ${f1(pct)}`
+      );
+    }
+  } else {
+    steps.push(`fixed ${f1(pct)}`);
   }
-  pct = Math.min(Math.max(pct, p.rangeMinPct), p.rangeMaxPct);
-  pct = Math.min(pct, maxPctForBins(p.maxPositions * BIN_PER_POSITION, binStep));
-  return pct < p.rangeMinPct ? null : pct;
+  if (pct < p.rangeMinPct) {
+    pct = p.rangeMinPct;
+    steps.push(`raised to min ${f1(pct)}`);
+  } else if (pct > p.rangeMaxPct) {
+    pct = p.rangeMaxPct;
+    steps.push(`cut to max ${f1(pct)}`);
+  }
+  const cap = maxPctForBins(p.maxPositions * BIN_PER_POSITION, binStep);
+  if (pct > cap) {
+    pct = cap;
+    steps.push(`capped by ${p.maxPositions} position(s) × ${BIN_PER_POSITION} bins @ bin step ${binStep} = ${f1(cap)}`);
+  }
+  if (pct < p.rangeMinPct) {
+    steps.push(`min ${f1(p.rangeMinPct)} does not fit → skip`);
+    return { pct: null, why: steps.join(" · ") };
+  }
+  return { pct, why: steps.join(" · ") };
+}
+
+// Lebar range (% turun dari harga) dibatasi min/max, lalu muat di maxPositions·70 bin; null jika min tak muat.
+export function pickRangePct(bars, p, binStep) {
+  return explainRangePct(bars, p, binStep).pct;
 }

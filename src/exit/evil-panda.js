@@ -88,6 +88,18 @@ export function stepPanda(progress, rows, params, { openedAtSec = 0 } = {}) {
   return { progress: next, fire: null };
 }
 
+const num = (v) => (Number.isFinite(v) ? Number(v.toPrecision(4)) : "?");
+
+// Penjelasan singkat (untuk log / alert) kenapa Evil Panda menutup trade; row = baris pandaRows yang memicu.
+export function pandaExitDetail(fire, row, params) {
+  const src = fire.price != null ? `live price ${num(fire.price)}` : "closed 15m bar";
+  let spike = fire.signal;
+  if (fire.signal === "rsi") spike = `RSI ${row?.rsi?.toFixed(1) ?? "?"} > ${params.rsi.level}`;
+  else if (fire.signal === "macd") spike = `MACD histogram turned positive (${num(row?.prevHist)} → ${num(row?.hist)})`;
+  else if (fire.signal === "bb") spike = `close ${num(row?.close)} > upper Bollinger ${num(row?.upper)}`;
+  return `${src}: ${spike} while armed (price broke below 15m Supertrend)`;
+}
+
 let warnedMacd = false;
 
 const norm = (p) => [p?.seenAbove ?? false, p?.armed ?? false, p?.lastBar ?? null].join("|");
@@ -185,9 +197,12 @@ export async function runEvilPanda(positions, { deps = {}, now = Date.now() } = 
 
     let progress = trade.panda;
     let fire = null;
+    let fireRow = null;
     if (needClosed) {
       const openedAtSec = (trade.openedAt || 0) / 1000;
-      ({ progress, fire } = stepPanda(trade.panda, pandaRows(closed, params), params, { openedAtSec }));
+      const rows = pandaRows(closed, params);
+      ({ progress, fire } = stepPanda(trade.panda, rows, params, { openedAtSec }));
+      if (fire) fireRow = rows.find((r) => r.time === fire.time) ?? null;
       if (!sameProgress(trade.panda, progress)) {
         updateTradePanda(trade.id, progress);
         const wasArmed = trade.panda?.armed === true;
@@ -200,7 +215,10 @@ export async function runEvilPanda(positions, { deps = {}, now = Date.now() } = 
       if (Number.isFinite(price)) {
         const row = liveRow(closed, price, params);
         const signal = livePandaSignal(progress, row, params);
-        if (signal) fire = { signal, time: row.time, price };
+        if (signal) {
+          fire = { signal, time: row.time, price };
+          fireRow = row;
+        }
       }
     }
     if (!fire) continue;
@@ -212,11 +230,10 @@ export async function runEvilPanda(positions, { deps = {}, now = Date.now() } = 
       continue;
     }
     if (!pandaStillOn(trade.id)) continue;
-    log.info(
-      `${label}: Evil Panda ${fire.signal} spike${fire.price != null ? ` (live ${fire.price})` : ""} → close trade`
-    );
+    const detail = pandaExitDetail(fire, fireRow, params);
+    log.info(`${label}: Evil Panda ${fire.signal} spike (${detail}) → close trade`);
     try {
-      await close(trade, { reason: `evil_panda_${fire.signal}`, swap: true, positionsByAddr });
+      await close(trade, { reason: `evil_panda_${fire.signal}`, detail, swap: true, positionsByAddr });
     } catch (err) {
       log.error(`${label}: Evil Panda close error: ${err.message}`);
     }

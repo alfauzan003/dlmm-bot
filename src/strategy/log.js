@@ -55,6 +55,7 @@ export function paperLogRow(t) {
     holdMin: t.holdMin,
     flipped: t.flipped,
     exitReason: t.closeReason,
+    exitDetail: t.closeDetail ?? null,
     predicted: null,
   };
 }
@@ -139,6 +140,7 @@ export async function logSettledAutoTrades({ deps, now } = {}) {
         holdMin: (trade.closedAt - trade.openedAt) / 60000,
         flipped: trade.flipLegs?.length > 0,
         exitReason: trade.closeReason,
+        exitDetail: trade.closeDetail ?? null,
         predicted,
       });
       d.markLogged(trade.id);

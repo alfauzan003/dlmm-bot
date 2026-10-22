@@ -1,9 +1,9 @@
 // Simulator posisi BidAsk single-sided SOL (murni, tanpa I/O). Harga = SOL per token, bin k relatif terhadap bin entry (k=0, harga p0).
 import { BIN_PER_POSITION, binsForPct } from "./screen.js";
 import { pickRangePct } from "./signal.js";
-import { evaluateStrategyExit } from "./exits.js";
+import { evaluateStrategyExit, strategyExitDetail } from "./exits.js";
 import { profileExit } from "./params.js";
-import { evaluateTradeExit } from "../exit/trade-exit.js";
+import { evaluateTradeExit, tradeExitDetail } from "../exit/trade-exit.js";
 
 const ratio = (binStep) => 1 + binStep / 1e4;
 const priceOf = (pos, k) => pos.p0 * ratio(pos.binStep) ** k;
@@ -133,7 +133,7 @@ export function simulateTrade({ bars, entryIndex, p, pool, solUsdAt, sim, poolLi
   };
   let flipped = false;
 
-  const finish = (price, exitReason, exitIndex, exitTime) => {
+  const finish = (price, exitReason, exitIndex, exitTime, exitDetail = null) => {
     let sol = 0;
     let token = 0;
     for (const b of pos.bins.values()) {
@@ -154,6 +154,7 @@ export function simulateTrade({ bars, entryIndex, p, pool, solUsdAt, sim, poolLi
       holdMin: (exitTime - entryTime) / 60000,
       flipped,
       exitReason,
+      exitDetail,
       exitIndex,
       entryTime,
       exitTime,
@@ -204,10 +205,13 @@ export function simulateTrade({ bars, entryIndex, p, pool, solUsdAt, sim, poolLi
       trade.strategyState = se.state;
 
       let reason = te.reason ?? se.reason;
+      let detail = null;
+      if (te.reason) detail = tradeExitDetail(te.reason, trade, pnlPct, te.peakPnlPct);
+      else if (se.reason) detail = strategyExitDetail(se.reason, { trade, view, p, now: t * 1000, state: se.state });
       if (!reason && stopAtSec != null && t >= stopAtSec) reason = "stop";
       if (!reason && last && i === bars.length - 1) reason = "end_of_data";
       if (reason && !last) accrue(); // tutup di tengah bar: hanya porsi kunjungan sejauh ini
-      if (reason) return finish(price, reason, i, t * 1000);
+      if (reason) return finish(price, reason, i, t * 1000, detail);
     }
   }
   return null;

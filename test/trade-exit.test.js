@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { aggregateTradePnl, evaluateTradeExit } from "../src/exit/trade-exit.js";
+import { aggregateTradePnl, evaluateTradeExit, tradeExitDetail } from "../src/exit/trade-exit.js";
 import { usdPnlFromEntry } from "../src/meteora/positions.js";
 
 const allOn = (extra = {}) => ({
@@ -161,4 +161,12 @@ test("only flip legs open → their deposits are used", () => {
     depositUsd: 40,
     pnlPct: 5,
   });
+});
+
+test("tradeExitDetail explains SL / TP / trail", () => {
+  assert.equal(tradeExitDetail("sl", allOn(), -25.24, 0), "PnL -25.2% ≤ SL −25%");
+  assert.equal(tradeExitDetail("tp", allOn(), 15.3, 15.3), "PnL +15.3% ≥ TP 15%");
+  assert.equal(tradeExitDetail("trail", allOn(), 8.9, 12), "peak +12.0%, now +8.9% ≤ peak − 3% (armed at 5%)");
+  assert.equal(tradeExitDetail(null, allOn(), 1, 1), null);
+  assert.equal(tradeExitDetail("tp", allOn(), null, null), null);
 });

@@ -212,7 +212,7 @@ export function setTradeDepositUsd(id, usd) {
 
 // Tutup trade bila semua leg-nya sudah closed. Mengembalikan trade yang baru
 // diselesaikan, atau null (belum selesai / sudah selesai / tidak ada).
-export function settleTradeIfDone(id, { fallbackReason = "closed_outside" } = {}) {
+export function settleTradeIfDone(id, { fallbackReason = "closed_outside", closeDetail = null } = {}) {
   const state = readState();
   const t = state.trades?.[String(id)];
   if (!t || t.closed === true) return null;
@@ -227,6 +227,7 @@ export function settleTradeIfDone(id, { fallbackReason = "closed_outside" } = {}
   t.closed = true;
   t.closedAt = Math.max(...legs.map((p) => p.closedAt ?? 0));
   t.closeReason = !last.closeReason || UNKNOWN_REASONS.has(last.closeReason) ? fallbackReason : last.closeReason;
+  if (closeDetail) t.closeDetail = closeDetail;
   setPnlFromLegs(t, legs);
   t.closeTx = last.closeTx ?? null;
   writeState(state);

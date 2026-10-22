@@ -123,7 +123,12 @@ export async function openPaperTrade({ profile, p, row, rangePct, entry, deps })
     },
     poolLiq,
     entryPrice, // harga bin aktif saat entry (SOL per token); cadangan bila bar entry tak pernah muncul
-    entry: { metrics: entry?.metrics ?? null, signal: entry?.signal ?? null },
+    entry: {
+      metrics: entry?.metrics ?? null,
+      signal: entry?.signal ?? null,
+      signalWhy: entry?.signalWhy ?? null,
+      rangeWhy: entry?.rangeWhy ?? null,
+    },
     closed: false,
     closedAt: null,
     closeReason: null,
@@ -147,6 +152,8 @@ export async function openPaperTrade({ profile, p, row, rangePct, entry, deps })
       feeTvl30mPct: entry?.metrics?.feeTvl30mPct,
       volatilityPct: entry?.metrics?.volatilityPct,
       mcapUsd: entry?.metrics?.mcapUsd,
+      signalDetail: entry?.signalWhy ?? null,
+      rangeWhy: entry?.rangeWhy ?? null,
       paper: true,
     });
   } catch (err) {
@@ -254,6 +261,7 @@ export async function tickPaperTrades({ deps, now } = {}) {
         closed: true,
         closedAt: res.exitTime,
         closeReason: res.exitReason,
+        closeDetail: res.exitDetail ?? null,
         closePnlSol: res.pnlSol,
         closePnlPct: res.pnlPct,
         flipped: res.flipped,
@@ -261,7 +269,9 @@ export async function tickPaperTrades({ deps, now } = {}) {
       });
       write(list);
       closed.push(cur);
-      log.info(`[PAPER] close ${cur.pair} (${cur.profile}) ${cur.closeReason} ${cur.closePnlPct.toFixed(2)}% — ${cur.id}`);
+      log.info(
+        `[PAPER] close ${cur.pair} (${cur.profile}) ${cur.closeReason}${cur.closeDetail ? ` (${cur.closeDetail})` : ""} ${cur.closePnlPct.toFixed(2)}% — ${cur.id}`
+      );
       try {
         d.notifyClose(cur);
       } catch (err) {

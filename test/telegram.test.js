@@ -310,3 +310,20 @@ test("notifyAutoEntry: live and paper text", () => {
   );
   assert.ok(sent[1].text.startsWith("📝 PAPER 🤖 Auto entry · degen · AAA-SOL\n"));
 });
+
+test("close alerts and auto entry alert show the Why lines", async () => {
+  const { notifyPaperClose } = await import("../src/notify/telegram.js");
+  const sent = captureSender();
+  notifyTradeClosed({ id: 2, pair: "X-SOL", closeReason: "range_broken", closeDetail: "price below range for 16m ≥ 15m", closePnlUsd: -1, closePnlPct: -2, openedAt: 0, closedAt: 60000 });
+  notifyTradeClosed({ id: 3, pair: "Y-SOL", closeReason: "tp", closePnlUsd: 1, closePnlPct: 2, openedAt: 0, closedAt: 60000 });
+  notifyPaperClose({ profile: "degen", pair: "Z-SOL", closeReason: "tp", closeDetail: "PnL +10.3% ≥ TP 10%", closePnlPct: 10.3, closePnlSol: 0.05, holdMin: 30, flipped: true });
+  notifyAutoEntry({
+    profile: "degen", pair: "Q-SOL", pool: "P", sizeSol: 0.5, rangePct: 42, binStep: 100, baseFeePct: 2,
+    feeTvl30mPct: 1.5, volatilityPct: 4, mcapUsd: 1e6, signalDetail: "pump 20.0% · pullback 10.0% · last bar red", rangeWhy: "fixed 42.0%",
+  });
+  __setSender(null);
+  assert.match(sent[0].text, /Reason: Range broken\nWhy: price below range for 16m ≥ 15m/);
+  assert.doesNotMatch(sent[1].text, /Why:/);
+  assert.match(sent[2].text, /Why: PnL \+10\.3% ≥ TP 10%/);
+  assert.match(sent[3].text, /Why entry: pump 20\.0% · pullback 10\.0% · last bar red\nWhy range: fixed 42\.0%/);
+});

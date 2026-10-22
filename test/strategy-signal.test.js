@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildProfile } from "../src/strategy/params.js";
-import { entrySignal, binsForPct, pickRangePct, barsNeeded } from "../src/strategy/signal.js";
+import { entrySignal, binsForPct, pickRangePct, explainRangePct, barsNeeded } from "../src/strategy/signal.js";
 
 const bar = (o, h, l, c, t = 0) => ({ time: t, open: o, high: h, low: l, close: c, volume: 100 });
 const p = { ...buildProfile({}, "degen"), pumpLookbackMin: 15 }; // W = 3 bars
@@ -49,4 +49,23 @@ test("pickRangePct shrinks to the bin cap and returns null when min does not fit
 test("barsNeeded", () => {
   assert.equal(barsNeeded(buildProfile({}, "degen")), 13);
   assert.equal(barsNeeded(buildProfile({}, "multihour")), 289);
+});
+
+test("explainRangePct explains each step and matches pickRangePct", () => {
+  const fixed = { ...p, rangeMode: "fixed", rangePct: 80, rangeMinPct: 20, rangeMaxPct: 65, maxPositions: 2 };
+  const a = explainRangePct([], fixed, 100);
+  assert.equal(a.pct, pickRangePct([], fixed, 100));
+  assert.match(a.why, /^fixed 80\.0% · cut to max 65\.0%$/);
+
+  const support = { ...p, rangeMode: "support", supportLookbackMin: 15, supportBufferPct: 5, rangeMinPct: 10, rangeMaxPct: 65, maxPositions: 2 };
+  const b = explainRangePct([bar(1, 1, 0.7, 0.9), bar(0.9, 1, 0.9, 1), bar(1, 1, 1, 1)], support, 100);
+  assert.ok(Math.abs(b.pct - 35) < 1e-9);
+  assert.match(b.why, /support mode: lowest low 15m 0\.7000 vs close 1\.000 → 30\.0% \+ buffer 5% = 35\.0%/);
+  assert.match(explainRangePct([bar(1, 1, 1, 1)], support, 100).why, /≥ close → min 10\.0%/);
+
+  const tight = { ...p, rangeMode: "fixed", rangePct: 65, rangeMinPct: 20, rangeMaxPct: 65, maxPositions: 1 };
+  assert.match(explainRangePct([], tight, 80).why, /capped by 1 position\(s\) × 70 bins @ bin step 80/);
+  const none = explainRangePct([], { ...tight, rangeMinPct: 60 }, 20);
+  assert.equal(none.pct, null);
+  assert.match(none.why, /does not fit → skip$/);
 });
