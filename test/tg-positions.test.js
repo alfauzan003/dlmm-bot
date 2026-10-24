@@ -664,7 +664,7 @@ test("flip confirm shows the planned bin count", async () => {
   deps.planFlip = async () => ({ binCount: 12, legs: [], newRange: { minBinId: 1, maxBinId: 12 } });
   const { bot, calls } = build();
   const { payload, flip } = await flipToken(bot, calls, trade.id);
-  assert.ok(payload.text.includes("Flip 12 bins → new token position over 12 bins above price."));
+  assert.ok(payload.text.includes("Flip 12 bins → one token position over 12 bins above price."));
   assert.match(flip, /^ok:/);
   assert.ok(buttons(payload).some((b) => b.text === "Cancel" && b.callback_data === `pos:open:${trade.id}`));
 });
@@ -701,7 +701,7 @@ test("flip token is one-shot and reports success", async () => {
   await bot.handleUpdate(cbUpdate(flip));
   assert.deepEqual(flips, [trade.id]);
   assert.ok(edits(calls).some((t) => t.includes("⏳ Flipping…")));
-  assert.ok(edits(calls).some((t) => t.includes("✅ Flipped 12 bins (1,234.5 token) → new position over 12 bins.")));
+  assert.ok(edits(calls).some((t) => t.includes("✅ Flipped 12 bins (1,234.5 token) → one position over 12 bins.")));
   assert.ok(answers(calls).some((c) => c.payload.text === "This button expired — start again"));
 });
 
@@ -722,7 +722,7 @@ test("flip in dry run says so", async () => {
   const { bot, calls } = build();
   const { flip } = await flipToken(bot, calls, trade.id);
   await bot.handleUpdate(cbUpdate(flip));
-  assert.ok(edits(calls).some((t) => t.includes("🧪 DRY RUN — would flip 4 bins → new position over 4 bins.")));
+  assert.ok(edits(calls).some((t) => t.includes("🧪 DRY RUN — would flip 4 bins → one position over 4 bins.")));
 });
 
 test("auto flip prompt sets and clears the trade's auto flip", async () => {

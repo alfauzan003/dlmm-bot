@@ -177,6 +177,85 @@ test("planFlip does not re-flip flip legs", async () => {
   assert.deepEqual(await planFlip(getTrade(trade.id), { deps }), { binCount: 0 });
 });
 
+// Flip kedua: bin baru dari leg asal + leg flip lama -> satu posisi.
+function reshapeDeps(fLegBins, l1Bins = bins(101, 105)) {
+  return fakeDeps({
+    readLegs: async () => ({
+      activeBinId: 100,
+      legs: [
+        { position: "L1", bins: [...bins(90, 100), ...l1Bins] },
+        { position: "F", bins: fLegBins },
+      ],
+    }),
+  });
+}
+
+test("second flip takes new bins and the earlier flip leg", async () => {
+  const trade = newTrade();
+  addTradeLeg(trade.id, "F", { flip: true });
+  const { deps } = reshapeDeps(bins(106, 120));
+  const plan = await planFlip(getTrade(trade.id), { deps });
+  assert.equal(plan.binCount, 20);
+  assert.deepEqual(plan.legs, [
+    { position: "L1", fromBinId: 101, toBinId: 105 },
+    { position: "F", fromBinId: 106, toBinId: 120 },
+  ]);
+  assert.deepEqual(plan.newRange, { minBinId: 101, maxBinId: 120 });
+});
+
+test("flipTrade withdraws from both legs and opens one position", async () => {
+  const trade = newTrade();
+  addTradeLeg(trade.id, "F", { flip: true });
+  const { deps, calls } = reshapeDeps(bins(106, 120));
+  const res = await flipTrade(getTrade(trade.id), { deps });
+  assert.equal(res.success, true);
+  assert.deepEqual(
+    calls.removeBins.map((l) => l.position),
+    ["L1", "F"]
+  );
+  assert.equal(calls.open.length, 1);
+  assert.equal(calls.open[0].tokenAmountUi, 60);
+  assert.deepEqual([calls.open[0].minBinId, calls.open[0].maxBinId], [101, 120]);
+  const t = getTrade(trade.id);
+  assert.deepEqual(t.positions, ["L1", "F", "NewPos"]);
+  assert.deepEqual(t.flipLegs, ["F", "NewPos"]);
+});
+
+test("flip leg bins on the SOL side are left", async () => {
+  const trade = newTrade();
+  addTradeLeg(trade.id, "F", { flip: true });
+  const { deps } = reshapeDeps([...bins(95, 100), ...bins(103, 110)], bins(101, 102));
+  const plan = await planFlip(getTrade(trade.id), { deps });
+  assert.equal(plan.binCount, 10);
+  assert.deepEqual(plan.legs, [
+    { position: "L1", fromBinId: 101, toBinId: 102 },
+    { position: "F", fromBinId: 103, toBinId: 110 },
+  ]);
+});
+
+test("closed flip legs are ignored", async () => {
+  const trade = newTrade();
+  trackPosition("F", "PoolA", "AAA-SOL", "MintA", null, "bidask:token");
+  addTradeLeg(trade.id, "F", { flip: true });
+  recordClose("F", "manual", 0, { pnlUsd: 0 });
+  const { deps } = reshapeDeps(bins(106, 120));
+  const plan = await planFlip(getTrade(trade.id), { deps });
+  assert.equal(plan.binCount, 5);
+  assert.deepEqual(plan.legs, [{ position: "L1", fromBinId: 101, toBinId: 105 }]);
+});
+
+test("the 70-bin cap is shared with flip legs", async () => {
+  const trade = newTrade();
+  addTradeLeg(trade.id, "F", { flip: true });
+  const { deps } = reshapeDeps(bins(111, 200), bins(101, 110));
+  const plan = await planFlip(getTrade(trade.id), { deps });
+  assert.equal(plan.binCount, 70);
+  assert.deepEqual(plan.legs, [
+    { position: "L1", fromBinId: 101, toBinId: 110 },
+    { position: "F", fromBinId: 111, toBinId: 170 },
+  ]);
+});
+
 test("planFlip refuses when the fee estimate is over the cap", async () => {
   const { deps } = fakeDeps({ feeCheck: () => ({ ok: false, totalSol: 0.02, cap: 0.01 }) });
   assert.match((await planFlip(newTrade(), { deps })).error, /fee estimate 0\.020000 SOL > cap 0\.01/);

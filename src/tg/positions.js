@@ -372,11 +372,11 @@ const NOTHING_TO_FLIP = "Nothing to flip — no token-only bins yet.";
 function describeFlip(res) {
   if (res.busy) return BUSY;
   const n = res.binCount;
-  if (res.dryRun) return `🧪 DRY RUN — would flip ${n} bins → new position over ${n} bins.`;
+  if (res.dryRun) return `🧪 DRY RUN — would flip ${n} bins → one position over ${n} bins.`;
   if (res.redepositFailed) return "⚠️ Withdrawn but re-deposit failed — token kept in wallet.";
   if (!res.success && n === 0 && !res.error) return NOTHING_TO_FLIP;
   if (!res.success) return `⚠️ Could not flip: ${esc(res.error ?? "unknown error")}`;
-  return `✅ Flipped ${n} bins (${fmtToken(res.tokenAmount)} token) → new position over ${n} bins.`;
+  return `✅ Flipped ${n} bins (${fmtToken(res.tokenAmount)} token) → one position over ${n} bins.`;
 }
 
 export function register(bot) {
@@ -531,7 +531,7 @@ export function register(bot) {
         .text("Flip", `ok:${session.issueToken({ action: "flip", id })}`)
         .row()
         .text("Cancel", `pos:open:${id}`);
-      await editSafe(ctx, screen(id, `Flip ${n} bins → new token position over ${n} bins above price.`), {
+      await editSafe(ctx, screen(id, `Flip ${n} bins → one token position over ${n} bins above price.`), {
         ...HTML,
         reply_markup: keyboard,
       });

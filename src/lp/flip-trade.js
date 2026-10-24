@@ -143,13 +143,14 @@ export async function planFlip(trade, { deps } = {}) {
   const { pool, baseIsX } = (await d.loadPool(trade.pool)) || {};
   if (!pool) return { error: "pool not found" };
   const { activeBinId, legs } = await d.readLegs(pool, baseIsX);
-  // Leg hasil flip sudah berupa token di sisi token: menarik-setornya lagi hanya membuang fee & rent.
+  // Seluruh sisi token ditata ulang jadi satu posisi: bin baru leg asal + leg flip lama (yang sudah
+  // di bawah harga = token lagi). Flip hanya bila leg asal punya bin baru; leg flip saja = buang fee.
   const flipLegs = new Set(trade.flipLegs || []);
-  const own = new Set(
-    (trade.positions || []).filter((addr) => !flipLegs.has(addr) && getTrackedPosition(addr)?.closed !== true)
-  );
-  const sel = selectFlipBins({ legs: legs.filter((l) => own.has(l.position)), activeBinId, baseIsX });
-  if (sel.binCount === 0) return { binCount: 0 };
+  const own = new Set((trade.positions || []).filter((addr) => getTrackedPosition(addr)?.closed !== true));
+  const candidates = legs.filter((l) => own.has(l.position));
+  const fresh = selectFlipBins({ legs: candidates.filter((l) => !flipLegs.has(l.position)), activeBinId, baseIsX });
+  if (fresh.binCount === 0) return { binCount: 0 };
+  const sel = selectFlipBins({ legs: candidates, activeBinId, baseIsX });
   // Cek biaya & SOL sebelum menarik apa pun: gagal setelah tarik = token terdampar di wallet.
   const fee = d.feeCheck();
   if (!fee.ok) return { error: `fee estimate ${fee.totalSol.toFixed(6)} SOL > cap ${fee.cap} SOL` };
