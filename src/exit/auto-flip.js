@@ -1,5 +1,6 @@
-// Auto flip: trade bid_ask/mixed dengan `autoFlip.pct` di-flip otomatis (sekali) saat harga sudah
-// melewati pct% bin sisi SOL range sejak trade dibuka. Dipanggil tiap siklus loop exit utama.
+// Auto flip: trade bid_ask/mixed dengan `autoFlip.pct` di-flip otomatis saat harga sudah melewati
+// pct% bin sisi SOL range sejak trade dibuka; dengan `autoFlip.step` diulang tiap step%.
+// Dipanggil tiap siklus loop exit utama.
 import log from "../core/logger.js";
 import { canFlip, flipTrade } from "../lp/flip-trade.js";
 import { notifyAutoFlip } from "../notify/telegram.js";
@@ -45,19 +46,30 @@ function failReason(res) {
   return res.error ?? "unknown error";
 }
 
-// Teks notifikasi hasil auto flip (polos, tanpa HTML).
-export function autoFlipMessage(trade, pct, res) {
+// Ambang auto flip berikutnya: level pct + k·step (k >= 1) pertama yang > crossed; null bila tanpa
+// step atau lewat 100%. Turun cepat melewati beberapa level -> langsung ke level di atas crossed.
+export function nextAutoFlipPct(pct, step, crossed) {
+  if (!(step > 0)) return null;
+  let next = pct + (Math.floor((crossed - pct) / step) + 1) * step;
+  if (next <= crossed) next += step;
+  return next > 100 ? null : next;
+}
+
+// Teks notifikasi hasil auto flip (polos, tanpa HTML). nextPct = ambang berikutnya (null = mati).
+export function autoFlipMessage(trade, pct, res, nextPct = null) {
   const head = `#${trade.id} ${trade.pair} at ${Math.round(pct)}% crossed`;
   const n = res.binCount;
-  if (res.dryRun) return `🧪 DRY RUN — auto flip ${head} would flip ${n} bins. Auto flip turned off.`;
+  const tail = nextPct != null ? `Next auto flip at ${Math.round(nextPct * 10) / 10}%.` : "Auto flip turned off.";
+  if (res.dryRun) return `🧪 DRY RUN — auto flip ${head} would flip ${n} bins. ${tail}`;
   if (res.success) {
-    return `🤖 Auto flip ${head}: flipped ${n} bins (${fmtToken(res.tokenAmount)} token) → new position over ${n} bins.`;
+    return `🤖 Auto flip ${head}: flipped ${n} bins (${fmtToken(res.tokenAmount)} token) → one position over ${n} bins. ${tail}`;
   }
   return `⚠️ Auto flip ${head} failed: ${failReason(res)}. Auto flip turned off.`;
 }
 
 // Satu siklus: flip trade yang sudah melewati ambangnya. Busy (trade/pool) atau error tak terduga
-// → tetap aktif, dicoba siklus berikutnya; hasil lain (sukses, dry run, gagal) → dimatikan + notifikasi.
+// → tetap aktif, dicoba siklus berikutnya; sukses / dry run → level berikutnya (step) atau mati;
+// gagal → dimatikan. Selalu ada notifikasi kecuali busy/error.
 export async function runAutoFlips(positions, { deps = {} } = {}) {
   const flip = deps.flipTrade ?? flipTrade;
   const notify = deps.notify ?? notifyAutoFlip;
@@ -81,7 +93,10 @@ export async function runAutoFlips(positions, { deps = {} } = {}) {
       log.info(`${label}: trade/pool sibuk — coba lagi siklus berikutnya`);
       continue;
     }
-    setTradeAutoFlip(trade.id, null);
-    notify(autoFlipMessage(trade, pct, res ?? {}));
+    // Sukses / dry run dengan step -> lanjut ke level berikutnya; selain itu mati.
+    const { step } = trade.autoFlip;
+    const next = res?.success ? nextAutoFlipPct(trade.autoFlip.pct, step, pct) : null;
+    setTradeAutoFlip(trade.id, next == null ? null : { pct: next, step });
+    notify(autoFlipMessage(trade, pct, res ?? {}, next));
   }
 }

@@ -10,7 +10,8 @@ process.env.STATE_FILE = path.join(TMP, "state.json");
 process.env.DECISION_LOG_FILE = path.join(TMP, "decision-log.json");
 process.env.PNL_HISTORY_FILE = path.join(TMP, "pnl-history.json");
 
-const { crossedPct, estimateOpenActive, runAutoFlips, autoFlipMessage } = await import("../src/exit/auto-flip.js");
+const { crossedPct, estimateOpenActive, runAutoFlips, autoFlipMessage, nextAutoFlipPct } =
+  await import("../src/exit/auto-flip.js");
 const { trackPosition, recordClose } = await import("../src/state/positions.js");
 const { createTrade, getTrade, tryLockTrade, unlockTrade } = await import("../src/state/trades.js");
 
@@ -125,7 +126,7 @@ test("runAutoFlips flips at the threshold, turns off and notifies", async () => 
   assert.deepEqual(calls.flip, [trade.id]);
   assert.equal(getTrade(trade.id).autoFlip, undefined);
   assert.deepEqual(calls.notify, [
-    `🤖 Auto flip #${trade.id} AAA-SOL at 30% crossed: flipped 30 bins (12.5 token) → new position over 30 bins.`,
+    `🤖 Auto flip #${trade.id} AAA-SOL at 30% crossed: flipped 30 bins (12.5 token) → one position over 30 bins. Auto flip turned off.`,
   ]);
 });
 
@@ -215,6 +216,70 @@ test("autoFlipMessage rounds the crossed percentage", () => {
   });
   assert.equal(
     text,
-    "🤖 Auto flip #3 B-SOL at 32% crossed: flipped 2 bins (1,234.5679 token) → new position over 2 bins."
+    "🤖 Auto flip #3 B-SOL at 32% crossed: flipped 2 bins (1,234.5679 token) → one position over 2 bins. Auto flip turned off."
   );
+});
+
+// --- step ---
+
+test("nextAutoFlipPct", () => {
+  assert.equal(nextAutoFlipPct(60, 10, 60), 70);
+  assert.equal(nextAutoFlipPct(60, 10, 63), 70);
+  assert.equal(nextAutoFlipPct(60, 10, 85), 90);
+  assert.equal(nextAutoFlipPct(60, 10, 95), 100);
+  assert.equal(nextAutoFlipPct(60, 10, 100), null);
+  assert.equal(nextAutoFlipPct(60, undefined, 65), null);
+});
+
+test("crossed exactly on a level moves to the next one", () => {
+  assert.equal(nextAutoFlipPct(60, 10, 70), 80);
+});
+
+test("fractional step stays above crossed", () => {
+  const next = nextAutoFlipPct(33.3, 3.3, 36.6);
+  assert.ok(next > 36.6, String(next));
+  assert.ok(Math.abs(next - 39.9) < 1e-9, String(next));
+});
+
+test("runAutoFlips with a step moves to the next threshold", async () => {
+  const trade = newTrade({ autoFlip: { pct: 60, step: 10 } });
+  const { deps, calls } = fakeDeps();
+  await runAutoFlips(positions(40), { deps });
+  assert.deepEqual(getTrade(trade.id).autoFlip, { pct: 70, step: 10 });
+  assert.deepEqual(calls.notify, [
+    `🤖 Auto flip #${trade.id} AAA-SOL at 60% crossed: flipped 30 bins (12.5 token) → one position over 30 bins. Next auto flip at 70%.`,
+  ]);
+});
+
+test("runAutoFlips with a step skips levels after a fast drop", async () => {
+  const trade = newTrade({ autoFlip: { pct: 60, step: 10 } });
+  const { deps } = fakeDeps();
+  await runAutoFlips(positions(15), { deps });
+  assert.deepEqual(getTrade(trade.id).autoFlip, { pct: 90, step: 10 });
+});
+
+test("runAutoFlips with a step turns off past 100%", async () => {
+  const trade = newTrade({ autoFlip: { pct: 100, step: 10 } });
+  const { deps, calls } = fakeDeps();
+  await runAutoFlips(positions(0), { deps });
+  assert.equal(getTrade(trade.id).autoFlip, undefined);
+  assert.ok(calls.notify[0].endsWith("Auto flip turned off."), calls.notify[0]);
+});
+
+test("runAutoFlips dry run steps too", async () => {
+  const trade = newTrade({ autoFlip: { pct: 60, step: 10 } });
+  const { deps, calls } = fakeDeps({ success: true, dryRun: true, binCount: 30 });
+  await runAutoFlips(positions(40), { deps });
+  assert.deepEqual(getTrade(trade.id).autoFlip, { pct: 70, step: 10 });
+  assert.deepEqual(calls.notify, [
+    `🧪 DRY RUN — auto flip #${trade.id} AAA-SOL at 60% crossed would flip 30 bins. Next auto flip at 70%.`,
+  ]);
+});
+
+test("runAutoFlips with a step still turns off on failure", async () => {
+  const trade = newTrade({ autoFlip: { pct: 60, step: 10 } });
+  const { deps, calls } = fakeDeps({ success: false, error: "fee estimate too high", binCount: 0 });
+  await runAutoFlips(positions(40), { deps });
+  assert.equal(getTrade(trade.id).autoFlip, undefined);
+  assert.ok(calls.notify[0].endsWith("failed: fee estimate too high. Auto flip turned off."), calls.notify[0]);
 });
