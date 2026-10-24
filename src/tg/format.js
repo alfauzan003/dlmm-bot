@@ -26,6 +26,12 @@ export function fmtToken(n) {
   return Number(n).toLocaleString("en-US", { maximumFractionDigits: 4 });
 }
 
+// Label tombol auto flip: { pct, step } -> "60/10", { pct } -> "60%", kosong -> "off".
+export function autoFlipLabel(autoFlip) {
+  if (!(autoFlip?.pct > 0)) return "🤖 Auto flip off";
+  return autoFlip.step > 0 ? `🤖 Auto flip ${autoFlip.pct}/${autoFlip.step}` : `🤖 Auto flip ${autoFlip.pct}%`;
+}
+
 export function shortAddr(a) {
   const s = String(a ?? "");
   return s.length <= 9 ? s : `${s.slice(0, 4)}…${s.slice(-4)}`;

@@ -71,5 +71,12 @@ test("parseAutoFlipInput", () => {
   assert.deepEqual(parseAutoFlipInput(" 12,5% "), { on: true, pct: 12.5 });
   assert.deepEqual(parseAutoFlipInput("100"), { on: true, pct: 100 });
   assert.deepEqual(parseAutoFlipInput("OFF"), { on: false });
-  for (const bad of ["0", "101", "-5", "abc", "", "30 40", "1e2"]) assert.equal(parseAutoFlipInput(bad), null, bad);
+  for (const bad of ["0", "101", "-5", "abc", "", "1e2"]) assert.equal(parseAutoFlipInput(bad), null, bad);
+});
+
+test("parseAutoFlipInput with a step", () => {
+  assert.deepEqual(parseAutoFlipInput("60 10"), { on: true, pct: 60, step: 10 });
+  assert.deepEqual(parseAutoFlipInput("60% 10"), { on: true, pct: 60, step: 10 });
+  assert.deepEqual(parseAutoFlipInput("60"), { on: true, pct: 60 });
+  for (const bad of ["60 0", "60 100", "60 10 5", "0 10", "60 x"]) assert.equal(parseAutoFlipInput(bad), null, bad);
 });

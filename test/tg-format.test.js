@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fmtUsd, fmtPct, fmtSol, shortAddr, fmtWib, exitSummary, esc } from "../src/tg/format.js";
+import { fmtUsd, fmtPct, fmtSol, shortAddr, fmtWib, exitSummary, esc, autoFlipLabel } from "../src/tg/format.js";
 
 test("fmtUsd", () => {
   assert.equal(fmtUsd(3.1), "$3.10");
@@ -47,4 +47,11 @@ test("exitSummary", () => {
 
 test("esc", () => {
   assert.equal(esc("a<b>&c"), "a&lt;b&gt;&amp;c");
+});
+
+test("autoFlipLabel", () => {
+  assert.equal(autoFlipLabel({ pct: 60, step: 10 }), "🤖 Auto flip 60/10");
+  assert.equal(autoFlipLabel({ pct: 60 }), "🤖 Auto flip 60%");
+  assert.equal(autoFlipLabel(null), "🤖 Auto flip off");
+  assert.equal(autoFlipLabel(undefined), "🤖 Auto flip off");
 });

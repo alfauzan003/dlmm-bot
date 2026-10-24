@@ -3,6 +3,7 @@ import { InlineKeyboard } from "grammy";
 import config from "../config/index.js";
 import { registerPrompt, withGuard } from "./bot.js";
 import { parseAutoFlipInput, parseExitInput, parseSolAmount } from "./parse.js";
+import { autoFlipLabel } from "./format.js";
 import * as session from "./session.js";
 import { registerStrat } from "./strat-settings.js";
 import { loadStratSchema } from "../config/strat-schema.js";
@@ -49,7 +50,7 @@ export function buildSettings(settings, dryRun) {
     .text("📐 Range presets", "set:rng")
     .text(`💰 Deposits ${settings.depositPresets.join(" / ")}`, "set:dep")
     .row()
-    .text(`🤖 Auto flip ${settings.autoFlipPct != null ? `${settings.autoFlipPct}%` : "off"}`, "set:autoflip")
+    .text(autoFlipLabel({ pct: settings.autoFlipPct, step: settings.autoFlipStep }), "set:autoflip")
     .row()
     .text("🐼 Exit strategy", "set:exit")
     .row()
@@ -230,7 +231,9 @@ export function register(bot) {
     "set:autoflip",
     withGuard("Auto flip default", async (ctx) => {
       session.put("prompt", { kind: "settings-autoflip" });
-      await ctx.reply("Send the default Auto flip % for new bid_ask / mixed trades (e.g. 30), or off.");
+      await ctx.reply(
+        "Send the default Auto flip % and optional step for new bid_ask / mixed trades (e.g. 60 10 = flip at 60%, 70%, 80%…; 60 = once), or off."
+      );
     })
   );
 
@@ -240,7 +243,7 @@ export function register(bot) {
       await ctx.reply("Invalid value, try again");
       return;
     }
-    setAutoFlipDefault(parsed.on ? parsed.pct : null);
+    setAutoFlipDefault(parsed.on ? parsed.pct : null, parsed.on ? (parsed.step ?? null) : null);
     session.del("prompt");
     await replySettings(ctx);
   });

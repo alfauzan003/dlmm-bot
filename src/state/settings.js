@@ -19,6 +19,8 @@ export const DEFAULT_SETTINGS = {
   depositPresets: [0.5, 0.7, 0.9, 1],
   // Default auto flip (%) untuk trade bid_ask/mixed baru dari /open; null = mati.
   autoFlipPct: null,
+  // Step default (%): flip lagi tiap step% setelah autoFlipPct; null = sekali saja.
+  autoFlipStep: null,
   // Override strat.conf dari Telegram: { KEY: "nilai" } (string, diparse seperti strat.conf).
   stratOverrides: {},
 };
@@ -31,6 +33,7 @@ function validRange(key, r) {
 }
 
 const validAutoFlipPct = (n) => Number.isFinite(n) && n >= 1 && n <= 100;
+const validAutoFlipStep = (n) => Number.isFinite(n) && n >= 1 && n <= 99;
 
 const validDeposits = (list) =>
   Array.isArray(list) && list.length === 4 && list.every((n) => Number.isFinite(n) && n > 0);
@@ -52,6 +55,8 @@ function withDefaults(raw) {
     ? [...src.depositPresets]
     : [...DEFAULT_SETTINGS.depositPresets];
   out.autoFlipPct = validAutoFlipPct(src.autoFlipPct) ? src.autoFlipPct : null;
+  // Step tanpa start tidak berarti apa-apa.
+  out.autoFlipStep = out.autoFlipPct != null && validAutoFlipStep(src.autoFlipStep) ? src.autoFlipStep : null;
   const so = src.stratOverrides && typeof src.stratOverrides === "object" && !Array.isArray(src.stratOverrides);
   out.stratOverrides = so
     ? Object.fromEntries(Object.entries(src.stratOverrides).filter(([, v]) => typeof v === "string"))
@@ -139,11 +144,13 @@ export function resetDepositPresets() {
   return settings;
 }
 
-// Default auto flip: 1..100 (%) atau null (mati).
-export function setAutoFlipDefault(pct) {
+// Default auto flip: 1..100 (%) atau null (mati); step opsional 1..99 (butuh pct).
+export function setAutoFlipDefault(pct, step = null) {
   if (pct !== null && !validAutoFlipPct(pct)) throw new Error("Auto flip % must be 1-100 or off");
+  if (step !== null && (pct === null || !validAutoFlipStep(step))) throw new Error("Auto flip step must be 1-99");
   const settings = getSettings();
   settings.autoFlipPct = pct;
+  settings.autoFlipStep = step;
   write(settings);
   return settings;
 }

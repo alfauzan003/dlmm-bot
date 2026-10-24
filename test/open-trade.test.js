@@ -42,7 +42,17 @@ function fakeDeps({
   held = 0,
   quote = { binArraysCount: 0, binArrayCost: 0, bitmapExtensionCost: 0 },
 } = {}) {
-  const calls = { quote: [], swap: [], swapToSol: [], send: [], init: [], multi: [], add: [], progress: [], keypairs: [] };
+  const calls = {
+    quote: [],
+    swap: [],
+    swapToSol: [],
+    send: [],
+    init: [],
+    multi: [],
+    add: [],
+    progress: [],
+    keypairs: [],
+  };
   let sendCount = 0;
   let tokenBalance = held;
   const sdk = {
@@ -510,4 +520,18 @@ test("meta.autoFlip null turns auto flip off even with a default", async () => {
   assert.equal(res.success, true);
   assert.equal("autoFlip" in getTrade(res.trade.id), false);
   assert.equal("strategy" in getTrade(res.trade.id), false);
+});
+
+test("bid_ask open takes the default auto flip step", async () => {
+  for (const [args, expected] of [
+    [[60, 10], { pct: 60, step: 10 }],
+    [[60], { pct: 60 }],
+  ]) {
+    reset();
+    setAutoFlipDefault(...args);
+    const { deps } = fakeDeps();
+    const plan = await planOpen({ ...base, shape: "bid_ask", deps });
+    const res = await withLive(() => executeOpen(plan, { deps }));
+    assert.deepEqual(getTrade(res.trade.id).autoFlip, expected);
+  }
 });

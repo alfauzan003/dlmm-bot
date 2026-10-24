@@ -207,3 +207,27 @@ test("withDefaults drops malformed stratOverrides", () => {
   fs.writeFileSync(FILE, JSON.stringify({ stratOverrides: ["x"] }));
   assert.deepEqual(getSettings().stratOverrides, {});
 });
+
+test("auto flip default with a step", () => {
+  const s = setAutoFlipDefault(60, 10);
+  assert.equal(s.autoFlipPct, 60);
+  assert.equal(s.autoFlipStep, 10);
+  assert.equal(getSettings().autoFlipStep, 10);
+  const off = setAutoFlipDefault(null);
+  assert.equal(off.autoFlipPct, null);
+  assert.equal(off.autoFlipStep, null);
+  for (const [pct, step] of [
+    [60, 0],
+    [60, 100],
+    [null, 10],
+  ])
+    assert.throws(() => setAutoFlipDefault(pct, step), String([pct, step]));
+});
+
+test("step without a start gives no auto flip", () => {
+  fs.writeFileSync(FILE, JSON.stringify({ autoFlipPct: null, autoFlipStep: 10 }));
+  assert.equal(getSettings().autoFlipStep, null);
+  fs.writeFileSync(FILE, JSON.stringify({ autoFlipPct: 60, autoFlipStep: 250 }));
+  assert.equal(getSettings().autoFlipStep, null);
+  assert.equal(getSettings().autoFlipPct, 60);
+});

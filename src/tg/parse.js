@@ -42,10 +42,16 @@ export function parseExitInput(kind, text) {
   return Number.isFinite(pct) && pct > 0 && pct <= 1000 ? { on: true, pct } : null;
 }
 
-// Auto flip: "30" / "30%" (1..100) -> { on:true, pct }; "off" -> { on:false }; tidak valid -> null.
+// Auto flip: "60" / "60%" (1..100) -> { on:true, pct }; "60 10" -> { on:true, pct, step } (step 1..99,
+// flip lagi tiap step%); "off" -> { on:false }; tidak valid -> null.
 export function parseAutoFlipInput(text) {
   const raw = String(text ?? "").trim();
   if (raw.toLowerCase() === "off") return { on: false };
-  const pct = toNumber(raw.replace(/%$/, ""));
-  return Number.isFinite(pct) && pct >= 1 && pct <= 100 ? { on: true, pct } : null;
+  const parts = raw.split(/\s+/);
+  if (parts.length > 2) return null;
+  const pct = toNumber(parts[0].replace(/%$/, ""));
+  if (!(Number.isFinite(pct) && pct >= 1 && pct <= 100)) return null;
+  if (parts.length === 1) return { on: true, pct };
+  const step = toNumber(parts[1]);
+  return Number.isFinite(step) && step >= 1 && step <= 99 ? { on: true, pct, step } : null;
 }

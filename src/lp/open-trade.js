@@ -36,8 +36,9 @@ export const MAX_TRADE_POSITIONS = 10;
 // (FLIP_SHAPES tidak di-import: flip-trade.js sudah meng-import modul ini.)
 const AUTO_FLIP_SHAPES = ["bid_ask", "mixed"];
 function autoFlipForNewTrade(shape) {
-  const pct = getSettings().autoFlipPct;
-  return pct != null && AUTO_FLIP_SHAPES.includes(shape) ? { pct } : null;
+  const { autoFlipPct: pct, autoFlipStep: step } = getSettings();
+  if (pct == null || !AUTO_FLIP_SHAPES.includes(shape)) return null;
+  return step != null ? { pct, step } : { pct };
 }
 
 const fmt = (n) => Number(n).toFixed(4);

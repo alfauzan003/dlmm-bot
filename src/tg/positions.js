@@ -9,7 +9,18 @@ import { canFlip, flipTrade, planFlip } from "../lp/flip-trade.js";
 import { getTrackedPosition } from "../state/positions.js";
 import { getTrade, listOpenTrades, setTradeAutoFlip, setTradeExit, setTradePanda } from "../state/trades.js";
 import { registerConfirm, registerPrompt, withGuard } from "./bot.js";
-import { esc, exitSummary, fmtAge, fmtPct, fmtSol, fmtToken, fmtUsd, fmtWib, shortAddr } from "./format.js";
+import {
+  autoFlipLabel,
+  esc,
+  exitSummary,
+  fmtAge,
+  fmtPct,
+  fmtSol,
+  fmtToken,
+  fmtUsd,
+  fmtWib,
+  shortAddr,
+} from "./format.js";
 import { parseAutoFlipInput, parseExitInput } from "./parse.js";
 import * as session from "./session.js";
 
@@ -240,8 +251,7 @@ export function buildTradeDetail(trade, live, now = Date.now()) {
     .row()
     .text("❌ Close", `pos:close:${id}`);
   if (canFlip(trade)) {
-    const auto = trade.autoFlip?.pct > 0 ? `${trade.autoFlip.pct}%` : "off";
-    keyboard.text("🔁 Flip", `pos:flip:${id}`).text(`🤖 Auto flip ${auto}`, `pos:autoflip:${id}`);
+    keyboard.text("🔁 Flip", `pos:flip:${id}`).text(autoFlipLabel(trade.autoFlip), `pos:autoflip:${id}`);
   }
   keyboard.row().text("🔄 Refresh", `pos:open:${id}`).text("◀ Back", "home:positions");
   return { text, keyboard };
@@ -446,7 +456,9 @@ export function register(bot) {
       if (!trade) return notOpen(ctx, id);
       if (!canFlip(trade)) return;
       session.put("prompt", { kind: "pos-autoflip", id });
-      await ctx.reply(`Send the Auto flip % for trade #${id} (e.g. 30), or off.`);
+      await ctx.reply(
+        `Send the Auto flip % and optional step for trade #${id} (e.g. 60 10 = flip at 60%, 70%, 80%…; 60 = once), or off.`
+      );
     })
   );
 
@@ -459,7 +471,8 @@ export function register(bot) {
     session.del("prompt");
     const trade = openTradeOrNull(prompt.id);
     if (!trade) return notOpen(ctx, prompt.id);
-    setTradeAutoFlip(trade.id, parsed.on ? { pct: parsed.pct } : null);
+    const { pct, step } = parsed;
+    setTradeAutoFlip(trade.id, parsed.on ? (step != null ? { pct, step } : { pct }) : null);
     await showDetail(ctx, getTrade(trade.id), false);
   });
 

@@ -730,7 +730,10 @@ test("auto flip prompt sets and clears the trade's auto flip", async () => {
   const { bot, calls } = build();
   await bot.handleUpdate(cbUpdate(`pos:autoflip:${trade.id}`));
   assert.deepEqual(session.get("prompt"), { kind: "pos-autoflip", id: trade.id });
-  assert.equal(sent(calls).at(-1), `Send the Auto flip % for trade #${trade.id} (e.g. 30), or off.`);
+  assert.equal(
+    sent(calls).at(-1),
+    `Send the Auto flip % and optional step for trade #${trade.id} (e.g. 60 10 = flip at 60%, 70%, 80%…; 60 = once), or off.`
+  );
 
   await bot.handleUpdate(textUpdate("150"));
   assert.ok(sent(calls).at(-1).includes("Invalid"));
@@ -750,4 +753,21 @@ test("auto flip button on a spot trade is ignored", async () => {
   const { bot } = build();
   await bot.handleUpdate(cbUpdate(`pos:autoflip:${trade.id}`));
   assert.equal(session.get("prompt"), null);
+});
+
+test("auto flip with a step: label and prompt", async () => {
+  const base = { id: 7, pool: "Pool", pair: "A-SOL", origin: "manual", depositSol: 1, exit: EXIT(), shape: "bid_ask" };
+  const labels = buildTradeDetail({ ...base, autoFlip: { pct: 60, step: 10 } }, null)
+    .keyboard.inline_keyboard.flat()
+    .map((b) => b.text);
+  assert.ok(labels.includes("🤖 Auto flip 60/10"));
+
+  const trade = newTrade({ shape: "bid_ask" });
+  const { bot } = build();
+  await bot.handleUpdate(cbUpdate(`pos:autoflip:${trade.id}`));
+  await bot.handleUpdate(textUpdate("60 10"));
+  assert.deepEqual(getTrade(trade.id).autoFlip, { pct: 60, step: 10 });
+  await bot.handleUpdate(cbUpdate(`pos:autoflip:${trade.id}`));
+  await bot.handleUpdate(textUpdate("45"));
+  assert.deepEqual(getTrade(trade.id).autoFlip, { pct: 45 });
 });

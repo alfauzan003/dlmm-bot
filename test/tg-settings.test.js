@@ -247,7 +247,10 @@ test("auto flip default: prompt sets, shows and clears it", async () => {
   const { bot, calls } = build();
   await bot.handleUpdate(cbUpdate("set:autoflip"));
   assert.deepEqual(session.get("prompt"), { kind: "settings-autoflip" });
-  assert.equal(lastText(calls), "Send the default Auto flip % for new bid_ask / mixed trades (e.g. 30), or off.");
+  assert.equal(
+    lastText(calls),
+    "Send the default Auto flip % and optional step for new bid_ask / mixed trades (e.g. 60 10 = flip at 60%, 70%, 80%…; 60 = once), or off."
+  );
   await bot.handleUpdate(textUpdate("abc"));
   assert.equal(lastText(calls), "Invalid value, try again");
   await bot.handleUpdate(textUpdate("30"));
@@ -297,4 +300,16 @@ test("set:exit opens the Exit strategy screen", async () => {
 test("settings text explains Auto Entry", () => {
   const { text } = buildSettings(DEFAULT_SETTINGS, true);
   assert.ok(text.includes("Auto Entry screens Meteora pools and runs the bid-ask flip (profiles in 🧩 Strategy)."));
+});
+
+test("auto flip default with a step from /settings", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("set:autoflip"));
+  await bot.handleUpdate(textUpdate("60 10"));
+  assert.equal(getSettings().autoFlipPct, 60);
+  assert.equal(getSettings().autoFlipStep, 10);
+  assert.ok(lastKeyboard(calls).some((b) => b.text === "🤖 Auto flip 60/10"));
+  await bot.handleUpdate(cbUpdate("set:autoflip"));
+  await bot.handleUpdate(textUpdate("off"));
+  assert.equal(getSettings().autoFlipStep, null);
 });
