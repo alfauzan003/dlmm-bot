@@ -52,7 +52,7 @@ Rule: candidates = open legs (not closed in state, flip or not). If `selectFlipB
 - [ ] **Step 1: Write failing tests** in `test/flip-trade.test.js` (use existing `newTrade`, `fakeDeps`, `addTradeLeg`, `bins` helpers):
   - `second flip takes new bins and the earlier flip leg`: trade L1 + flip leg F (`addTradeLeg(id,"F",{flip:true})`); readLegs active 100, L1 token bins 101..105, F bins 106..120 → `plan.binCount === 20`, `plan.legs` deep-equals `[{position:"L1",fromBinId:101,toBinId:105},{position:"F",fromBinId:106,toBinId:120}]`, `plan.newRange` `{minBinId:101,maxBinId:120}`.
   - `flipTrade withdraws from both legs and opens one position`: same setup → `calls.removeBins` has 2 entries (L1, F), `calls.open.length === 1`, `getTrade(id).positions` = `["L1","F","NewPos"]`, `flipLegs` = `["F","NewPos"]`.
-  - `flip leg bins on the SOL side are left`: active 100, L1 bins 101..102, F bins 95..110 (all tokenAmount 1) → `plan.legs` deep-equals `[{position:"L1",fromBinId:101,toBinId:102},{position:"F",fromBinId:101,toBinId:110}]`.
+  - `flip leg bins on the SOL side are left`: active 100, L1 bins 101..102, F bins `[...bins(95, 100), ...bins(103, 110)]` (all tokenAmount 1) → `plan.legs` deep-equals `[{position:"L1",fromBinId:101,toBinId:102},{position:"F",fromBinId:103,toBinId:110}]`, `binCount 10`.
   - `closed flip legs are ignored`: F recorded closed (`recordClose("F",...)`) with bins 106..120, L1 101..105 → `plan.binCount === 5`.
   - `the 70-bin cap is shared with flip legs`: L1 101..110, F 111..200 → `binCount 70`, F range `111..170`.
   - Keep existing `planFlip does not re-flip flip legs` unchanged (must still pass).
