@@ -151,6 +151,8 @@ export async function planFlip(trade, { deps } = {}) {
   const fresh = selectFlipBins({ legs: candidates.filter((l) => !flipLegs.has(l.position)), activeBinId, baseIsX });
   if (fresh.binCount === 0) return { binCount: 0 };
   const sel = selectFlipBins({ legs: candidates, activeBinId, baseIsX });
+  // Cap 70 bisa hanya memilih leg flip (sisa leg asal lebih jauh) -> tarik-setor tempat yang sama.
+  if (!sel.legs.some((l) => !flipLegs.has(l.position))) return { binCount: 0 };
   // Cek biaya & SOL sebelum menarik apa pun: gagal setelah tarik = token terdampar di wallet.
   const fee = d.feeCheck();
   if (!fee.ok) return { error: `fee estimate ${fee.totalSol.toFixed(6)} SOL > cap ${fee.cap} SOL` };

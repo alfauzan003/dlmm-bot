@@ -283,3 +283,17 @@ test("runAutoFlips with a step still turns off on failure", async () => {
   assert.equal(getTrade(trade.id).autoFlip, undefined);
   assert.ok(calls.notify[0].endsWith("failed: fee estimate too high. Auto flip turned off."), calls.notify[0]);
 });
+
+test("auto flip changed by the user during a flip is not overwritten", async () => {
+  const { setTradeAutoFlip } = await import("../src/state/trades.js");
+  const trade = newTrade({ autoFlip: { pct: 60, step: 10 } });
+  const { deps, calls } = fakeDeps();
+  const inner = deps.flipTrade;
+  deps.flipTrade = async (t) => {
+    setTradeAutoFlip(t.id, null); // pengguna mengirim "off" saat flip berjalan
+    return inner(t);
+  };
+  await runAutoFlips(positions(40), { deps });
+  assert.equal(getTrade(trade.id).autoFlip, undefined);
+  assert.equal(calls.notify.length, 1);
+});

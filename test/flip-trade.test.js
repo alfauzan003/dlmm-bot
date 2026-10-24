@@ -472,3 +472,11 @@ test("releases lock and guards when deposit throws", async () => {
   assert.equal(isEntryInProgressPool("PoolA"), false);
   assert.equal(getEntryInProgressMints().has("MintA"), false);
 });
+
+test("flip after the cap was hit does not re-flip the flip leg alone", async () => {
+  const trade = newTrade();
+  addTradeLeg(trade.id, "F", { flip: true });
+  // Sisa leg asal (171..200) lebih jauh dari leg flip (101..170): cap 70 hanya mengambil leg flip.
+  const { deps } = reshapeDeps(bins(101, 170), bins(171, 200));
+  assert.deepEqual(await planFlip(getTrade(trade.id), { deps }), { binCount: 0 });
+});

@@ -5,7 +5,7 @@ import log from "../core/logger.js";
 import { canFlip, flipTrade } from "../lp/flip-trade.js";
 import { notifyAutoFlip } from "../notify/telegram.js";
 import { getTrackedPosition } from "../state/positions.js";
-import { listOpenTrades, setTradeAutoFlip, tradeLock } from "../state/trades.js";
+import { getTrade, listOpenTrades, setTradeAutoFlip, tradeLock } from "../state/trades.js";
 import { fmtToken } from "../tg/format.js";
 
 const isLegClosed = (addr) => getTrackedPosition(addr)?.closed === true;
@@ -94,6 +94,12 @@ export async function runAutoFlips(positions, { deps = {} } = {}) {
       continue;
     }
     // Sukses / dry run dengan step -> lanjut ke level berikutnya; selain itu mati.
+    // Pengguna bisa mengubah auto flip selama flip berjalan: nilai barunya dihormati (tidak ditimpa).
+    const current = getTrade(trade.id)?.autoFlip ?? null;
+    if (JSON.stringify(current) !== JSON.stringify(trade.autoFlip)) {
+      notify(autoFlipMessage(trade, pct, res ?? {}, current?.pct ?? null));
+      continue;
+    }
     const { step } = trade.autoFlip;
     const next = res?.success ? nextAutoFlipPct(trade.autoFlip.pct, step, pct) : null;
     setTradeAutoFlip(trade.id, next == null ? null : { pct: next, step });
