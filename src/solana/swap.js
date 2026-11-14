@@ -75,6 +75,31 @@ async function jupiterSwap({ inputMint, outputMint, rawAmount }) {
 }
 
 /**
+ * Quote token -> SOL tanpa taker (tidak ada transaksi dibuat). Slippage sama
+ * dengan swap sungguhan. Returns { outSol, slippageBps } (slippageBps bisa null).
+ */
+export async function quoteToSol(mint, amount) {
+  const decimals = await getMintDecimals(mint);
+  const params = new URLSearchParams({
+    inputMint: mint,
+    outputMint: WSOL_MINT,
+    amount: String(Math.floor(amount * Math.pow(10, decimals))),
+  });
+  if (!config.swap.useRtse) params.set("slippageBps", String(config.swap.slippageBps));
+  const headers = {};
+  const apiKey = getJupiterApiKey();
+  if (apiKey) headers["x-api-key"] = apiKey;
+  const res = await fetch(`${JUPITER_SWAP_V2}/order?${params}`, { headers, signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(`V2 quote failed: ${res.status}`);
+  const order = await res.json();
+  if (order.errorCode || order.errorMessage) throw new Error(`V2 quote error: ${order.errorMessage || order.errorCode}`);
+  const outSol = Number(order.outAmount) / 1e9;
+  if (!Number.isFinite(outSol)) throw new Error("V2 quote: no outAmount");
+  const slippageBps = Number.isFinite(Number(order.slippageBps)) ? Number(order.slippageBps) : null;
+  return { outSol, slippageBps };
+}
+
+/**
  * Swap SOL -> base token (used for the token side of a double-sided entry).
  * Retries transient on-chain failures with a fresh quote (harga bergerak cepat
  * saat entry). Kalau /execute melaporkan gagal tapi saldo token naik, tx

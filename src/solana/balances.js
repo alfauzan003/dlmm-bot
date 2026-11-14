@@ -25,6 +25,23 @@ async function fetchPriceData(ids) {
   return null;
 }
 
+// Nama/simbol token dari Jupiter Tokens v2 (maks 100 mint per panggilan).
+// Gagal → Map kosong (pemanggil memakai fallback alamat pendek).
+export async function getTokenNames(mints = []) {
+  const names = new Map();
+  if (mints.length === 0) return names;
+  const url = `https://api.jup.ag/tokens/v2/search?query=${mints.slice(0, 100).join(",")}`;
+  const headers = config.jupiterSwapApiKey ? { "x-api-key": config.jupiterSwapApiKey } : {};
+  try {
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return names;
+    for (const t of await res.json()) {
+      if (t?.id) names.set(t.id, { name: t.name || null, symbol: t.symbol || null });
+    }
+  } catch {}
+  return names;
+}
+
 export async function getMintDecimals(mint) {
   if (mint === WSOL_MINT || mint === "SOL") return 9;
   try {

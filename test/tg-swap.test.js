@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 const { createBot } = await import("../src/tg/bot.js");
 const swapModule = await import("../src/tg/swap.js");
 
-const { buildSwapList, deps } = swapModule;
+const { buildSwapList, slippageLabel, tokenLabel, deps } = swapModule;
 const OWNER = 123;
 const MINT = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263";
 const BOT_INFO = {
@@ -30,6 +30,10 @@ test.beforeEach((t) => {
   tokenBalance = 1000;
   deps.getBalances = async () => ({ sol: 1, tokens: [{ mint: MINT, balance: 1000, usd: 5, symbol: "BONK" }] });
   deps.getTokenBalance = async () => tokenBalance;
+  deps.getTokenNames = async (mints) => new Map(mints.map((m) => [m, { name: "Bonk", symbol: "BONK" }]));
+  deps.quoteToSol = async () => ({ outSol: 0.5, slippageBps: 100 });
+  deps.getSolUsd = async () => 200;
+  deps.getSlippage = () => ({ rtse: false, bps: 100 });
   deps.isDryRun = () => false;
   deps.isOpenInProgress = () => false;
   deps.swapToSol = async (mint, amount) => {
@@ -123,4 +127,39 @@ test("cancel drops the confirm token", async () => {
   await bot.handleUpdate(cbUpdate(kb.find((b) => b.text === "✖ Cancel").callback_data));
   await bot.handleUpdate(cbUpdate(kb.find((b) => b.text === "✅ Confirm").callback_data));
   assert.equal(swaps.length, 0);
+});
+
+test("tokenLabel and slippageLabel", () => {
+  assert.equal(tokenLabel(MINT, { name: "Bonk", symbol: "BONK" }), "Bonk (BONK)");
+  assert.equal(tokenLabel(MINT, null, "DezXAZ8z"), "DezXAZ8z");
+  assert.equal(slippageLabel({ rtse: false, bps: 100 }), "1% (100 bps)");
+  assert.equal(slippageLabel({ rtse: true, bps: 100 }), "RTSE");
+  assert.equal(slippageLabel({ rtse: true, bps: 100 }, 250), "RTSE (~2.5%)");
+});
+
+test("list buttons show the token name", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(textUpdate("/swap"));
+  assert.equal(lastMarkup(calls)[0].text, "Bonk (BONK): 1,000 ($5.00)");
+});
+
+test("confirm card shows name, SOL and USD estimate, and slippage", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate(`swp:${MINT}`));
+  const text = texts(calls).at(-1);
+  assert.ok(text.includes("Token: Bonk (BONK)"), text);
+  assert.ok(text.includes("≈ 0.5 SOL ($100.00)"), text);
+  assert.ok(text.includes("Slippage: 1% (100 bps)"), text);
+});
+
+test("confirm card survives a failed quote and shows RTSE", async () => {
+  deps.quoteToSol = async () => {
+    throw new Error("V2 quote failed: 500");
+  };
+  deps.getSlippage = () => ({ rtse: true, bps: 100 });
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate(`swp:${MINT}`));
+  const text = texts(calls).at(-1);
+  assert.ok(text.includes("≈ ? SOL (?)"), text);
+  assert.ok(text.includes("Slippage: RTSE"), text);
 });
