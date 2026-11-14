@@ -163,3 +163,27 @@ test("confirm card survives a failed quote and shows RTSE", async () => {
   assert.ok(text.includes("≈ ? SOL (?)"), text);
   assert.ok(text.includes("Slippage: RTSE"), text);
 });
+
+test("refresh re-quotes, edits the card and swaps the old token for a new one", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate(`swp:${MINT}`));
+  const oldKb = lastMarkup(calls);
+  const refresh = oldKb.find((b) => b.text === "🔄 Refresh").callback_data;
+  deps.quoteToSol = async () => ({ outSol: 0.6, slippageBps: 100 });
+  await bot.handleUpdate(cbUpdate(refresh));
+  const edit = calls.findLast((c) => c.method === "editMessageText");
+  assert.ok(edit.payload.text.includes("≈ 0.6 SOL ($120.00)"), edit.payload.text);
+  // token lama tidak berlaku lagi
+  await bot.handleUpdate(cbUpdate(oldKb.find((b) => b.text === "✅ Confirm").callback_data));
+  assert.equal(swaps.length, 0);
+  const fresh = edit.payload.reply_markup.inline_keyboard.flat().find((b) => b.text === "✅ Confirm").callback_data;
+  await bot.handleUpdate(cbUpdate(fresh));
+  assert.deepEqual(swaps, [{ mint: MINT, amount: 1000 }]);
+});
+
+test("refresh with an expired token alerts", async () => {
+  const { bot, calls } = build();
+  await bot.handleUpdate(cbUpdate("swp:r:zzzzzzzz"));
+  const alert = calls.find((c) => c.method === "answerCallbackQuery");
+  assert.ok(alert.payload.show_alert);
+});

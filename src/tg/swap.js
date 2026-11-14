@@ -73,13 +73,37 @@ async function showSwap(ctx) {
   await ctx.reply(text, keyboard ? { reply_markup: keyboard } : {});
 }
 
+const NO_BALANCE = "That token has no balance anymore.";
+
 async function pickToken(ctx) {
-  const mint = ctx.match[1];
-  const balance = await deps.getTokenBalance(mint);
-  if (!(balance > 0)) {
-    await ctx.reply("That token has no balance anymore.");
+  const card = await buildConfirm(ctx.match[1]);
+  if (!card) {
+    await ctx.reply(NO_BALANCE);
     return;
   }
+  await ctx.reply(card.text, { ...HTML, reply_markup: card.keyboard });
+}
+
+// Refresh: token lama ditukar token baru, saldo/quote/harga diambil ulang, kartu yang sama diedit.
+async function refreshConfirm(ctx) {
+  const payload = session.redeemToken(ctx.match[1]);
+  if (!payload) {
+    await ctx.answerCallbackQuery({ text: "This button expired — start again", show_alert: true });
+    return;
+  }
+  const card = await buildConfirm(payload.mint);
+  if (!card) {
+    await ctx.editMessageText(NO_BALANCE).catch(() => {});
+    return;
+  }
+  await ctx.editMessageText(card.text, { ...HTML, reply_markup: card.keyboard });
+  await ctx.answerCallbackQuery({ text: "Refreshed" }).catch(() => {});
+}
+
+// Kartu konfirmasi (saldo, estimasi SOL/USD, slippage) + token baru; null bila saldo kosong.
+async function buildConfirm(mint) {
+  const balance = await deps.getTokenBalance(mint);
+  if (!(balance > 0)) return null;
   const [names, quote, solUsd] = await Promise.all([
     safe("nama token", () => deps.getTokenNames([mint])),
     safe("quote", () => deps.quoteToSol(mint, balance)),
@@ -89,7 +113,11 @@ async function pickToken(ctx) {
   const outSol = quote?.outSol;
   const outUsd = finite(outSol) && finite(solUsd) ? outSol * solUsd : null;
   const token = session.issueToken({ action: "swap", mint, label });
-  const kb = new InlineKeyboard().text("✅ Confirm", `ok:${token}`).text("✖ Cancel", `swp:x:${token}`);
+  const keyboard = new InlineKeyboard()
+    .text("✅ Confirm", `ok:${token}`)
+    .text("✖ Cancel", `swp:x:${token}`)
+    .row()
+    .text("🔄 Refresh", `swp:r:${token}`);
   const lines = [
     "🔄 Swap to SOL",
     "",
@@ -100,7 +128,7 @@ async function pickToken(ctx) {
     `Slippage: ${slippageLabel(deps.getSlippage(), quote?.slippageBps)}`,
   ];
   if (deps.isDryRun()) lines.push("", "🧪 DRY RUN — nothing will be swapped");
-  await ctx.reply(lines.join("\n"), { ...HTML, reply_markup: kb });
+  return { text: lines.join("\n"), keyboard };
 }
 
 async function runSwap(ctx, { mint, label = shortAddr(mint) }) {
@@ -111,7 +139,7 @@ async function runSwap(ctx, { mint, label = shortAddr(mint) }) {
   // Saldo dibaca ulang saat konfirmasi: bisa berubah sejak kartu dibuat.
   const amount = await deps.getTokenBalance(mint);
   if (!(amount > 0)) {
-    await ctx.editMessageText("That token has no balance anymore.").catch(() => {});
+    await ctx.editMessageText(NO_BALANCE).catch(() => {});
     return;
   }
   await ctx.editMessageText(`⏳ Swapping ${fmtToken(amount)} ${label} → SOL…`).catch(() => {});
@@ -138,6 +166,7 @@ export function register(bot) {
       await ctx.editMessageText("Cancelled.").catch(() => {});
     })
   );
+  bot.callbackQuery(/^swp:r:(\w+)$/, withGuard("Refresh", refreshConfirm));
   bot.callbackQuery(/^swp:([1-9A-HJ-NP-Za-km-z]{32,44})$/, withGuard("Swap", pickToken));
   registerConfirm("swap", runSwap);
 }
