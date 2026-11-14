@@ -9,6 +9,7 @@ import * as positions from "./tg/positions.js";
 import * as openWizard from "./tg/open-wizard.js";
 import * as pnl from "./tg/pnl.js";
 import * as wallet from "./tg/wallet.js";
+import * as swap from "./tg/swap.js";
 import { startEntryScanner } from "./entry/index.js";
 import { mainLoop } from "./exit/index.js";
 import { legacyAdoptionCount, tradeExitLoop } from "./exit/trade-loop.js";
@@ -33,7 +34,7 @@ const legacyCount = legacyAdoptionCount();
 if (legacyCount > 0) log.warn(`${legacyCount} posisi lama akan diadopsi tanpa TP/SL — atur di /positions`);
 
 // Bot Telegram + kartu home: tidak di-await agar Telegram yang lambat tidak menunda scanner / exit loop.
-startBot([start, help, settings, positions, openWizard, pnl, wallet])
+startBot([start, help, settings, positions, openWizard, pnl, wallet, swap])
   .then((bot) => bot && start.sendHome(bot.api, { prefix: start.onlinePrefix(legacyCount) }))
   .catch((err) => log.error(`Telegram startup gagal: ${err?.message ?? err}`));
 

@@ -42,10 +42,10 @@ function build(modules) {
   return { bot, calls };
 }
 
-test("COMMANDS lists the seven commands", () => {
+test("COMMANDS lists the eight commands", () => {
   assert.deepEqual(
     COMMANDS.map((c) => c.command),
-    ["start", "open", "positions", "pnl", "wallet", "settings", "help"]
+    ["start", "open", "positions", "pnl", "wallet", "swap", "settings", "help"]
   );
 });
 

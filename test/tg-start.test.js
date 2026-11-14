@@ -42,7 +42,7 @@ test("buildHome hides DRY RUN badge when live", () => {
 test("buildHome keyboard callback data", () => {
   const { keyboard } = buildHome(BASE);
   const data = keyboard.inline_keyboard.flat().map((b) => b.callback_data);
-  assert.deepEqual(data, ["home:open", "home:positions", "home:pnl", "home:wallet", "home:settings", "home:help"]);
+  assert.deepEqual(data, ["home:open", "home:positions", "home:pnl", "home:wallet", "home:swap", "home:settings", "home:help"]);
 });
 
 test("buildHome shows ? for missing values", () => {

@@ -14,6 +14,7 @@ export const COMMANDS = [
   { command: "positions", description: "Claim, set TP/SL/Trail, close" },
   { command: "pnl", description: "Profit today / week / month" },
   { command: "wallet", description: "Deposit, withdraw, export or import key" },
+  { command: "swap", description: "Swap a wallet token to SOL" },
   { command: "settings", description: "Toggles and Auto Exit defaults" },
   { command: "help", description: "How-to and command list" },
 ];
@@ -52,7 +53,9 @@ export function homeKeyboard() {
     .text("📊 PnL", "home:pnl")
     .text("👛 Wallet", "home:wallet")
     .row()
+    .text("🔄 Swap", "home:swap")
     .text("⚙️ Settings", "home:settings")
+    .row()
     .text("❓ Help", "home:help");
 }
 

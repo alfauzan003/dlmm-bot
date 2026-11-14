@@ -8,6 +8,7 @@ export const HELP_TEXT = [
   "📂 Positions (/positions): open a position to claim fees, set TP / SL / Trail, or close it.",
   "📊 PnL (/pnl): profit today / this week / this month, with a PnL card hand-off.",
   "👛 Wallet (/wallet): deposit address, withdraw, export or import the key.",
+  "🔄 Swap (/swap): pick a wallet token and sell its whole balance for SOL.",
   "⚙️ Settings (/settings): toggles (Auto Exit, Auto Entry), Auto Exit defaults, exit strategies (Evil Panda) and strategy settings.",
   "",
   "Tip: paste a token CA or pool address in the chat to start opening a position.",
@@ -18,6 +19,7 @@ export const HELP_TEXT = [
   "/positions - claim, set TP/SL/Trail, close",
   "/pnl - profit today / week / month",
   "/wallet - deposit, withdraw, export or import key",
+  "/swap - swap a wallet token to SOL",
   "/settings - toggles and Auto Exit defaults",
   "/help - this message",
 ].join("\n");
