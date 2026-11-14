@@ -3,7 +3,7 @@
 const f1 = (v) => (Number.isFinite(v) ? `${v.toFixed(1)}%` : "?");
 const f2 = (v) => (Number.isFinite(v) ? `${v.toFixed(2)}%` : "?");
 
-// Funnel kosong untuk satu scan profil.
+// Funnel kosong untuk satu scan strategi.
 export function emptyFunnel() {
   return { fetched: 0, filtered: {}, passed: 0, tokens: 0, limited: {}, checked: 0, error: null };
 }
@@ -22,44 +22,43 @@ export function fmtCounts(counts, { sep = ", " } = {}) {
     .join(sep);
 }
 
-export function tokenDetail(reason, token, g) {
+export function tokenDetail(reason, token, p, now) {
   const audit = token?.audit ?? {};
   if (reason === "no_token") return "no Jupiter token info";
-  if (reason === "organic") return `organic score ${token?.organicScore ?? "?"} < ${g.organicScoreMin}`;
-  if (reason === "top_holders") return `top holders ${audit.topHoldersPercentage ?? "?"}% > ${g.topHoldersMaxPct}%`;
+  if (reason === "mcap") return `Jupiter mcap $${Math.round(Number(token?.mcap) || 0)} outside ${p.minMcapUsd}–${p.maxMcapUsd || "∞"}`;
+  if (reason === "holders") return `Jupiter holders ${token?.holderCount ?? "?"} < ${p.minHolders}`;
+  if (reason === "top10") return `top 10 holders ${f1(audit.topHoldersPercentage)} > ${p.maxTop10Pct}%`;
+  if (reason === "age") {
+    const created = Date.parse(token?.createdAt ?? token?.firstPool?.createdAt ?? "");
+    const age = Number.isFinite(created) ? `${((now - created) / 3600000).toFixed(1)}h` : "?";
+    return `token age ${age} outside ${p.minTokenAgeH}–${p.maxTokenAgeH || "∞"}h`;
+  }
   if (reason === "authorities") return "mint/freeze authority not disabled";
   return reason;
 }
 
-export function volatilityDetail(vol, p) {
-  if (vol == null) return "volatility n/a (not enough closed 5m bars)";
-  return `volatility ${f1(vol)} outside ${p.volatilityMinPct}–${p.volatilityMaxPct}%`;
-}
+const px = (v) => (Number.isFinite(v) ? `$${v.toPrecision(4)}` : "?");
 
-export function signalDetail(sig, p) {
+export function signalDetail(sig, p, source) {
   const m = sig.metrics;
-  if (sig.reason === "immediate") return "immediate timing";
-  if (sig.reason === "not_enough_bars") return `not enough closed 5m bars for ${p.pumpLookbackMin}m lookback`;
+  if (sig.reason === "no_history") return "no ATH/ATL (not enough candles)";
   if (!m) return sig.reason;
-  const pump = `pump ${f1(m.pumpPct)}`;
-  const pull = `pullback ${f1(m.pullbackPct)}`;
-  if (sig.reason === "no_pump") return `${pump} < min ${p.minPumpPct}% in ${p.pumpLookbackMin}m`;
-  if (sig.reason === "pullback_small") return `${pump} · ${pull} < min ${p.minPullbackPct}%`;
-  if (sig.reason === "pullback_large") return `${pump} · ${pull} > max ${p.maxPullbackPct}%`;
-  if (sig.reason === "not_red") return `${pump} · ${pull} · last bar not red`;
-  if (sig.reason === "signal") return `${pump} · ${pull} · last bar red`;
+  const fib = `price ${px(m.price)} · fib ${p.fibEntryLevel} ${px(m.fibEntry)} · ATL ${px(m.atl)} / ATH ${px(m.ath)}`;
+  const src = source ? ` · 5m ${source}` : "";
+  if (sig.reason === "above_fib") return `${fib} → price above fib ${p.fibEntryLevel}${src}`;
+  if (sig.reason === "signal") return `${fib} · max range ${f1(m.maxPct)} (to fib ${p.fibDeepLevel})${src}`;
   return sig.reason;
 }
 
 export function limitDetail(reason, p) {
-  if (reason === "max_open") return `profile already has ${p.maxOpen} open trade(s)`;
+  if (reason === "max_open") return `strategy already has ${p.maxOpen} open trade(s)`;
   if (reason === "token_open") return "token already has an open auto trade";
   if (reason === "cooldown") return "token in cooldown after its last close";
-  if (reason === "profile_off") return "profile off";
+  if (reason === "profile_off") return "strategy off";
   return reason;
 }
 
-// Baris log funnel satu scan profil.
+// Baris log funnel satu scan strategi.
 export function funnelLine(name, f) {
   if (f.error) return `Auto entry ${name} scan: ${f.error}`;
   const parts = [`${f.fetched} pools`];
@@ -75,12 +74,12 @@ export function funnelLine(name, f) {
 // Baris log satu kandidat: verdict + alasan.
 export function candidateLine(name, c) {
   const pair = c.pairName || `${c.pool.slice(0, 8)}…`;
-  const extra = [`fee/TVL ${f2(c.feeTvl30mPct)}`];
-  if (c.volatilityPct != null) extra.push(`vol ${f1(c.volatilityPct)}`);
+  const extra = [`fee/active TVL ${f2(c.feeActiveTvl30mPct)}`];
+  if (Number.isFinite(c.volatilityPct)) extra.push(`vol ${c.volatilityPct.toFixed(1)}`);
   return `Auto entry ${name} · ${pair} → ${c.signal}${c.detail ? ` (${c.detail})` : ""} · ${extra.join(" · ")}`;
 }
 
-// Digest: akumulasi scan per profil sejak digest terakhir.
+// Digest: akumulasi scan per strategi sejak digest terakhir.
 export function emptyDigest() {
   return { profiles: {} };
 }
@@ -118,7 +117,7 @@ export function buildDigestText(digest, { mode, minutes, profilesOn = [] }) {
   const span = minutes == null ? "first scan" : `last ${Math.round(minutes)}m`;
   const L = [`🔎 Auto Entry digest · ${span} · ${mode}`];
   const names = [...new Set([...profilesOn, ...Object.keys(digest.profiles)])];
-  if (names.length === 0) L.push("", "No profile is on.");
+  if (names.length === 0) L.push("", "No strategy is on.");
   for (const name of names) {
     const d = digest.profiles[name];
     L.push("");

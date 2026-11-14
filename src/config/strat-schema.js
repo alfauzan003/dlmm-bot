@@ -34,26 +34,24 @@ const OVERRIDES = {
   EVIL_PANDA_MACD_SIGNAL: { min: 1, int: true },
   EVIL_PANDA_BB_LENGTH: { min: 2, int: true },
   EVIL_PANDA_BB_STDDEV: { gt: 0 },
-  DEGEN_ENTRY_TIMING: { type: "enum", options: ["pullback", "immediate"] },
-  MULTI_ENTRY_TIMING: { type: "enum", options: ["pullback", "immediate"] },
-  DEGEN_RANGE_MODE: { type: "enum", options: ["fixed", "support"] },
-  MULTI_RANGE_MODE: { type: "enum", options: ["fixed", "support"] },
   AUTO_SCAN_INTERVAL_SEC: { min: 15 },
-  AUTO_ORGANIC_SCORE_MIN: { min: 0, max: 100 },
-  AUTO_TOP_HOLDERS_MAX_PCT: { min: 0, max: 100 },
   AUTO_CANDIDATES_PER_SCAN: { min: 1, int: true },
+  BIDASK_MAX_POSITIONS: { min: 1, max: 10, int: true },
+  BIDASK_FLIP_PCT: { min: 0, max: 100 },
+  BIDASK_FLIP_STEP: { min: 0, max: 100 },
+  BIDASK_RANGE_MIN_PCT: { gt: 0, max: 99 },
+  BIDASK_MAX_TOP10_PCT: { min: 0, max: 100 },
+  BIDASK_FIB_ENTRY_LEVEL: { min: 0, max: 1 },
+  BIDASK_FIB_DEEP_LEVEL: { min: 0, max: 1 },
+  BIDASK_VOLATILITY_CAP: { gt: 0 },
+  BIDASK_SIZE_SOL: { gt: 0 },
   SIM_POOL_SPREAD_BINS: { gt: 0, int: true },
 };
 
 // Aturan per pola nama. OVERRIDES menang.
 const PATTERNS = [
-  [/^(DEGEN|MULTI)_MAX_POSITIONS$/, { min: 1, max: 10, int: true }],
-  [/^(DEGEN|MULTI)_FLIP_PCT$/, { min: 1, max: 100 }],
-  [/^(DEGEN|MULTI)_RANGE_(MIN_|MAX_)?PCT$/, { gt: 0, max: 99 }],
-  [/^(DEGEN|MULTI)_(MAX_OPEN|LOW_VOLUME_BARS|MIN_LPS|MIN_HOLDERS|MIN_BIN_STEP)$/, { min: 0, int: true }],
-  [/^(DEGEN|MULTI)_SIZE_SOL$/, { gt: 0 }],
-  [/^(DEGEN|MULTI)_PUMP_LOOKBACK_MIN$/, { gt: 0 }],
-  [/^(DEGEN|MULTI)_.*_(PCT|USD|MIN|H|SOL)$/, { min: 0 }],
+  [/^BIDASK_(MAX_OPEN|LOW_VOLUME_BARS|MIN_HOLDERS|MIN_BIN_STEP)$/, { min: 0, int: true }],
+  [/^BIDASK_.*_(PCT|USD|MIN|H|SOL)$/, { min: 0 }],
   [/_(ATTEMPTS|RETRY)$/, { int: true }],
 ];
 

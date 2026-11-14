@@ -1,6 +1,5 @@
 // Simulator posisi BidAsk single-sided SOL (murni, tanpa I/O). Harga = SOL per token, bin k relatif terhadap bin entry (k=0, harga p0).
 import { BIN_PER_POSITION, binsForPct } from "./screen.js";
-import { pickRangePct } from "./signal.js";
 import { evaluateStrategyExit, strategyExitDetail } from "./exits.js";
 import { profileExit } from "./params.js";
 import { evaluateTradeExit, tradeExitDetail } from "../exit/trade-exit.js";
@@ -115,7 +114,7 @@ const POINT_SEC = 75; // 4 titik path per bar 5m
 export function simulateTrade({ bars, entryIndex, p, pool, solUsdAt, sim, poolLiqSolAt, stopAtSec, rangePct }) {
   const entry = bars[entryIndex];
   if (!entry) return null;
-  const pct = rangePct ?? pickRangePct(bars.slice(0, entryIndex), p, pool.binStep);
+  const pct = rangePct;
   if (pct == null) return null;
   const deposit = p.sizeSol;
   const pos = createSimPosition({ depositSol: deposit, rangePct: pct, binStep: pool.binStep, p0: entry.open });

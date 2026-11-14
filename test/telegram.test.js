@@ -285,7 +285,7 @@ test("close alerts pass editMessageId through to edit the sent alert", async () 
 test("notifyAutoEntry: live and paper text", () => {
   const sent = captureSender();
   const args = {
-    profile: "degen",
+    profile: "bidask_flip",
     pair: "AAA-SOL",
     pool: "PoolX",
     sizeSol: 0.5,
@@ -298,17 +298,19 @@ test("notifyAutoEntry: live and paper text", () => {
   };
   notifyAutoEntry(args);
   notifyAutoEntry({ ...args, paper: true });
+  notifyAutoEntry({ ...args, feeActiveTvl30mPct: 2.345 });
   __setSender(null);
   assert.equal(
     sent[0].text,
     [
-      "🤖 Auto entry · degen · AAA-SOL",
+      "🤖 Auto entry · bidask_flip · AAA-SOL",
       "Size 0.5 SOL · range −50% · bin 100 · fee 2%",
-      "Fee/TVL 30m 1.23% · volatility 3.1% · MC $1500000.00",
+      "Fee/TVL 30m 1.23% · volatility 3.1 · MC $1500000.00",
       "Pool: PoolX",
     ].join("\n")
   );
-  assert.ok(sent[1].text.startsWith("📝 PAPER 🤖 Auto entry · degen · AAA-SOL\n"));
+  assert.ok(sent[1].text.startsWith("📝 PAPER 🤖 Auto entry · bidask_flip · AAA-SOL\n"));
+  assert.match(sent[2].text, /\nFee\/active TVL 30m 2\.35% · volatility 3\.1 · MC /);
 });
 
 test("close alerts and auto entry alert show the Why lines", async () => {

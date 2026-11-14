@@ -4,12 +4,12 @@ import { buildProfile, buildAutoEntry } from "../src/strategy/params.js";
 import { cooldownUntil, canOpen, todayAutoPnlSol, brakeHit } from "../src/strategy/limits.js";
 
 const g = buildAutoEntry({});
-const p = { ...buildProfile({}, "degen"), maxOpen: 1 };
+const p = { ...buildProfile({}, "bidask_flip"), maxOpen: 1 };
 
 test("canOpen order", () => {
   assert.equal(canOpen({ p: { ...p, on: false }, open: [], closed: [], mint: "M", now: 0, g }).reason, "profile_off");
-  assert.equal(canOpen({ p, open: [{ profile: "degen", baseMint: "X" }], closed: [], mint: "M", now: 0, g }).reason, "max_open");
-  assert.equal(canOpen({ p: { ...p, maxOpen: 2 }, open: [{ profile: "multihour", baseMint: "M" }], closed: [], mint: "M", now: 0, g }).reason, "token_open");
+  assert.equal(canOpen({ p, open: [{ profile: "bidask_flip", baseMint: "X" }], closed: [], mint: "M", now: 0, g }).reason, "max_open");
+  assert.equal(canOpen({ p: { ...p, maxOpen: 2 }, open: [{ profile: "other", baseMint: "M" }], closed: [], mint: "M", now: 0, g }).reason, "token_open");
   assert.deepEqual(canOpen({ p, open: [], closed: [], mint: "M", now: 0, g }), { ok: true, reason: null });
 });
 

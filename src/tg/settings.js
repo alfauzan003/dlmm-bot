@@ -52,16 +52,17 @@ export function buildSettings(settings, dryRun) {
     .row()
     .text(autoFlipLabel({ pct: settings.autoFlipPct, step: settings.autoFlipStep }), "set:autoflip")
     .row()
+    .text("🤖 Auto Entry", "st:g:auto")
     .text("🐼 Exit strategy", "set:exit")
     .row()
-    .text("🧩 Strategy", "st:home");
+    .text("🛠 Advanced", "st:g:adv");
   const text = [
     "⚙️ Settings",
     "",
     "Tap a toggle to switch it. Tap TP / SL / Trail to change the Auto Exit defaults for new trades.",
-    "Auto Entry screens Meteora pools and runs the bid-ask flip (profiles in 🧩 Strategy).",
-    "Range presets and Deposits set the quick-pick buttons in /open.",
-    "Auto flip is the default for new bid_ask / mixed trades from /open.",
+    "Range presets, Deposits and Auto flip are the defaults for /open.",
+    "🤖 Auto Entry: strategies (bidask flip, rabbit soon), safety checks and limits.",
+    "🛠 Advanced: transactions, swaps, monitoring, market data, logs.",
     "",
     `DRY_RUN: ${dryRun ? "on" : "off"} (.env)`,
   ].join("\n");

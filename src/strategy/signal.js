@@ -1,87 +1,58 @@
-// Sinyal entry + pemilihan range Auto Entry (murni, tanpa I/O). Bar 5m tertutup, terlama dulu.
+// Sinyal entry bidask flip + lebar range (murni, tanpa I/O): Fibonacci retracement ATL -> ATH.
+// Level L ada di harga ATH − L·(ATH − ATL): 0 = ATH, 1 = ATL.
 import { BIN_PER_POSITION, binsForPct } from "./screen.js";
 
 export { binsForPct };
-
-const BAR_MIN = 5;
 
 // Pct terbesar yang range-nya masih `bins` bin (termasuk bin aktif).
 export function maxPctForBins(bins, binStep) {
   return (1 - (1 + binStep / 10000) ** -(bins - 1)) * 100;
 }
 
-export function barsNeeded(p) {
-  const pump = Math.ceil(p.pumpLookbackMin / BAR_MIN) + 1;
-  const support = p.rangeMode === "support" ? Math.ceil(p.supportLookbackMin / BAR_MIN) + 1 : 0;
-  return Math.max(pump, support, 7);
+// ATH / ATL dari beberapa seri bar (high / low); null bila tidak ada bar valid.
+export function athAtl(...series) {
+  let ath = -Infinity;
+  let atl = Infinity;
+  for (const bars of series) {
+    for (const b of bars || []) {
+      if (Number.isFinite(b.high) && b.high > 0) ath = Math.max(ath, b.high);
+      if (Number.isFinite(b.low) && b.low > 0) atl = Math.min(atl, b.low);
+    }
+  }
+  return Number.isFinite(ath) && Number.isFinite(atl) && ath > atl ? { ath, atl } : null;
 }
 
-// pumpPct = (high/base − 1)·100, pullbackPct = (1 − close/high)·100.
-export function entrySignal(bars, p) {
-  if (p.entryTiming === "immediate") {
-    return bars.length ? { enter: true, reason: "immediate", metrics: null } : { enter: false, reason: "not_enough_bars", metrics: null };
-  }
-  const w = Math.ceil(p.pumpLookbackMin / BAR_MIN);
-  if (bars.length < w) return { enter: false, reason: "not_enough_bars", metrics: null };
-  const win = bars.slice(-w);
-  const base = win[0].open;
-  const high = Math.max(...win.map((b) => b.high));
-  const last = win[win.length - 1];
-  const close = last.close;
-  const pumpPct = (high / base - 1) * 100;
-  const pullbackPct = (1 - close / high) * 100;
-  const metrics = { pumpPct, pullbackPct, high, base, close };
-  const no = (reason) => ({ enter: false, reason, metrics });
-  if (pumpPct < p.minPumpPct) return no("no_pump");
-  if (pullbackPct < p.minPullbackPct) return no("pullback_small");
-  if (pullbackPct > p.maxPullbackPct) return no("pullback_large");
-  if (!(last.close < last.open)) return no("not_red");
+export const fibPrice = (ath, atl, level) => ath - level * (ath - atl);
+
+// Entry bila harga sudah turun ke / di bawah level entry (default 0.382). maxPct = jarak (%) level entry -> level dalam.
+export function fibSignal({ ath, atl, price }, p) {
+  if (!(ath > atl) || !(atl > 0) || !(price > 0)) return { enter: false, reason: "no_history", metrics: null };
+  const fibEntry = fibPrice(ath, atl, p.fibEntryLevel);
+  const fibDeep = fibPrice(ath, atl, p.fibDeepLevel);
+  const maxPct = ((fibEntry - fibDeep) / fibEntry) * 100;
+  const metrics = { ath, atl, price, fibEntry, fibDeep, maxPct };
+  if (price > fibEntry) return { enter: false, reason: "above_fib", metrics };
   return { enter: true, reason: "signal", metrics };
 }
 
 const f1 = (v) => `${v.toFixed(1)}%`;
 
-// Seperti pickRangePct, plus `why`: langkah-langkah yang menghasilkan pct (untuk log / alert).
-export function explainRangePct(bars, p, binStep) {
-  let pct = p.rangePct;
-  const steps = [];
-  if (p.rangeMode === "support" && bars.length) {
-    const n = Math.ceil(p.supportLookbackMin / BAR_MIN);
-    const support = Math.min(...bars.slice(-n).map((b) => b.low));
-    const close = bars[bars.length - 1].close;
-    if (support >= close) {
-      pct = p.rangeMinPct;
-      steps.push(`support mode: lowest low ${p.supportLookbackMin}m ≥ close → min ${f1(pct)}`);
-    } else {
-      const dist = (1 - support / close) * 100;
-      pct = dist + p.supportBufferPct;
-      steps.push(
-        `support mode: lowest low ${p.supportLookbackMin}m ${support.toPrecision(4)} vs close ${close.toPrecision(4)} → ${f1(dist)} + buffer ${p.supportBufferPct}% = ${f1(pct)}`
-      );
-    }
-  } else {
-    steps.push(`fixed ${f1(pct)}`);
+// target = min + (min(vol, cap) / cap) · (max − min), lalu muat di maxPositions·70 bin. pct null = dilewati.
+export function explainRangePct({ maxPct, volatility }, p, binStep) {
+  if (!Number.isFinite(volatility)) return { pct: null, why: "volatility n/a" };
+  if (!Number.isFinite(maxPct)) return { pct: null, why: "max range n/a" };
+  const cap = p.volatilityCap > 0 ? p.volatilityCap : 10;
+  const v = Math.min(Math.max(volatility, 0), cap);
+  let pct = p.rangeMinPct + (v / cap) * (maxPct - p.rangeMinPct);
+  const steps = [`vol ${v.toFixed(2)}/${cap} · min ${f1(p.rangeMinPct)} · max ${f1(maxPct)} → ${f1(pct)}`];
+  const binCap = maxPctForBins(p.maxPositions * BIN_PER_POSITION, binStep);
+  if (pct > binCap) {
+    pct = binCap;
+    steps.push(`capped by ${p.maxPositions} position(s) × ${BIN_PER_POSITION} bins @ bin step ${binStep} = ${f1(binCap)}`);
   }
-  if (pct < p.rangeMinPct) {
-    pct = p.rangeMinPct;
-    steps.push(`raised to min ${f1(pct)}`);
-  } else if (pct > p.rangeMaxPct) {
-    pct = p.rangeMaxPct;
-    steps.push(`cut to max ${f1(pct)}`);
-  }
-  const cap = maxPctForBins(p.maxPositions * BIN_PER_POSITION, binStep);
-  if (pct > cap) {
-    pct = cap;
-    steps.push(`capped by ${p.maxPositions} position(s) × ${BIN_PER_POSITION} bins @ bin step ${binStep} = ${f1(cap)}`);
-  }
-  if (pct < p.rangeMinPct) {
-    steps.push(`min ${f1(p.rangeMinPct)} does not fit → skip`);
+  if (!(pct > 0) || pct >= 100) {
+    steps.push("not a valid range → skip");
     return { pct: null, why: steps.join(" · ") };
   }
   return { pct, why: steps.join(" · ") };
-}
-
-// Lebar range (% turun dari harga) dibatasi min/max, lalu muat di maxPositions·70 bin; null jika min tak muat.
-export function pickRangePct(bars, p, binStep) {
-  return explainRangePct(bars, p, binStep).pct;
 }

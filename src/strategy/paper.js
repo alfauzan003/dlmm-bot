@@ -150,6 +150,7 @@ export async function openPaperTrade({ profile, p, row, rangePct, entry, deps })
       binStep: row.binStep,
       baseFeePct: row.baseFeePct,
       feeTvl30mPct: entry?.metrics?.feeTvl30mPct,
+      feeActiveTvl30mPct: entry?.metrics?.feeActiveTvl30mPct ?? null,
       volatilityPct: entry?.metrics?.volatilityPct,
       mcapUsd: entry?.metrics?.mcapUsd,
       signalDetail: entry?.signalWhy ?? null,

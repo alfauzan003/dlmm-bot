@@ -97,8 +97,9 @@ test("buildSettings callback data", () => {
     "set:rng",
     "set:dep",
     "set:autoflip",
+    "st:g:auto",
     "set:exit",
-    "st:home",
+    "st:g:adv",
   ]);
 });
 
@@ -299,7 +300,8 @@ test("set:exit opens the Exit strategy screen", async () => {
 
 test("settings text explains Auto Entry", () => {
   const { text } = buildSettings(DEFAULT_SETTINGS, true);
-  assert.ok(text.includes("Auto Entry screens Meteora pools and runs the bid-ask flip (profiles in 🧩 Strategy)."));
+  assert.ok(text.includes("🤖 Auto Entry: strategies (bidask flip, rabbit soon), safety checks and limits."));
+  assert.ok(text.includes("🛠 Advanced: transactions, swaps, monitoring, market data, logs."));
 });
 
 test("auto flip default with a step from /settings", async () => {

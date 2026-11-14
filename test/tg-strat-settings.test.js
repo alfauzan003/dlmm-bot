@@ -32,7 +32,7 @@ const settingsModule = await import("../src/tg/settings.js");
 const session = await import("../src/tg/session.js");
 const { getStratOverrides, setStratOverride } = await import("../src/state/settings.js");
 const { parseStratText } = await import("../src/config/strat-schema.js");
-const { buildStratSection } = await import("../src/tg/strat-settings.js");
+const { buildStratSection, buildStratGroup, buildStratSubgroup, groupOf } = await import("../src/tg/strat-settings.js");
 
 const OWNER = 123;
 const BOT_INFO = {
@@ -96,15 +96,19 @@ const lastText = (calls) => sent(calls).at(-1)?.text ?? "";
 const lastButtons = (calls) => sent(calls).at(-1)?.reply_markup?.inline_keyboard.flat() ?? [];
 const lastData = (calls) => lastButtons(calls).map((b) => b.callback_data);
 
-test("/settings links to the Strategy menu and home lists the sections", async () => {
+test("/settings links to Auto Entry and Advanced; Advanced lists the other sections", async () => {
   const { bot, calls } = build();
   await bot.handleUpdate(textUpdate("/settings"));
-  assert.ok(lastData(calls).includes("st:home"));
-  await bot.handleUpdate(cbUpdate("st:home"));
+  assert.ok(lastData(calls).includes("st:g:auto"));
+  assert.ok(lastData(calls).includes("st:g:adv"));
+  await bot.handleUpdate(cbUpdate("st:g:adv"));
   const labels = lastButtons(calls).map((b) => b.text);
   assert.ok(labels.some((l) => l.startsWith("General")));
   assert.ok(labels.some((l) => l.startsWith("Entry")));
   assert.ok(lastData(calls).includes("st:s:1:0"));
+  // Tombol lama st:home tetap membuka Advanced.
+  await bot.handleUpdate(cbUpdate("st:home"));
+  assert.match(lastText(calls), /Advanced/);
 });
 
 test("sections page 8 keys at a time", async () => {
@@ -190,7 +194,7 @@ test("a key no longer in strat.conf answers without crashing", async () => {
 test("every callback on every screen fits Telegram's 64-byte limit", async () => {
   const { bot, calls } = build();
   const seen = new Set();
-  const queue = ["st:home"];
+  const queue = ["st:home", "st:g:auto"];
   while (queue.length) {
     const data = queue.shift();
     if (seen.has(data) || !data.startsWith("st:") || data.startsWith("st:set:") || data.startsWith("st:reset"))
@@ -223,6 +227,59 @@ test("Exit strategy sections go back to the Exit strategy screen", () => {
     ["# ===== Entry =====", "A_SEC=1", "", "# ===== Exit strategy · Evil Panda =====", "EVIL_PANDA_RSI=true"].join("\n")
   );
   const back = (i) => buildStratSection(schema, {}, i, 0).keyboard.inline_keyboard.flat().at(-1);
-  assert.deepEqual([back(0).text, back(0).callback_data], ["⬅ Sections", "st:home"]);
+  assert.deepEqual([back(0).text, back(0).callback_data], ["⬅ Advanced", "st:g:adv"]);
   assert.deepEqual([back(1).text, back(1).callback_data], ["⬅ Exit strategy", "set:exit"]);
+});
+
+test("Auto Entry group: strategies with several sections open a sub-menu; back goes up one level", () => {
+  const schema = parseStratText(
+    [
+      "# ===== General =====",
+      "SOL_MODE=false",
+      "",
+      "# ===== Auto Entry · Bidask flip · Screener =====",
+      "# Screener help",
+      "",
+      "BIDASK_ON=true",
+      "",
+      "# ===== Auto Entry · Bidask flip · Entry & range =====",
+      "BIDASK_FLIP_PCT=65",
+      "",
+      "# ===== Auto Entry · Rabbit =====",
+      "RABBIT_ON=false",
+      "",
+      "# ===== Auto Entry · Safety =====",
+      "ENTRY_MAX_FAILURES=3",
+      "",
+      "# ===== Exit strategy · Evil Panda =====",
+      "EVIL_PANDA_RSI=true",
+    ].join("\n")
+  );
+  assert.deepEqual(schema.sections.map((x) => groupOf(x.title)), ["adv", "auto", "auto", "auto", "auto", "exit"]);
+  const auto = buildStratGroup(schema, { BIDASK_FLIP_PCT: "70" }, "auto").keyboard.inline_keyboard.flat();
+  assert.deepEqual(
+    auto.map((b) => [b.text, b.callback_data]),
+    [
+      ["🔁 Bidask flip (1 ✏️)", "st:g:auto:1"],
+      ["🐇 Rabbit (soon)", "st:s:3:0"],
+      ["🛡 Safety", "st:s:4:0"],
+      ["◀ Back", "set:back"],
+    ]
+  );
+  const adv = buildStratGroup(schema, {}, "adv").keyboard.inline_keyboard.flat();
+  assert.deepEqual(adv.map((b) => b.callback_data), ["st:s:0:0", "set:back"]);
+  const sub = buildStratSubgroup(schema, {}, 1);
+  assert.deepEqual(
+    sub.keyboard.inline_keyboard.flat().map((b) => [b.text, b.callback_data]),
+    [
+      ["Screener", "st:s:1:0"],
+      ["Entry & range", "st:s:2:0"],
+      ["⬅ Auto Entry", "st:g:auto"],
+    ]
+  );
+  assert.match(sub.text, /Bidask flip[\s\S]*Screener help/);
+  const back = (i) => buildStratSection(schema, {}, i, 0).keyboard.inline_keyboard.flat().at(-1);
+  assert.deepEqual([back(2).text, back(2).callback_data], ["⬅ Bidask flip", "st:g:auto:1"]);
+  assert.deepEqual([back(3).text, back(3).callback_data], ["⬅ Auto Entry", "st:g:auto"]);
+  assert.deepEqual([back(0).text, back(0).callback_data], ["⬅ Advanced", "st:g:adv"]);
 });

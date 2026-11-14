@@ -159,38 +159,50 @@ off per trade with **🐼 Panda** in `/positions` (the card shows `🐼 Evil Pan
 with it on when Auto Exit is ON and `EVIL_PANDA_DEFAULT_ON=true`. Tune it in **/settings → 🐼 Exit strategy → Evil
 Panda**. The close alert shows which signal fired, e.g. `Evil Panda (RSI)`.
 
-## Auto Entry · bid-ask flip
+## Auto Entry · bidask flip
 
 While **Auto Entry** is ON the bot looks for pools on its own and opens trades without a confirm tap. There is no
-pool list: the screener reads Meteora, and SOL pairs only. Every number below is a key in `strat.conf`, grouped in
-`/settings` → `🧩 Strategy` under the `Auto Entry · …` sections.
+pool list: the screener reads Meteora, and SOL pairs only. Every number below is a key in `strat.conf`, editable in
+`/settings` → `🤖 Auto Entry` → `🔁 Bidask flip` (Screener / Entry & range / Size & exits). A second strategy,
+**Rabbit**, is planned; its switch (`RABBIT_ON`) has no effect yet.
 
-**Two profiles**, each with its own on/off switch, size, limits and thresholds (Auto Entry is the master switch):
+**Screener** (every `AUTO_SCAN_INTERVAL_SEC`, 300 s): reads Meteora pool-discovery (timeframe 30m) with these filters,
+all `BIDASK_*`:
 
-| Profile     | For                               | Defaults                                 |
-| ----------- | --------------------------------- | ---------------------------------------- |
-| `degen`     | Young, volatile pools, short hold | `DEGEN_*`: 0.5 SOL, max 2 open, hold 2 h |
-| `multihour` | Bigger, older pools, long hold    | `MULTI_*`: 1 SOL, max 2 open, hold 24 h  |
+| Filter              | Default        | Key                                                |
+| ------------------- | -------------- | -------------------------------------------------- |
+| Market cap          | $200k – $5M    | `MIN_MCAP_USD`, `MAX_MCAP_USD` (0 = no max)        |
+| Token age           | 2 h – no max   | `MIN_TOKEN_AGE_H`, `MAX_TOKEN_AGE_H` (0 = no max)  |
+| Holders             | ≥ 500          | `MIN_HOLDERS`                                      |
+| Top 10 holders      | ≤ 30%          | `MAX_TOP10_PCT`                                    |
+| Fees (30m)          | ≥ $1           | `MIN_FEES_30M_USD`                                 |
+| Base fee            | ≥ 1%           | `MIN_BASE_FEE_PCT`                                 |
+| Fee / active TVL    | ≥ 0.2% (30m)   | `MIN_FEE_ACTIVE_TVL_30M_PCT`                       |
+| Bin step            | ≥ 80           | `MIN_BIN_STEP`                                     |
 
-**Screener** (every `AUTO_SCAN_INTERVAL_SEC`, 60 s): reads the Meteora pool list with the profile's TVL, 30 minute
-volume, fee / TVL, bin step, market cap, holders, pool age and base fee limits. Per token it keeps only the
-cheapest pool (lowest base fee, then highest TVL). The top `AUTO_CANDIDATES_PER_SCAN` are then checked with Jupiter
-token data (organic score, top holders, mint and freeze authority off), the 30 minute volatility band and, if set,
-the number of LP owners.
+Pools are ranked by fee / active TVL. When a token has several pools, the highest ranked one is kept and the next
+token takes the free slot, so the top `AUTO_CANDIDATES_PER_SCAN` (3) candidates are always different tokens. Each
+candidate's token is checked again with the Jupiter Tokens API (market cap, holders, top 10, age, and mint / freeze
+authority off when `AUTO_REQUIRE_AUTHORITIES_OFF=true`).
 
-**Entry signal** (on closed 5m bars): the price pumped by at least `MIN_PUMP_PCT` inside `PUMP_LOOKBACK_MIN`, has
-pulled back from the high by `MIN_PULLBACK_PCT` to `MAX_PULLBACK_PCT`, and the last closed bar is red. With
-`ENTRY_TIMING=immediate` the signal is skipped. The pool-price check from the Transactions settings still runs before
-opening.
+**Entry signal** (Fibonacci retracement from the all time low to the all time high, in USD):
 
-**Open**: SOL only, BidAsk, from the current price down to `RANGE_PCT` below (`RANGE_MODE=fixed`) or down to the
-recent low plus a buffer (`support`), clamped to `RANGE_MIN_PCT` – `RANGE_MAX_PCT` and to `MAX_POSITIONS` on-chain
-positions. Pools whose non-refundable position cost is above `AUTO_MAX_NONREFUNDABLE_SOL` are skipped.
+- ATH / ATL come from 1h DexPaprika candles since the token's birth (at most `DEXPAPRIKA_HISTORY_DAYS`, which must
+  fit your DexPaprika plan) plus the last ~100 5m candles. 5m candles come from GMGN, with DexPaprika as fallback;
+  the last 5m close is the current price.
+- Level 0 is the ATH, level 1 the ATL. A price above `FIB_ENTRY_LEVEL` (0.382) is skipped.
+- `max_pct` = the drop (%) from the 0.382 level to `FIB_DEEP_LEVEL` (0.786).
 
-**Flip**: when `FLIP_PCT`% of the SOL side has been crossed by price, the existing auto flip moves the token bins above
-the price (token only, BidAsk), so the trade keeps earning fees while price bounces.
+**Range**: `v = min(volatility, VOLATILITY_CAP)` and `target = RANGE_MIN_PCT + (v / VOLATILITY_CAP) × (max_pct −
+RANGE_MIN_PCT)`, with volatility from Meteora pool-discovery (24h), `RANGE_MIN_PCT` 30 and the cap 10. The trade opens SOL only,
+BidAsk, from the price down to `target`%, capped to `MAX_POSITIONS` on-chain positions (70 bins each). Pools whose
+non-refundable position cost is above `AUTO_MAX_NONREFUNDABLE_SOL` are skipped, and the pool-price check from Safety
+still runs before opening.
 
-**Exits**: TP / SL / Trail come from the profile (`TP_PCT`, `SL_PCT`, `TRAIL_*`; 0 = off), not from the Auto Exit
+**Flip**: auto flip at `FLIP_PCT` (65%) of the SOL side, then every `FLIP_STEP` (10%) more: the token bins are moved
+above the price (token only, BidAsk), so the trade keeps earning fees while price bounces.
+
+**Exits**: TP / SL / Trail come from the strategy (`TP_PCT`, `SL_PCT`, `TRAIL_*`; 0 = off), not from the Auto Exit
 defaults, and stay editable per trade in `/positions`. On top of that, strategy exits close the trade with swap to SOL:
 
 | Reason         | Closes when                                                                      |
@@ -201,8 +213,8 @@ defaults, and stay editable per trade in `/positions`. On top of that, strategy 
 | `volume_died`  | `LOW_VOLUME_BARS` closed 5m bars in a row below `MIN_VOLUME_5M_USD`              |
 | `max_hold`     | The trade is open for `MAX_HOLD_MIN` minutes                                     |
 
-**Limits**: at most `MAX_OPEN` auto trades per profile, one open auto trade per token, a cooldown per token after a
-close (`AUTO_COOLDOWN_MIN`, longer after a loss: `AUTO_COOLDOWN_LOSS_MIN`), and failed entries use
+**Limits**: at most `MAX_OPEN` auto trades, one open auto trade per token, a cooldown per token after a close
+(`AUTO_COOLDOWN_MIN`, longer after a loss: `AUTO_COOLDOWN_LOSS_MIN`), and failed entries use
 `ENTRY_FAILURE_COOLDOWN_SEC` / `ENTRY_MAX_FAILURES`. `GAS_RESERVE` SOL always stays in the wallet.
 
 **Daily loss brake**: once auto trades closed since 00:00 WIB lose `AUTO_DAILY_LOSS_LIMIT_SOL` or more, Auto Entry is
@@ -210,23 +222,16 @@ switched OFF and you get one Telegram alert. Open trades keep their exits. Turn 
 
 **DRY_RUN**: nothing is ever sent. Auto Entry opens paper trades instead (see [Paper mode](#paper-mode-dry_run)).
 
-**Backtester**: picks starting values per profile from Meteora 5m candles. It never changes your config; paste the
-result into `strat.conf` or set the keys in `/settings` → `🧩 Strategy`.
-
-```bash
-node scripts/backtest-flip.js fetch --profile <degen|multihour> --days 5 --max-pools 200
-node scripts/backtest-flip.js run --profile <degen|multihour> --samples 400
-```
-
-`fetch` downloads the dataset to `data/backtest/<profile>/` (the first run can take a while). `run` searches
-parameter sets (older 70% of the days to train, newest 30% to validate) and writes
-`data/backtest/<profile>/report-<date>.md` and `best.conf`. The simulator assumptions are the `SIM_*` keys.
+**API keys** (`.env`): `GMGN_API_KEY` for 5m candles, `DEXPAPRIKA_API_KEY` for the 1h history (without a key
+DexPaprika only serves the last 24 h of 1h candles). A free DexPaprika key uses `api.dexpaprika.com` (the default);
+Dev / Pro keys need `DEXPAPRIKA_API_URL=https://api-pro.dexpaprika.com`. Only Dev / Pro serve 5m candles, so on a
+free key the 5m fallback fails and a candidate whose GMGN request fails is skipped for that scan.
 
 ### Paper mode (DRY_RUN)
 
 With `DRY_RUN=true` no transaction or swap is sent, but Auto Entry keeps running: every entry it would make opens a
 **paper trade** instead. A paper trade is simulated on real pool data: the pool's active bin and liquidity at entry,
-then the live Meteora 5m candles, with the same profile exits as a live auto trade.
+then the live Meteora 5m candles, with the same strategy exits as a live auto trade.
 
 - Paper trades are saved in `paper-trades.json` (not `state.json`). In DRY_RUN the limits (`MAX_OPEN`, one trade per
   token, cooldowns) count paper trades.
@@ -254,13 +259,18 @@ range % and flip %. `--since` is a WIB date. Once there are live trades with pre
 | Toggle     | First-start value | Effect                                                 |
 | ---------- | ----------------- | ------------------------------------------------------ |
 | Auto Exit  | ON                | Attach TP / SL / Trail defaults to new trades          |
-| Auto Entry | OFF               | Screen Meteora pools and run the bid-ask flip strategy |
+| Auto Entry | OFF               | Screen Meteora pools and run the bidask flip strategy  |
 
 The toggles are saved in `settings.json`. They take effect without a restart and are the only on/off switch for
 these features.
 
-**🧩 Strategy** (in `/settings`) shows every key of `strat.conf`, grouped by its `# ===== … =====` sections (General, Auto
-Entry · Safety / Screener / Degen profile / Multi-hour profile / Limits / Simulator, Exit strategy · Evil Panda, Transactions, Swap & sweep, Monitoring, Market data & rate limits, Logs).
+Every key of `strat.conf` can be edited from `/settings`, grouped by its `# ===== … =====` sections:
+
+- **🤖 Auto Entry**: `🔁 Bidask flip` (Screener, Entry & range, Size & exits), `🐇 Rabbit (soon)`, `🛡 Safety`,
+  `⛔ Limits` — the `Auto Entry · …` sections.
+- **🐼 Exit strategy**: Evil Panda — the `Exit strategy · …` sections.
+- **🛠 Advanced**: every other section (General, Paper trading simulator, Transactions, Swap & sweep, Monitoring,
+  Market data & rate limits, Logs) and **Reset all overrides**.
 The comment block right under a section header is shown as that section's description, and the comment above each
 key as its help. Changing a value there saves it as an override in `settings.json`
 (`stratOverrides`); `strat.conf` stays the committed default and **↩ Reset to default** / **Reset all overrides**
@@ -275,7 +285,11 @@ only in `.env` and are never shown.
 - Auto Entry starts OFF. The old Supertrend entry and its pool list file are gone: turn Auto Entry on in `/settings` to use
   the bid-ask flip strategy. Leftover pool list and `supertrend-cache.json` files are ignored and can be deleted.
 - The old rule-based "deterministic" exit (per-mode stop loss, OOR, indicators, trailing, low yield, OOR fallback
-  and spot re-entry) has been removed, along with its `BIDASK_*` / `SPOT_*` / `TIMEFRAME` / `TRAILING_*` keys.
+  and spot re-entry) has been removed, along with its `BIDASK_DOUBLE_*` / `BIDASK_SOL_*` / `SPOT_*` / `TIMEFRAME` /
+  `TRAILING_*` keys. (The `BIDASK_*` keys in `strat.conf` today belong to the bidask flip Auto Entry strategy.)
+- The Degen and Multi-hour Auto Entry profiles (`DEGEN_*` / `MULTI_*`) and the backtester (`scripts/backtest-flip.js`)
+  are gone; Auto Entry now runs the bidask flip strategy. Auto trades opened by the old profiles keep their stored
+  exits.
   Use TP / SL / Trail per trade instead. Leftover overrides for removed keys in `settings.json` are ignored.
 
 ## PnL and Metlex
@@ -321,7 +335,6 @@ These are created while the bot runs and are git-ignored. Do not edit them while
 | `logs/`                                 | Process logs (PM2)                                     |
 | `paper-trades.json`                     | Paper trades (DRY_RUN Auto Entry)                      |
 | `strategy-log.jsonl`                    | Learning log: one row per finished auto trade          |
-| `data/backtest/`                        | Backtest datasets, reports and `best.conf`             |
 
 ## Scripts
 

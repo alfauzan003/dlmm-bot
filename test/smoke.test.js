@@ -67,7 +67,7 @@ const MODULES = [
   "../src/lp/flip-trade.js",
   "../src/exit/auto-flip.js",
   "../src/exit/strategy-exit.js",
-  "../src/strategy/backtest.js",
+  "../src/market/dexpaprika.js",
   "../src/strategy/exits.js",
   "../src/strategy/limits.js",
   "../src/strategy/log.js",

@@ -1,42 +1,35 @@
-// Parameter strategi Auto Entry (bid-ask flip): dua profil (degen, multihour) + global.
-// Semua dibaca dari peta env (strat.conf) dengan prefix per profil.
+// Parameter strategi Auto Entry: satu strategi bidask flip (Fibonacci) + global. Rabbit menyusul.
+// Semua dibaca dari peta env (strat.conf) dengan prefix per strategi.
 import { bool, num } from "../config/env.js";
 
-export const PROFILES = ["degen", "multihour"];
-export const PROFILE_PREFIX = { degen: "DEGEN", multihour: "MULTI" };
+export const PROFILES = ["bidask_flip"];
+export const PROFILE_PREFIX = { bidask_flip: "BIDASK" };
 
-const TIMING = ["pullback", "immediate"];
-const RANGE_MODES = ["fixed", "support"];
-
-// Urutan = tabel spec section 7 (juga urutan profileToConf).
+// Urutan = urutan di strat.conf.
 export const PROFILE_FIELDS = [
   { suffix: "ON", field: "on", type: "bool" },
+  // Screener (pool-discovery Meteora, timeframe 30m).
+  { suffix: "MIN_MCAP_USD", field: "minMcapUsd", type: "num" },
+  { suffix: "MAX_MCAP_USD", field: "maxMcapUsd", type: "num" },
+  { suffix: "MIN_TOKEN_AGE_H", field: "minTokenAgeH", type: "num" },
+  { suffix: "MAX_TOKEN_AGE_H", field: "maxTokenAgeH", type: "num" },
+  { suffix: "MIN_HOLDERS", field: "minHolders", type: "int" },
+  { suffix: "MAX_TOP10_PCT", field: "maxTop10Pct", type: "num" },
+  { suffix: "MIN_FEES_30M_USD", field: "minFees30mUsd", type: "num" },
+  { suffix: "MIN_BASE_FEE_PCT", field: "minBaseFeePct", type: "num" },
+  { suffix: "MIN_FEE_ACTIVE_TVL_30M_PCT", field: "minFeeActiveTvl30mPct", type: "num" },
+  { suffix: "MIN_BIN_STEP", field: "minBinStep", type: "int" },
+  // Entry & range (Fibonacci ATL -> ATH).
+  { suffix: "FIB_ENTRY_LEVEL", field: "fibEntryLevel", type: "num" },
+  { suffix: "FIB_DEEP_LEVEL", field: "fibDeepLevel", type: "num" },
+  { suffix: "RANGE_MIN_PCT", field: "rangeMinPct", type: "num" },
+  { suffix: "VOLATILITY_CAP", field: "volatilityCap", type: "num" },
+  { suffix: "FLIP_PCT", field: "flipPct", type: "num" },
+  { suffix: "FLIP_STEP", field: "flipStep", type: "num" },
+  // Size & exits.
   { suffix: "SIZE_SOL", field: "sizeSol", type: "num" },
   { suffix: "MAX_OPEN", field: "maxOpen", type: "int" },
-  { suffix: "MIN_TVL_USD", field: "minTvlUsd", type: "num" },
-  { suffix: "MIN_VOLUME_30M_USD", field: "minVolume30mUsd", type: "num" },
-  { suffix: "MIN_FEE_TVL_30M_PCT", field: "minFeeTvl30mPct", type: "num" },
-  { suffix: "MIN_MCAP_USD", field: "minMcapUsd", type: "num" },
-  { suffix: "MIN_HOLDERS", field: "minHolders", type: "int" },
-  { suffix: "MAX_POOL_AGE_H", field: "maxPoolAgeH", type: "num" },
-  { suffix: "MIN_BIN_STEP", field: "minBinStep", type: "int" },
-  { suffix: "MAX_BASE_FEE_PCT", field: "maxBaseFeePct", type: "num" },
-  { suffix: "VOLATILITY_MIN_PCT", field: "volatilityMinPct", type: "num" },
-  { suffix: "VOLATILITY_MAX_PCT", field: "volatilityMaxPct", type: "num" },
-  { suffix: "MIN_LPS", field: "minLps", type: "int" },
-  { suffix: "ENTRY_TIMING", field: "entryTiming", type: "enum", options: TIMING },
-  { suffix: "PUMP_LOOKBACK_MIN", field: "pumpLookbackMin", type: "num" },
-  { suffix: "MIN_PUMP_PCT", field: "minPumpPct", type: "num" },
-  { suffix: "MIN_PULLBACK_PCT", field: "minPullbackPct", type: "num" },
-  { suffix: "MAX_PULLBACK_PCT", field: "maxPullbackPct", type: "num" },
-  { suffix: "RANGE_MODE", field: "rangeMode", type: "enum", options: RANGE_MODES },
-  { suffix: "RANGE_PCT", field: "rangePct", type: "num" },
-  { suffix: "RANGE_MIN_PCT", field: "rangeMinPct", type: "num" },
-  { suffix: "RANGE_MAX_PCT", field: "rangeMaxPct", type: "num" },
-  { suffix: "SUPPORT_LOOKBACK_MIN", field: "supportLookbackMin", type: "num" },
-  { suffix: "SUPPORT_BUFFER_PCT", field: "supportBufferPct", type: "num" },
   { suffix: "MAX_POSITIONS", field: "maxPositions", type: "int" },
-  { suffix: "FLIP_PCT", field: "flipPct", type: "num" },
   { suffix: "TP_PCT", field: "tpPct", type: "num" },
   { suffix: "SL_PCT", field: "slPct", type: "num" },
   { suffix: "TRAIL_START_PCT", field: "trailStartPct", type: "num" },
@@ -49,35 +42,28 @@ export const PROFILE_FIELDS = [
 ];
 
 export const PROFILE_DEFAULTS = {
-  degen: {
-    name: "degen",
+  bidask_flip: {
+    name: "bidask_flip",
     on: true,
+    minMcapUsd: 200000,
+    maxMcapUsd: 5000000,
+    minTokenAgeH: 2,
+    maxTokenAgeH: 0,
+    minHolders: 500,
+    maxTop10Pct: 30,
+    minFees30mUsd: 1,
+    minBaseFeePct: 1,
+    minFeeActiveTvl30mPct: 0.2,
+    minBinStep: 80,
+    fibEntryLevel: 0.382,
+    fibDeepLevel: 0.786,
+    rangeMinPct: 30,
+    volatilityCap: 10,
+    flipPct: 65,
+    flipStep: 10,
     sizeSol: 0.5,
     maxOpen: 2,
-    minTvlUsd: 2000,
-    minVolume30mUsd: 10000,
-    minFeeTvl30mPct: 0.2,
-    minMcapUsd: 200000,
-    minHolders: 800,
-    maxPoolAgeH: 72,
-    minBinStep: 80,
-    maxBaseFeePct: 5,
-    volatilityMinPct: 2,
-    volatilityMaxPct: 4,
-    minLps: 10,
-    entryTiming: "pullback",
-    pumpLookbackMin: 60,
-    minPumpPct: 20,
-    minPullbackPct: 5,
-    maxPullbackPct: 30,
-    rangeMode: "fixed",
-    rangePct: 50,
-    rangeMinPct: 20,
-    rangeMaxPct: 65,
-    supportLookbackMin: 360,
-    supportBufferPct: 5,
     maxPositions: 2,
-    flipPct: 60,
     tpPct: 10,
     slPct: 15,
     trailStartPct: 0,
@@ -88,57 +74,17 @@ export const PROFILE_DEFAULTS = {
     lowVolumeBars: 3,
     maxHoldMin: 120,
   },
-  multihour: {
-    name: "multihour",
-    on: true,
-    sizeSol: 1,
-    maxOpen: 2,
-    minTvlUsd: 10000,
-    minVolume30mUsd: 5000,
-    minFeeTvl30mPct: 0.2,
-    minMcapUsd: 3000000,
-    minHolders: 2000,
-    maxPoolAgeH: 0,
-    minBinStep: 20,
-    maxBaseFeePct: 2,
-    volatilityMinPct: 2,
-    volatilityMaxPct: 4,
-    minLps: 20,
-    entryTiming: "pullback",
-    pumpLookbackMin: 240,
-    minPumpPct: 10,
-    minPullbackPct: 3,
-    maxPullbackPct: 20,
-    rangeMode: "support",
-    rangePct: 35,
-    rangeMinPct: 15,
-    rangeMaxPct: 50,
-    supportLookbackMin: 1440,
-    supportBufferPct: 5,
-    maxPositions: 2,
-    flipPct: 60,
-    tpPct: 5,
-    slPct: 12,
-    trailStartPct: 0,
-    trailDistancePct: 0,
-    oorAboveMin: 30,
-    oorBelowMin: 60,
-    minVolume5mUsd: 500,
-    lowVolumeBars: 6,
-    maxHoldMin: 1440,
-  },
 };
 
 function parseField(f, raw, def) {
   if (f.type === "bool") return bool(raw, def);
-  if (f.type === "enum") return f.options.includes(raw) ? raw : def;
   const n = num(raw, def);
   return f.type === "int" ? Math.floor(n) : n;
 }
 
-// Pasangan min/max yang terbalik diurutkan ulang.
+// Pasangan min/max yang terbalik diurutkan ulang (0 = tanpa max, tidak diurutkan).
 function orderPair(p, lo, hi) {
-  if (p[lo] > p[hi]) [p[lo], p[hi]] = [p[hi], p[lo]];
+  if (p[hi] > 0 && p[lo] > p[hi]) [p[lo], p[hi]] = [p[hi], p[lo]];
 }
 
 export function buildProfile(env, name) {
@@ -146,23 +92,22 @@ export function buildProfile(env, name) {
   const defaults = PROFILE_DEFAULTS[name];
   const p = { name };
   for (const f of PROFILE_FIELDS) p[f.field] = parseField(f, env[`${prefix}_${f.suffix}`], defaults[f.field]);
-  orderPair(p, "rangeMinPct", "rangeMaxPct");
-  orderPair(p, "volatilityMinPct", "volatilityMaxPct");
-  orderPair(p, "minPullbackPct", "maxPullbackPct");
+  orderPair(p, "minMcapUsd", "maxMcapUsd");
+  orderPair(p, "minTokenAgeH", "maxTokenAgeH");
+  if (p.fibEntryLevel > p.fibDeepLevel) [p.fibEntryLevel, p.fibDeepLevel] = [p.fibDeepLevel, p.fibEntryLevel];
   return p;
 }
 
 export function buildAutoEntry(e) {
   return {
-    scanIntervalSec: num(e.AUTO_SCAN_INTERVAL_SEC, 60),
-    candidatesPerScan: Math.floor(num(e.AUTO_CANDIDATES_PER_SCAN, 5)),
-    organicScoreMin: num(e.AUTO_ORGANIC_SCORE_MIN, 60),
-    topHoldersMaxPct: num(e.AUTO_TOP_HOLDERS_MAX_PCT, 30),
+    scanIntervalSec: num(e.AUTO_SCAN_INTERVAL_SEC, 300),
+    candidatesPerScan: Math.floor(num(e.AUTO_CANDIDATES_PER_SCAN, 3)),
     requireAuthoritiesOff: bool(e.AUTO_REQUIRE_AUTHORITIES_OFF, true),
     maxNonRefundableSol: num(e.AUTO_MAX_NONREFUNDABLE_SOL, 0.02),
     cooldownMin: num(e.AUTO_COOLDOWN_MIN, 120),
     cooldownLossMin: num(e.AUTO_COOLDOWN_LOSS_MIN, 720),
     dailyLossLimitSol: num(e.AUTO_DAILY_LOSS_LIMIT_SOL, 0.5),
+    dexpaprikaHistoryDays: num(e.DEXPAPRIKA_HISTORY_DAYS, 7),
     sim: {
       poolDepthFactor: num(e.SIM_POOL_DEPTH_FACTOR, 1),
       poolSpreadBins: num(e.SIM_POOL_SPREAD_BINS, 69),
@@ -173,7 +118,7 @@ export function buildAutoEntry(e) {
   };
 }
 
-// Bentuk exit per trade; 0 = fitur mati. Evil Panda tidak dipakai profil.
+// Bentuk exit per trade; 0 = fitur mati. Evil Panda tidak dipakai strategi.
 export function profileExit(p) {
   return {
     tp: { on: p.tpPct > 0, pct: p.tpPct },
@@ -183,8 +128,8 @@ export function profileExit(p) {
   };
 }
 
-// Baris strat.conf (KEY=value) untuk satu profil, urutan PROFILE_FIELDS.
-export function profileToConf(p) {
-  const prefix = PROFILE_PREFIX[p.name];
-  return PROFILE_FIELDS.map((f) => `${prefix}_${f.suffix}=${p[f.field]}`).join("\n") + "\n";
+// Auto flip per trade; null = mati. step 0 = sekali.
+export function profileAutoFlip(p) {
+  if (!(p.flipPct > 0)) return null;
+  return p.flipStep > 0 ? { pct: p.flipPct, step: p.flipStep } : { pct: p.flipPct };
 }

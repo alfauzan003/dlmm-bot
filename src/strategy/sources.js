@@ -1,4 +1,4 @@
-// Sumber data backtest/strategi (I/O): daftar pool Meteora, OHLCV, info token Jupiter, seri SOL/USD.
+// Sumber data strategi (I/O): daftar pool Meteora, OHLCV (Meteora / GMGN / DexPaprika), info token Jupiter, seri SOL/USD.
 // Setiap fungsi menerima deps { fetchJson, sleep, now } agar tes tidak menyentuh jaringan.
 import { PublicKey } from "@solana/web3.js";
 import config from "../config/index.js";
@@ -6,7 +6,9 @@ import log from "../core/logger.js";
 import { WSOL_MINT, USDC_MINT } from "../core/constants.js";
 import { getConnection } from "../solana/connection.js";
 import { getPrices } from "../market/jupiter-price.js";
-import { toPoolRow } from "./screen.js";
+import { fetchGmgnKline } from "../market/gmgn-client.js";
+import { fetchDexPaprikaOhlcv } from "../market/dexpaprika.js";
+import { toPoolRow, volatilityQueryUrl } from "./screen.js";
 
 const METEORA_BASE = "https://dlmm.datapi.meteora.ag";
 const OHLCV_BAR_SEC = 300;
@@ -107,6 +109,77 @@ export async function getSolUsdForced({ deps } = {}) {
     log.warn(`Harga SOL gagal: ${err.message}`);
   }
   return lastSolUsd;
+}
+
+// Volatility pool-discovery (timeframe VOLATILITY_TIMEFRAME) per alamat pool; pool tanpa nilai tidak ada di Map.
+export async function fetchVolatility(addresses, { deps } = {}) {
+  const d = withDeps(deps);
+  const out = new Map();
+  if (addresses.length === 0) return out;
+  await paceMeteora(d);
+  const json = await d.fetchJson(volatilityQueryUrl(addresses));
+  for (const p of Array.isArray(json?.data) ? json.data : []) {
+    const v = p?.volatility == null ? NaN : Number(p.volatility);
+    if (p?.pool_address && Number.isFinite(v)) out.set(p.pool_address, v);
+  }
+  return out;
+}
+
+const RECENT_5M_BARS = 100; // satu request GMGN (maks 100 candle)
+const PRICE_FAR = Math.log(2); // seri DexPaprika dianggap salah arah bila close > 2x dari harga acuan
+const logDist = (a, b) => Math.abs(Math.log(a / b));
+
+function withCandleDeps(deps = {}) {
+  return { fetchGmgnKline, fetchDexPaprikaOhlcv, now: Date.now, ...deps };
+}
+
+// DexPaprika (USD): pilih arah seri (base / inversed) yang close terakhirnya dekat harga acuan base token.
+async function dexPaprikaUsd(d, pool, opts, refUsd) {
+  const bars = await d.fetchDexPaprikaOhlcv(pool, { ...opts, inversed: false });
+  if (!(refUsd > 0) || bars.length === 0) return bars;
+  if (logDist(bars[bars.length - 1].close, refUsd) <= PRICE_FAR) return bars;
+  const inv = await d.fetchDexPaprikaOhlcv(pool, { ...opts, inversed: true });
+  if (inv.length && logDist(inv[inv.length - 1].close, refUsd) <= PRICE_FAR) return inv;
+  throw new Error("DexPaprika price does not match the token price");
+}
+
+// ~100 bar 5m terakhir dalam USD (bar terakhir bisa masih terbentuk): GMGN, fallback DexPaprika.
+// Hasil { bars, source, error }; bars [] bila keduanya gagal.
+export async function fetchRecent5mUsd(row, { deps } = {}) {
+  const d = withCandleDeps(deps);
+  let gmgnError = null;
+  try {
+    const bars = await d.fetchGmgnKline(row.baseMint, { resolution: "5m", limit: RECENT_5M_BARS });
+    if (bars?.length) return { bars, source: "gmgn", error: null };
+    gmgnError = "no candles";
+  } catch (err) {
+    gmgnError = err.message;
+  }
+  try {
+    const endSec = Math.floor(d.now() / 1000);
+    const bars = await dexPaprikaUsd(
+      d,
+      row.address,
+      { interval: "5m", startSec: endSec - RECENT_5M_BARS * 300, endSec },
+      row.basePriceUsd
+    );
+    if (bars.length) return { bars, source: "dexpaprika", error: null };
+    return { bars: [], source: null, error: `GMGN: ${gmgnError} · DexPaprika: no candles` };
+  } catch (err) {
+    return { bars: [], source: null, error: `GMGN: ${gmgnError} · DexPaprika: ${err.message}` };
+  }
+}
+
+// Bar 1h DexPaprika (USD) sejak token lahir, dibatasi DEXPAPRIKA_HISTORY_DAYS (0 = tanpa batas).
+export async function fetchHistory1hUsd(row, { refUsd, deps } = {}) {
+  const d = withCandleDeps(deps);
+  const endSec = Math.floor(d.now() / 1000);
+  const days = Number(config.autoEntry.dexpaprikaHistoryDays) || 0;
+  const born = row.tokenCreatedAt > 0 ? Math.floor(row.tokenCreatedAt / 1000 / 3600) * 3600 : 0;
+  const windowStart = days > 0 ? endSec - Math.floor(days * 86400) : 0;
+  const startSec = Math.max(born, windowStart);
+  if (!(startSec > 0)) throw new Error("token age unknown");
+  return dexPaprikaUsd(d, row.address, { interval: "1h", startSec, endSec }, refUsd ?? row.basePriceUsd);
 }
 
 // Info token Jupiter (organic score, audit, dst) per mint; batch 100, cache 5 menit.

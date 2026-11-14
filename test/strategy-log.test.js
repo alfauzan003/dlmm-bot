@@ -10,7 +10,6 @@ process.env.STATE_FILE = path.join(TMP, "state.json");
 process.env.SETTINGS_FILE = path.join(TMP, "settings.json");
 process.env.PAPER_FILE = path.join(TMP, "paper-trades.json");
 process.env.STRATEGY_LOG_FILE = path.join(TMP, "strategy-log.jsonl");
-process.env.BACKTEST_DIR = path.join(TMP, "backtest");
 const STRAT = path.join(TMP, "strat.conf");
 fs.writeFileSync(STRAT, fs.readFileSync(new URL("../strat.conf", import.meta.url), "utf8"));
 process.env.STRAT_FILE = STRAT;
@@ -40,8 +39,8 @@ function trade(over = {}) {
     closeReason: "cycle_done",
     flipLegs: ["leg"],
     strategy: {
-      profile: "degen",
-      params: { ...config.autoEntry.profiles.degen },
+      profile: "bidask_flip",
+      params: { ...config.autoEntry.profiles.bidask_flip },
       entry: { metrics: { feeTvl30mPct: 3 }, signal: null, rangePct: 50, poolMeta: { binStep: 100, baseFeePct: 2, protocolFeePct: 5, tvlUsd: 50000 } },
     },
     ...over,
@@ -96,7 +95,7 @@ test("logSettledAutoTrades waits 2 minutes, writes one row with 5 predictions, m
   const row = calls.rows[0];
   assert.equal(row.mode, "live");
   assert.equal(row.ts, CLOSED);
-  assert.equal(row.profile, "degen");
+  assert.equal(row.profile, "bidask_flip");
   assert.equal(row.pair, "AAA-SOL");
   assert.equal(row.mint, "MintLog1111111111111111111111111111111111111");
   assert.equal(row.pnlPct, 4.2);
@@ -167,7 +166,7 @@ test("a failed write leaves the trade unmarked so it is retried", async () => {
 test("paperLogRow maps a closed paper trade", () => {
   const row = paperLogRow({
     id: "P1",
-    profile: "degen",
+    profile: "bidask_flip",
     pool: "pool",
     pair: "AAA-SOL",
     baseMint: "mint",
@@ -185,7 +184,7 @@ test("paperLogRow maps a closed paper trade", () => {
   assert.deepEqual(row, {
     ts: 123,
     mode: "paper",
-    profile: "degen",
+    profile: "bidask_flip",
     pool: "pool",
     pair: "AAA-SOL",
     mint: "mint",
@@ -204,7 +203,7 @@ test("paperLogRow maps a closed paper trade", () => {
 test("summarizeRows groups, buckets and picks the lowest-MAE factor", () => {
   const live = (pnl, pred) => ({
     mode: "live",
-    profile: "degen",
+    profile: "bidask_flip",
     pnlPct: pnl,
     params: { rangePct: 30, flipPct: 60 },
     entry: { rangePct: 52.5 }, // range aktual, bukan params
@@ -229,7 +228,7 @@ test("summarizeRows groups, buckets and picks the lowest-MAE factor", () => {
 });
 
 test("summarizeRows: paper rows and rows without pnl or predictions stay out of calibration", () => {
-  const base = { profile: "degen", params: { rangePct: 35, flipPct: 60 }, flipped: true, holdMin: 30, exitReason: "stop" };
+  const base = { profile: "bidask_flip", params: { rangePct: 35, flipPct: 60 }, flipped: true, holdMin: 30, exitReason: "stop" };
   const s = summarizeRows([
     { ...base, mode: "paper", pnlPct: -10, predicted: null },
     { ...base, mode: "live", pnlPct: 2, predicted: null },

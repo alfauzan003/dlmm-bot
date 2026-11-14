@@ -75,6 +75,9 @@ export function buildConfig(e) {
         : "https://api.mainnet-beta.solana.com"),
     heliusApiKey: e.HELIUS_API_KEY || "",
     gmgnApiKey: e.GMGN_API_KEY || "",
+    // DexPaprika: free key / tanpa key -> api.dexpaprika.com; plan Dev/Pro -> api-pro.dexpaprika.com.
+    dexpaprikaApiKey: e.DEXPAPRIKA_API_KEY || "",
+    dexpaprikaApiUrl: (e.DEXPAPRIKA_API_URL || "https://api.dexpaprika.com").replace(/\/+$/, ""),
     jupiterPriceApiKey: e.JUPITER_PRICE_API_KEY || e.JUPITER_API_KEY || "",
     jupiterSwapApiKey: e.JUPITER_SWAP_API_KEY || e.JUPITER_API_KEY || "",
     dryRun: e.DRY_RUN !== "false",
@@ -142,7 +145,7 @@ export function buildConfig(e) {
 
     entry,
     swap,
-    // Auto Entry bid-ask flip (lihat src/strategy/params.js).
+    // Auto Entry: strategi bidask flip (lihat src/strategy/params.js).
     autoEntry: buildAutoEntry(e),
   };
 

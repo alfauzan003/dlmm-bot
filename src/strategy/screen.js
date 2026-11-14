@@ -1,7 +1,7 @@
-// Filter screener Auto Entry (murni, tanpa I/O): query pool Meteora, filter pool/token, volatilitas.
+// Filter screener Auto Entry (murni, tanpa I/O): query pool-discovery Meteora, filter pool/token.
 import { WSOL_MINT } from "../core/constants.js";
 
-const DATAPI_POOLS = "https://dlmm.datapi.meteora.ag/pools";
+const DISCOVERY_POOLS = "https://pool-discovery-api.datapi.meteora.ag/pools";
 const HOUR_MS = 3600000;
 export const BIN_PER_POSITION = 70; // sama dengan DEFAULT_BIN_PER_POSITION
 
@@ -10,76 +10,110 @@ export function binsForPct(pct, binStep) {
   return Math.floor(Math.log(1 - pct / 100) / -Math.log(1 + binStep / 10000));
 }
 
-export function poolQueryUrl(p, now, { pageSize = 100 } = {}) {
+// Query pool-discovery (timeframe 30m), semua filter strategi di server. sort_by API ini diabaikan server,
+// jadi urutan fee / active TVL dibuat di klien (sortByFeeActiveTvl).
+export function poolQueryUrl(p, now, { pageSize = 200 } = {}) {
   const parts = [
-    `tvl>${p.minTvlUsd}`,
-    `volume_30m>${p.minVolume30mUsd}`,
-    `fee_tvl_ratio_30m>${p.minFeeTvl30mPct}`,
-    `bin_step>=${p.minBinStep}`,
+    "pool_type=dlmm",
     "is_blacklisted=false",
+    `base_token_market_cap>=${p.minMcapUsd}`,
+    `base_token_holders>=${p.minHolders}`,
+    `fee>=${p.minFees30mUsd}`,
+    `fee_pct>=${p.minBaseFeePct}`,
+    `fee_active_tvl_ratio>=${p.minFeeActiveTvl30mPct}`,
+    `bin_step>=${p.minBinStep}`,
   ];
-  if (p.maxPoolAgeH > 0) parts.push(`pool_created_at>${now - p.maxPoolAgeH * HOUR_MS}`);
-  return `${DATAPI_POOLS}?page_size=${pageSize}&sort_by=fee_tvl_ratio_30m:desc&filter_by=${encodeURIComponent(parts.join(" && "))}`;
+  if (p.maxMcapUsd > 0) parts.push(`base_token_market_cap<=${p.maxMcapUsd}`);
+  if (p.maxTop10Pct > 0) parts.push(`base_token_top_holders_pct<=${p.maxTop10Pct}`);
+  if (p.minTokenAgeH > 0) parts.push(`base_token_created_at<=${Math.floor(now - p.minTokenAgeH * HOUR_MS)}`);
+  if (p.maxTokenAgeH > 0) parts.push(`base_token_created_at>=${Math.floor(now - p.maxTokenAgeH * HOUR_MS)}`);
+  const q = new URLSearchParams({
+    page_size: String(pageSize),
+    timeframe: "30m",
+    filter_by: parts.join(" && "),
+  });
+  return `${DISCOVERY_POOLS}?${q}`;
 }
 
-// Respons datapi -> baris pool. Hanya pair SOL; null bila data inti hilang.
+// Volatility untuk rumus range diambil dari timeframe ini (request terpisah, hanya kandidat teratas).
+export const VOLATILITY_TIMEFRAME = "24h";
+
+export function volatilityQueryUrl(addresses) {
+  const q = new URLSearchParams({
+    page_size: String(Math.max(1, addresses.length)),
+    timeframe: VOLATILITY_TIMEFRAME,
+    filter_by: `pool_address=[${addresses.join(",")}]`,
+  });
+  return `${DISCOVERY_POOLS}?${q}`;
+}
+
+const n = (v) => (v == null ? NaN : Number(v)); // null jangan jadi 0
+
+// Respons pool-discovery -> baris pool. Hanya pair SOL; null bila data inti hilang.
 export function toPoolRow(raw) {
   const x = raw?.token_x;
   const y = raw?.token_y;
-  const cfg = raw?.pool_config;
-  if (!x || !y || !cfg) return null;
+  if (!x || !y) return null;
   let base;
   let baseIsX;
   if (y.address === WSOL_MINT && x.address && x.address !== WSOL_MINT) [base, baseIsX] = [x, true];
   else if (x.address === WSOL_MINT && y.address && y.address !== WSOL_MINT) [base, baseIsX] = [y, false];
   else return null;
-  const binStep = Number(cfg.bin_step);
-  const tvlUsd = Number(raw.tvl);
-  if (!raw.address || !(binStep > 0) || !(tvlUsd > 0)) return null;
+  const address = raw.pool_address ?? raw.address;
+  const binStep = n(raw.dlmm_params?.bin_step);
+  const tvlUsd = n(raw.tvl);
+  if (!address || !(binStep > 0) || !(tvlUsd > 0)) return null;
   return {
-    address: raw.address,
+    address,
     name: raw.name ?? "",
     baseMint: base.address,
     baseIsX,
     binStep,
-    baseFeePct: Number(cfg.base_fee_pct) || 0,
-    protocolFeePct: Number(cfg.protocol_fee_pct) || 0,
+    baseFeePct: n(raw.fee_pct) || 0,
+    protocolFeePct: 0, // tidak ada di pool-discovery
     tvlUsd,
-    volume30mUsd: Number(raw.volume?.["30m"]) || 0,
-    feeTvl30mPct: Number(raw.fee_tvl_ratio?.["30m"]) || 0,
-    mcapUsd: Number(base.market_cap) || 0,
-    holders: Number(base.holders) || 0,
-    createdAt: Number(raw.created_at) || 0,
+    activeTvlUsd: n(raw.active_tvl) || 0,
+    volume30mUsd: n(raw.volume) || 0,
+    fees30mUsd: n(raw.fee) || 0,
+    feeTvl30mPct: n(raw.fee_tvl_ratio) || 0,
+    feeActiveTvl30mPct: n(raw.fee_active_tvl_ratio) || 0,
+    mcapUsd: n(base.market_cap) || 0,
+    holders: n(raw.base_token_holders ?? base.holders) || 0,
+    top10Pct: Number.isFinite(n(base.top_holders_pct)) ? n(base.top_holders_pct) : null,
+    tokenCreatedAt: n(base.created_at) || 0,
+    basePriceUsd: n(base.price) || null,
+    authoritiesOff: base.has_mint_authority === false && base.has_freeze_authority === false,
+    createdAt: n(raw.pool_created_at) || 0,
   };
 }
 
+// Cek ulang filter server di klien (data API bisa telat / filter diabaikan).
 export function passesPoolFilters(row, p, now) {
   const fail = (reason) => ({ ok: false, reason });
-  if (row.tvlUsd < p.minTvlUsd) return fail("tvl");
-  if (row.volume30mUsd < p.minVolume30mUsd) return fail("volume");
-  if (row.feeTvl30mPct < p.minFeeTvl30mPct) return fail("fee_tvl");
-  if (row.mcapUsd < p.minMcapUsd) return fail("mcap");
+  if (row.mcapUsd < p.minMcapUsd || (p.maxMcapUsd > 0 && row.mcapUsd > p.maxMcapUsd)) return fail("mcap");
+  const ageH = row.tokenCreatedAt > 0 ? (now - row.tokenCreatedAt) / HOUR_MS : null;
+  if (ageH == null || ageH < p.minTokenAgeH || (p.maxTokenAgeH > 0 && ageH > p.maxTokenAgeH)) return fail("age");
   if (row.holders < p.minHolders) return fail("holders");
-  if (p.maxPoolAgeH > 0 && now - row.createdAt > p.maxPoolAgeH * HOUR_MS) return fail("age");
+  if (p.maxTop10Pct > 0 && !(Number.isFinite(row.top10Pct) && row.top10Pct <= p.maxTop10Pct)) return fail("top10");
+  if (row.fees30mUsd < p.minFees30mUsd) return fail("fees");
+  if (row.baseFeePct < p.minBaseFeePct) return fail("base_fee");
+  if (row.feeActiveTvl30mPct < p.minFeeActiveTvl30mPct) return fail("fee_active_tvl");
   if (row.binStep < p.minBinStep) return fail("bin_step");
-  if (row.baseFeePct > p.maxBaseFeePct) return fail("base_fee");
   return { ok: true, reason: null };
 }
 
-// Satu pool per token: base fee terendah, lalu TVL tertinggi, lalu bin step terkecil.
-export function pickPoolPerToken(rows) {
-  const best = new Map();
-  for (const r of rows) {
-    const cur = best.get(r.baseMint);
-    if (!cur || better(r, cur)) best.set(r.baseMint, r);
-  }
-  return [...best.values()];
+// Fee / active TVL 30m terbesar dulu (stabil untuk nilai sama).
+export function sortByFeeActiveTvl(rows) {
+  return rows
+    .map((r, i) => [r, i])
+    .sort((a, b) => b[0].feeActiveTvl30mPct - a[0].feeActiveTvl30mPct || a[1] - b[1])
+    .map(([r]) => r);
 }
 
-function better(a, b) {
-  if (a.baseFeePct !== b.baseFeePct) return a.baseFeePct < b.baseFeePct;
-  if (a.tvlUsd !== b.tvlUsd) return a.tvlUsd > b.tvlUsd;
-  return a.binStep < b.binStep;
+// Satu pool per token: yang paling atas (urutan fee / active TVL) menang.
+export function pickPoolPerToken(rows) {
+  const seen = new Set();
+  return rows.filter((r) => !seen.has(r.baseMint) && seen.add(r.baseMint));
 }
 
 // Range minimum harus muat di maxPositions posisi (70 bin per posisi).
@@ -87,12 +121,22 @@ export function coversMinRange(binStep, p) {
   return binsForPct(p.rangeMinPct, binStep) + 1 <= p.maxPositions * BIN_PER_POSITION;
 }
 
-export function passesTokenFilters(token, g) {
+// Info token Jupiter: cek ulang mcap, holders, top 10, umur, authority.
+export function passesTokenFilters(token, p, g, now) {
   const fail = (reason) => ({ ok: false, reason });
   if (!token) return fail("no_token");
-  if (!(token.organicScore >= g.organicScoreMin)) return fail("organic");
+  const mcap = Number(token.mcap);
+  if (Number.isFinite(mcap) && (mcap < p.minMcapUsd || (p.maxMcapUsd > 0 && mcap > p.maxMcapUsd))) return fail("mcap");
+  const holders = Number(token.holderCount);
+  if (Number.isFinite(holders) && holders < p.minHolders) return fail("holders");
   const audit = token.audit ?? {};
-  if (!(audit.topHoldersPercentage <= g.topHoldersMaxPct)) return fail("top_holders");
+  const top10 = audit.topHoldersPercentage;
+  if (p.maxTop10Pct > 0 && !(Number.isFinite(top10) && top10 <= p.maxTop10Pct)) return fail("top10");
+  const created = Date.parse(token.createdAt ?? token.firstPool?.createdAt ?? "");
+  if (Number.isFinite(created)) {
+    const ageH = (now - created) / HOUR_MS;
+    if (ageH < p.minTokenAgeH || (p.maxTokenAgeH > 0 && ageH > p.maxTokenAgeH)) return fail("age");
+  }
   if (g.requireAuthoritiesOff && !(audit.mintAuthorityDisabled === true && audit.freezeAuthorityDisabled === true))
     return fail("authorities");
   return { ok: true, reason: null };
@@ -111,16 +155,4 @@ export function toSolPerToken(bars, baseIsX) {
   const kept = bars.filter(valid);
   if (baseIsX) return kept;
   return kept.map((b) => ({ time: b.time, open: 1 / b.open, high: 1 / b.low, low: 1 / b.high, close: 1 / b.close, volume: b.volume }));
-}
-
-// Rata-rata (high-low)/open*100 dari n bar terakhir; null bila bar kurang.
-export function volatilityPct(bars, n = 6) {
-  if (bars.length < n) return null;
-  const last = bars.slice(-n);
-  if (last.some((b) => !(b.open > 0))) return null;
-  return last.reduce((s, b) => s + ((b.high - b.low) / b.open) * 100, 0) / n;
-}
-
-export function passesVolatility(vol, p) {
-  return vol != null && vol >= p.volatilityMinPct && vol <= p.volatilityMaxPct;
 }

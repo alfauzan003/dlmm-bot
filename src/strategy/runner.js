@@ -1,4 +1,4 @@
-// Runner live Auto Entry: screener Meteora -> sinyal -> batas -> open (live) atau paper (DRY_RUN).
+// Runner live Auto Entry (bidask flip): screener Meteora -> Fibonacci -> batas -> open (live) atau paper (DRY_RUN).
 // Semua I/O lewat deps agar tes tidak menyentuh jaringan, wallet, atau transaksi.
 import config from "../config/index.js";
 import log from "../core/logger.js";
@@ -10,27 +10,31 @@ import { planOpen, executeOpen, SOL_BUFFER } from "../lp/open-trade.js";
 import { periodStart } from "../lp/pnl-stats.js";
 import { getConnection } from "../solana/connection.js";
 import { getWallet } from "../solana/wallet.js";
-import { PROFILES, profileExit } from "./params.js";
+import { PROFILES, profileExit, profileAutoFlip } from "./params.js";
 import {
   poolQueryUrl,
   passesPoolFilters,
+  sortByFeeActiveTvl,
   pickPoolPerToken,
   coversMinRange,
   passesTokenFilters,
-  closedBars,
-  volatilityPct,
-  passesVolatility,
-  toSolPerToken,
+  VOLATILITY_TIMEFRAME,
 } from "./screen.js";
-import { entrySignal, explainRangePct, barsNeeded } from "./signal.js";
+import { athAtl, fibSignal, explainRangePct } from "./signal.js";
 import { canOpen, todayAutoPnlSol, brakeHit } from "./limits.js";
-import { fetchPoolRows, fetchTokens, fetchRecentBars, countPoolLps, getSolUsdForced } from "./sources.js";
+import {
+  fetchPoolRows,
+  fetchTokens,
+  fetchVolatility,
+  fetchRecent5mUsd,
+  fetchHistory1hUsd,
+  getSolUsdForced,
+} from "./sources.js";
 import { openPaperTrade, listPaperTrades } from "./paper.js";
 import {
   emptyFunnel,
   bump,
   tokenDetail,
-  volatilityDetail,
   signalDetail,
   limitDetail,
   funnelLine,
@@ -62,8 +66,9 @@ function withDeps(deps = {}) {
   return {
     fetchPoolRows,
     fetchTokens,
-    fetchRecentBars,
-    countPoolLps,
+    fetchVolatility,
+    fetchRecent5mUsd,
+    fetchHistory1hUsd,
     planOpen,
     executeOpen,
     openPaperTrade: (a) =>
@@ -202,7 +207,7 @@ async function scanProfileOnce(name, { deps } = {}, funnel) {
   if (!p?.on) return { candidates, opened };
   const now = d.now();
 
-  // 1. Daftar pool datapi -> filter -> satu pool per token.
+  // 1. Daftar pool pool-discovery -> filter -> urut fee / active TVL -> satu pool per token (yang teratas).
   let rows;
   try {
     rows = await d.fetchPoolRows(poolQueryUrl(p, now));
@@ -219,7 +224,7 @@ async function scanProfileOnce(name, { deps } = {}, funnel) {
     return !reason;
   });
   funnel.passed = rows.length;
-  rows = pickPoolPerToken(rows);
+  rows = pickPoolPerToken(sortByFeeActiveTvl(rows));
   funnel.tokens = rows.length;
 
   // 2. Batas (trade auto terbuka / cooldown) + kegagalan entry; ambil N teratas.
@@ -249,6 +254,16 @@ async function scanProfileOnce(name, { deps } = {}, funnel) {
     return { candidates, opened };
   }
 
+  // Volatility Meteora 24h: satu request terpisah untuk kandidat teratas saja. Gagal -> kandidat dilewati.
+  let vols = new Map();
+  let volError = null;
+  try {
+    vols = await d.fetchVolatility(rows.map((r) => r.address));
+  } catch (err) {
+    volError = err.message;
+    log.warn(`Auto entry ${name}: volatility ${VOLATILITY_TIMEFRAME} gagal: ${err.message}`);
+  }
+
   for (const row of rows) {
     const pair = row.name || `${row.baseMint.slice(0, 4)}-SOL`;
     const snap = {
@@ -256,59 +271,55 @@ async function scanProfileOnce(name, { deps } = {}, funnel) {
       pairName: row.name || null,
       pool: row.address,
       feeTvl30mPct: row.feeTvl30mPct,
-      volatilityPct: null,
+      feeActiveTvl30mPct: row.feeActiveTvl30mPct,
+      volatilityPct: vols.get(row.address) ?? null,
       signal: null,
       detail: null,
     };
     candidates.push(snap);
 
     const token = tokens.get(row.baseMint);
-    const tok = passesTokenFilters(token, g);
+    const tok = passesTokenFilters(token, p, g, now);
     if (!tok.ok) {
       snap.signal = tok.reason;
-      snap.detail = tokenDetail(tok.reason, token, g);
+      snap.detail = tokenDetail(tok.reason, token, p, now);
       continue;
     }
 
-    // 4. Candle 5m tertutup -> volatilitas -> sinyal -> LP -> range.
-    let bars;
-    try {
-      const raw = await d.fetchRecentBars(row.address, barsNeeded(p) + 1);
-      if (!raw?.length) {
-        snap.signal = "no_candles";
-        snap.detail = "no 5m candles from Meteora";
-        continue;
-      }
-      bars = closedBars(toSolPerToken(raw, row.baseIsX), now);
-    } catch (err) {
-      log.warn(`Auto entry ${name}: candle ${pair} gagal: ${err.message}`);
-      snap.signal = "no_candles";
-      snap.detail = `candles failed: ${err.message}`;
-      continue;
-    }
-    const vol = volatilityPct(bars);
-    snap.volatilityPct = vol;
-    if (!passesVolatility(vol, p)) {
+    // 4. Volatility (Meteora 24h) -> candle 5m (GMGN, fallback DexPaprika) + 1h (DexPaprika) -> Fibonacci -> range.
+    const vol = vols.get(row.address);
+    if (!Number.isFinite(vol)) {
       snap.signal = "volatility";
-      snap.detail = volatilityDetail(vol, p);
+      snap.detail = volError
+        ? `${VOLATILITY_TIMEFRAME} volatility failed: ${volError}`
+        : `no ${VOLATILITY_TIMEFRAME} volatility from Meteora`;
       continue;
     }
-    const sig = entrySignal(bars, p);
+    const recent = await d.fetchRecent5mUsd(row);
+    if (!recent?.bars?.length) {
+      log.warn(`Auto entry ${name}: candle 5m ${pair} gagal: ${recent?.error ?? "?"}`);
+      snap.signal = "no_candles";
+      snap.detail = `5m candles failed: ${recent?.error ?? "?"}`;
+      continue;
+    }
+    const price = recent.bars[recent.bars.length - 1].close;
+    let history;
+    try {
+      history = await d.fetchHistory1hUsd(row, { refUsd: price });
+    } catch (err) {
+      log.warn(`Auto entry ${name}: candle 1h ${pair} gagal: ${err.message}`);
+      snap.signal = "no_history";
+      snap.detail = `1h history failed: ${err.message}`;
+      continue;
+    }
+    const extremes = athAtl(history, recent.bars);
+    const sig = fibSignal({ ...(extremes ?? {}), price }, p);
     snap.signal = sig.reason;
-    snap.detail = signalDetail(sig, p);
+    snap.detail = signalDetail(sig, p, recent.source);
     if (!sig.enter) continue;
     const sigDetail = snap.detail;
 
-    let lps = null;
-    if (p.minLps > 0) {
-      lps = await d.countPoolLps(row.address);
-      if (lps == null || lps < p.minLps) {
-        snap.signal = "lps";
-        snap.detail = `LPs ${lps ?? "?"} < ${p.minLps}`;
-        continue;
-      }
-    }
-    const range = explainRangePct(bars, p, row.binStep);
+    const range = explainRangePct({ maxPct: sig.metrics.maxPct, volatility: vol }, p, row.binStep);
     const rangePct = range.pct;
     if (rangePct == null) {
       snap.signal = "range";
@@ -331,14 +342,17 @@ async function scanProfileOnce(name, { deps } = {}, funnel) {
       entry: {
         metrics: {
           feeTvl30mPct: row.feeTvl30mPct,
+          feeActiveTvl30mPct: row.feeActiveTvl30mPct,
+          fees30mUsd: row.fees30mUsd,
           volume30mUsd: row.volume30mUsd,
           tvlUsd: row.tvlUsd,
+          activeTvlUsd: row.activeTvlUsd,
           mcapUsd: row.mcapUsd,
           holders: row.holders,
+          top10Pct: row.top10Pct,
           volatilityPct: vol,
-          lps,
         },
-        signal: { reason: sig.reason, ...(sig.metrics || {}) },
+        signal: { reason: sig.reason, candleSource: recent.source, ...(sig.metrics || {}) },
         signalWhy: sigDetail,
         rangePct,
         rangeWhy: range.why,
@@ -353,7 +367,7 @@ async function scanProfileOnce(name, { deps } = {}, funnel) {
 
     if (d.dryRun) {
       if (d.openPaperTrade) {
-        if (await d.openPaperTrade({ profile: name, p, row, bars, rangePct, strategy, now })) {
+        if (await d.openPaperTrade({ profile: name, p, row, rangePct, strategy, now })) {
           opened.push({ profile: name, baseMint: row.baseMint });
           snap.signal = "paper_opened";
         }
@@ -427,7 +441,7 @@ async function scanProfileOnce(name, { deps } = {}, funnel) {
     let res;
     try {
       res = await d.executeOpen(plan, {
-        meta: { origin: "auto", exit: profileExit(p), autoFlip: { pct: p.flipPct }, strategy },
+        meta: { origin: "auto", exit: profileExit(p), autoFlip: profileAutoFlip(p), strategy },
       });
     } catch (err) {
       res = { success: false, error: err.message };
@@ -448,6 +462,7 @@ async function scanProfileOnce(name, { deps } = {}, funnel) {
         binStep: row.binStep,
         baseFeePct: row.baseFeePct,
         feeTvl30mPct: row.feeTvl30mPct,
+        feeActiveTvl30mPct: row.feeActiveTvl30mPct,
         volatilityPct: vol,
         mcapUsd: row.mcapUsd,
         signalDetail: sigDetail,
@@ -478,7 +493,7 @@ async function scanProfileOnce(name, { deps } = {}, funnel) {
   return { candidates, opened };
 }
 
-// Satu putaran scan semua profil aktif. Langsung kembali bila Auto Entry OFF atau scan masih jalan.
+// Satu putaran scan semua strategi aktif. Langsung kembali bila Auto Entry OFF atau scan masih jalan.
 export async function runScan({ deps } = {}) {
   const on = deps?.isOn ?? isOn;
   if (!on("autoEntry")) {

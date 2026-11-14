@@ -14,7 +14,11 @@ import {
   resetMeteoraPace,
   countPoolLps,
   getSolUsdForced,
+  fetchRecent5mUsd,
+  fetchHistory1hUsd,
+  fetchVolatility,
 } from "../src/strategy/sources.js";
+import { fetchDexPaprikaOhlcv, _resetDexPaprikaForTest } from "../src/market/dexpaprika.js";
 
 test("fetchOhlcvRange paginates windows and dedupes", async () => {
   const calls = [];
@@ -75,11 +79,11 @@ test("fetchTokens batches by 100 and keys by id", async () => {
 
 test("fetchPoolRows maps pool rows and drops nulls", async () => {
   const good = {
-    address: "P1",
+    pool_address: "P1",
     name: "A-SOL",
     token_x: { address: "A" },
     token_y: { address: WSOL_MINT },
-    pool_config: { bin_step: 100 },
+    dlmm_params: { bin_step: 100 },
     tvl: 5000,
   };
   const deps = { sleep: async () => {}, fetchJson: async () => ({ data: [good, { address: "bad" }] }) };
@@ -267,4 +271,147 @@ test("getSolUsdForced forces past Jupiter pacing and falls back to the last good
   assert.equal(await getSolUsdForced({ deps }), 150);
   assert.deepEqual(calls[0], { mints: [WSOL_MINT], opts: { force: true } });
   assert.ok(calls.every((c) => c.opts.force === true));
+});
+
+// ---- Candle USD untuk bidask flip (GMGN 5m, DexPaprika 1h / fallback 5m) ----
+
+const HOUR_MS = 3600000;
+const usdBar = (time, close) => ({ time, open: close, high: close, low: close, close, volume: 1 });
+const ROW_USD = {
+  address: "PoolUsd",
+  baseMint: "MintUsd",
+  basePriceUsd: 0.001,
+  tokenCreatedAt: 1000 * HOUR_MS - 10 * HOUR_MS,
+};
+
+test("fetchRecent5mUsd: GMGN first, 100 bars of 5m", async () => {
+  const asked = [];
+  const r = await fetchRecent5mUsd(ROW_USD, {
+    deps: {
+      fetchGmgnKline: async (mint, opts) => {
+        asked.push([mint, opts]);
+        return [usdBar(0, 0.001)];
+      },
+      fetchDexPaprikaOhlcv: async () => assert.fail("no fallback when GMGN works"),
+    },
+  });
+  assert.deepEqual(asked, [["MintUsd", { resolution: "5m", limit: 100 }]]);
+  assert.equal(r.source, "gmgn");
+  assert.equal(r.bars.length, 1);
+});
+
+test("fetchRecent5mUsd: GMGN failure falls back to DexPaprika 5m; both failing returns both errors", async () => {
+  const now = 1000 * HOUR_MS;
+  const seen = [];
+  const r = await fetchRecent5mUsd(ROW_USD, {
+    deps: {
+      now: () => now,
+      fetchGmgnKline: async () => Promise.reject(new Error("RATE_LIMIT")),
+      fetchDexPaprikaOhlcv: async (pool, opts) => {
+        seen.push([pool, opts]);
+        return [usdBar(0, 0.0011)];
+      },
+    },
+  });
+  assert.equal(r.source, "dexpaprika");
+  assert.deepEqual(seen, [["PoolUsd", { interval: "5m", startSec: now / 1000 - 30000, endSec: now / 1000, inversed: false }]]);
+
+  const bad = await fetchRecent5mUsd(ROW_USD, {
+    deps: {
+      fetchGmgnKline: async () => [],
+      fetchDexPaprikaOhlcv: async () => Promise.reject(new Error("DexPaprika HTTP 403 plan_required")),
+    },
+  });
+  assert.deepEqual(bad.bars, []);
+  assert.equal(bad.error, "GMGN: no candles · DexPaprika: DexPaprika HTTP 403 plan_required");
+});
+
+test("fetchHistory1hUsd: from token birth, capped by DEXPAPRIKA_HISTORY_DAYS; picks the side near the token price", async () => {
+  const now = 1000 * HOUR_MS;
+  const before = config.autoEntry.dexpaprikaHistoryDays;
+  try {
+    config.autoEntry.dexpaprikaHistoryDays = 7;
+    const seen = [];
+    const fetchDexPaprikaOhlcv = async (pool, opts) => {
+      seen.push(opts);
+      return [usdBar(0, opts.inversed ? 0.0012 : 150)]; // default = harga SOL (salah sisi)
+    };
+    const bars = await fetchHistory1hUsd(ROW_USD, { refUsd: 0.001, deps: { now: () => now, fetchDexPaprikaOhlcv } });
+    assert.equal(bars[0].close, 0.0012);
+    assert.deepEqual(
+      seen.map((o) => [o.interval, o.startSec, o.endSec, o.inversed]),
+      [
+        ["1h", (now - 10 * HOUR_MS) / 1000, now / 1000, false],
+        ["1h", (now - 10 * HOUR_MS) / 1000, now / 1000, true],
+      ]
+    );
+    // Token lebih tua dari jendela plan -> mulai dari now − 7 hari.
+    seen.length = 0;
+    await fetchHistory1hUsd({ ...ROW_USD, tokenCreatedAt: now - 30 * 24 * HOUR_MS }, { refUsd: 150, deps: { now: () => now, fetchDexPaprikaOhlcv } });
+    assert.deepEqual(seen.map((o) => o.startSec), [now / 1000 - 7 * 86400]);
+    // Kedua sisi jauh dari harga acuan -> error.
+    await assert.rejects(
+      fetchHistory1hUsd(ROW_USD, { refUsd: 5, deps: { now: () => now, fetchDexPaprikaOhlcv } }),
+      /does not match the token price/
+    );
+  } finally {
+    config.autoEntry.dexpaprikaHistoryDays = before;
+  }
+});
+
+test("fetchDexPaprikaOhlcv: URL, key header, paging, dedupe and bad bars dropped", async () => {
+  _resetDexPaprikaForTest();
+  const before = [config.dexpaprikaApiKey, config.dexpaprikaApiUrl];
+  config.dexpaprikaApiKey = "test-key";
+  config.dexpaprikaApiUrl = "https://dp.test";
+  try {
+    const calls = [];
+    const iso = (sec) => new Date(sec * 1000).toISOString();
+    const fetchJson = async (url, opts) => {
+      calls.push({ url: new URL(url), headers: opts?.headers });
+      const start = Number(new URL(url).searchParams.get("start"));
+      return [
+        { time_open: iso(start), open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 },
+        { time_open: iso(start), open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 }, // duplikat
+        { time_open: iso(start + 3600), open: 0, high: 2, low: 0.5, close: 1.5, volume: 10 }, // harga 0
+      ];
+    };
+    const bars = await fetchDexPaprikaOhlcv("PoolX", {
+      interval: "1h",
+      startSec: 0,
+      endSec: 1500 * 3600,
+      inversed: true,
+      deps: { fetchJson, sleep: async () => {}, now: () => 0 },
+    });
+    assert.equal(calls.length, 2, "1500 bars -> 2 pages of 1000");
+    assert.equal(calls[0].url.origin + calls[0].url.pathname, "https://dp.test/networks/solana/pools/PoolX/ohlcv");
+    assert.deepEqual(
+      ["start", "end", "interval", "limit", "inversed"].map((k) => calls[0].url.searchParams.get(k)),
+      ["0", String(1000 * 3600), "1h", "1000", "true"]
+    );
+    assert.equal(calls[1].url.searchParams.get("start"), String(1000 * 3600));
+    assert.deepEqual(calls[0].headers, { Authorization: "test-key" });
+    assert.deepEqual(bars.map((b) => b.time), [0, 1000 * 3600]);
+    await assert.rejects(fetchDexPaprikaOhlcv("PoolX", { interval: "2h", startSec: 0, endSec: 1 }), /tidak didukung/);
+  } finally {
+    [config.dexpaprikaApiKey, config.dexpaprikaApiUrl] = before;
+  }
+});
+
+test("fetchVolatility: one 24h request for the given pools, missing values left out", async () => {
+  const urls = [];
+  const deps = {
+    sleep: async () => {},
+    fetchJson: async (url) => {
+      urls.push(new URL(url));
+      return { data: [{ pool_address: "P1", volatility: 4.1 }, { pool_address: "P2", volatility: null }] };
+    },
+  };
+  const vols = await fetchVolatility(["P1", "P2"], { deps });
+  assert.deepEqual([...vols], [["P1", 4.1]]);
+  assert.equal(urls.length, 1);
+  assert.equal(urls[0].searchParams.get("timeframe"), "24h");
+  assert.equal(urls[0].searchParams.get("filter_by"), "pool_address=[P1,P2]");
+  assert.deepEqual([...(await fetchVolatility([], { deps }))], []);
+  assert.equal(urls.length, 1, "no request for an empty list");
 });

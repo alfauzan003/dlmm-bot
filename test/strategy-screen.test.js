@@ -7,30 +7,50 @@ import {
   poolQueryUrl,
   toPoolRow,
   passesPoolFilters,
+  sortByFeeActiveTvl,
   pickPoolPerToken,
   coversMinRange,
   binsForPct,
   passesTokenFilters,
+  volatilityQueryUrl,
   closedBars,
   toSolPerToken,
-  volatilityPct,
-  passesVolatility,
 } from "../src/strategy/screen.js";
 
+const HOUR = 3600000;
+const NOW = 1000 * HOUR;
+const P = buildProfile({}, "bidask_flip");
+
+// Baris pool-discovery (timeframe 30m).
 const raw = (o = {}) => ({
-  address: "P1",
+  pool_address: "P1",
   name: "AAA-SOL",
-  token_x: { address: "MintA", market_cap: 500000, holders: 1000 },
+  token_x: {
+    address: "MintA",
+    market_cap: 500000,
+    holders: 1000,
+    top_holders_pct: 12,
+    created_at: NOW - 10 * HOUR,
+    price: 0.001,
+    has_mint_authority: false,
+    has_freeze_authority: false,
+  },
   token_y: { address: WSOL_MINT },
-  pool_config: { bin_step: 100, base_fee_pct: 2, protocol_fee_pct: 10 },
+  dlmm_params: { bin_step: 100 },
+  fee_pct: 2,
   tvl: 30000,
-  volume: { "30m": 50000 },
-  fee_tvl_ratio: { "30m": 4.6 },
-  created_at: 1_000_000,
+  active_tvl: 25000,
+  volume: 50000,
+  fee: 900,
+  fee_tvl_ratio: 3,
+  fee_active_tvl_ratio: 3.6,
+  volatility: 4.2,
+  base_token_holders: 1001,
+  pool_created_at: NOW - 5 * HOUR,
   ...o,
 });
 
-test("toPoolRow maps a SOL pair with base = X", () => {
+test("toPoolRow maps a pool-discovery SOL pair with base = X", () => {
   assert.deepEqual(toPoolRow(raw()), {
     address: "P1",
     name: "AAA-SOL",
@@ -38,13 +58,20 @@ test("toPoolRow maps a SOL pair with base = X", () => {
     baseIsX: true,
     binStep: 100,
     baseFeePct: 2,
-    protocolFeePct: 10,
+    protocolFeePct: 0,
     tvlUsd: 30000,
+    activeTvlUsd: 25000,
     volume30mUsd: 50000,
-    feeTvl30mPct: 4.6,
+    fees30mUsd: 900,
+    feeTvl30mPct: 3,
+    feeActiveTvl30mPct: 3.6,
     mcapUsd: 500000,
-    holders: 1000,
-    createdAt: 1_000_000,
+    holders: 1001,
+    top10Pct: 12,
+    tokenCreatedAt: NOW - 10 * HOUR,
+    basePriceUsd: 0.001,
+    authoritiesOff: true,
+    createdAt: NOW - 5 * HOUR,
   });
 });
 
@@ -54,49 +81,79 @@ test("toPoolRow: SOL as X takes base from Y", () => {
   assert.equal(r.baseIsX, false);
 });
 
-test("toPoolRow malformed rows are null", () => {
-  for (const o of [{ token_x: null }, { tvl: 0 }, { tvl: undefined }, { token_y: { address: "USDC" } }, { pool_config: null }])
+test("toPoolRow malformed rows are null; missing top10 stays null", () => {
+  for (const o of [{ token_x: null }, { tvl: 0 }, { tvl: undefined }, { token_y: { address: "USDC" } }, { dlmm_params: null }])
     assert.equal(toPoolRow(raw(o)), null, JSON.stringify(o));
-  assert.equal(toPoolRow(raw({ token_x: { address: "MintA", market_cap: null, holders: null } })).mcapUsd, 0);
+  const r = toPoolRow(raw({ token_x: { address: "MintA" } }));
+  assert.equal(r.top10Pct, null);
+  assert.equal("volatility" in r, false, "volatility comes from the separate 24h request");
 });
 
-test("poolQueryUrl includes age filter only when maxPoolAgeH > 0", () => {
-  const u = decodeURIComponent(poolQueryUrl({ ...buildProfile({}, "degen") }, 100 * 3600000));
-  assert.match(u, /pool_created_at>100800000/); // 100h - 72h
-  assert.match(u, /page_size=100&sort_by=fee_tvl_ratio_30m:desc&filter_by=/);
-  assert.match(u, /tvl>2000 && volume_30m>10000 && fee_tvl_ratio_30m>0\.2 && bin_step>=80 && is_blacklisted=false/);
-  assert.doesNotMatch(decodeURIComponent(poolQueryUrl(buildProfile({}, "multihour"), 0)), /pool_created_at/);
+test("volatilityQueryUrl: 24h, only the given pools", () => {
+  const u = new URL(volatilityQueryUrl(["P1", "P2", "P3"]));
+  assert.equal(u.origin + u.pathname, "https://pool-discovery-api.datapi.meteora.ag/pools");
+  assert.equal(u.searchParams.get("timeframe"), "24h");
+  assert.equal(u.searchParams.get("page_size"), "3");
+  assert.equal(u.searchParams.get("filter_by"), "pool_address=[P1,P2,P3]");
+});
+
+test("poolQueryUrl: pool-discovery, timeframe 30m, every filter on the server", () => {
+  const u = new URL(poolQueryUrl(P, NOW));
+  assert.equal(u.origin + u.pathname, "https://pool-discovery-api.datapi.meteora.ag/pools");
+  assert.equal(u.searchParams.get("timeframe"), "30m");
+  assert.equal(u.searchParams.get("page_size"), "200");
+  assert.equal(
+    u.searchParams.get("filter_by"),
+    [
+      "pool_type=dlmm",
+      "is_blacklisted=false",
+      "base_token_market_cap>=200000",
+      "base_token_holders>=500",
+      "fee>=1",
+      "fee_pct>=1",
+      "fee_active_tvl_ratio>=0.2",
+      "bin_step>=80",
+      "base_token_market_cap<=5000000",
+      "base_token_top_holders_pct<=30",
+      `base_token_created_at<=${NOW - 2 * HOUR}`,
+    ].join(" && ")
+  );
+  const v = new URL(poolQueryUrl({ ...P, maxMcapUsd: 0, maxTop10Pct: 0, minTokenAgeH: 0, maxTokenAgeH: 48 }, NOW));
+  const f = v.searchParams.get("filter_by");
+  assert.doesNotMatch(f, /market_cap<=|top_holders_pct|created_at<=/);
+  assert.match(f, new RegExp(`base_token_created_at>=${NOW - 48 * HOUR}`));
 });
 
 test("passesPoolFilters reasons", () => {
-  const p = buildProfile({}, "degen"); // tvl 2000, vol 10000, fee/tvl 0.2, mcap 200000, holders 800, age 72h, bin 80, fee 5
-  const now = 100 * 3600000;
-  const good = { ...toPoolRow(raw()), createdAt: now - 10 * 3600000 };
-  assert.deepEqual(passesPoolFilters(good, p, now), { ok: true, reason: null });
+  const good = toPoolRow(raw());
+  assert.deepEqual(passesPoolFilters(good, P, NOW), { ok: true, reason: null });
   const cases = [
-    [{ tvlUsd: 1999 }, "tvl"],
-    [{ volume30mUsd: 9999 }, "volume"],
-    [{ feeTvl30mPct: 0.1 }, "fee_tvl"],
     [{ mcapUsd: 199999 }, "mcap"],
-    [{ holders: 799 }, "holders"],
-    [{ createdAt: now - 73 * 3600000 }, "age"],
+    [{ mcapUsd: 5000001 }, "mcap"],
+    [{ tokenCreatedAt: NOW - 1 * HOUR }, "age"],
+    [{ tokenCreatedAt: 0 }, "age"],
+    [{ holders: 499 }, "holders"],
+    [{ top10Pct: 30.1 }, "top10"],
+    [{ top10Pct: null }, "top10"],
+    [{ fees30mUsd: 0.9 }, "fees"],
+    [{ baseFeePct: 0.9 }, "base_fee"],
+    [{ feeActiveTvl30mPct: 0.19 }, "fee_active_tvl"],
     [{ binStep: 79 }, "bin_step"],
-    [{ baseFeePct: 5.1 }, "base_fee"],
   ];
-  for (const [o, reason] of cases) assert.deepEqual(passesPoolFilters({ ...good, ...o }, p, now), { ok: false, reason }, reason);
-  // maxPoolAgeH = 0 -> tidak ada batas umur
-  assert.equal(passesPoolFilters({ ...good, createdAt: 0 }, { ...p, maxPoolAgeH: 0 }, now).ok, true);
+  for (const [o, reason] of cases) assert.deepEqual(passesPoolFilters({ ...good, ...o }, P, NOW), { ok: false, reason }, reason);
+  assert.equal(passesPoolFilters({ ...good, top10Pct: null }, { ...P, maxTop10Pct: 0 }, NOW).ok, true);
+  assert.equal(passesPoolFilters({ ...good, tokenCreatedAt: NOW - 50 * HOUR }, { ...P, maxTokenAgeH: 48 }, NOW).reason, "age");
 });
 
-test("pickPoolPerToken: lowest base fee, then highest TVL, then smallest bin step", () => {
-  const a = { ...toPoolRow(raw()), address: "A", baseFeePct: 2, tvlUsd: 10 };
-  const b = { ...a, address: "B", baseFeePct: 1, tvlUsd: 5 };
-  const c = { ...a, address: "C", baseFeePct: 1, tvlUsd: 5, binStep: 80 };
-  assert.deepEqual(pickPoolPerToken([a, b, c]).map((r) => r.address), ["C"]);
-  const d = { ...a, address: "D", baseFeePct: 1, tvlUsd: 9 };
-  assert.deepEqual(pickPoolPerToken([a, b, d]).map((r) => r.address), ["D"]);
-  const other = { ...a, address: "E", baseMint: "MintZ" };
-  assert.deepEqual(pickPoolPerToken([a, other]).map((r) => r.address), ["A", "E"]);
+test("sortByFeeActiveTvl + pickPoolPerToken: top pool per token wins, next token fills in", () => {
+  const row = toPoolRow(raw());
+  const a1 = { ...row, address: "A1", feeActiveTvl30mPct: 5 };
+  const a2 = { ...row, address: "A2", feeActiveTvl30mPct: 9 };
+  const b = { ...row, address: "B", baseMint: "MintB", feeActiveTvl30mPct: 7 };
+  const c = { ...row, address: "C", baseMint: "MintC", feeActiveTvl30mPct: 1 };
+  const sorted = sortByFeeActiveTvl([a1, c, b, a2]);
+  assert.deepEqual(sorted.map((r) => r.address), ["A2", "B", "A1", "C"]);
+  assert.deepEqual(pickPoolPerToken(sorted).map((r) => r.address), ["A2", "B", "C"]);
 });
 
 test("binsForPct matches pctToBinRange", () => {
@@ -113,25 +170,30 @@ test("coversMinRange", () => {
   assert.equal(coversMinRange(1, { rangeMinPct: 20, maxPositions: 1 }), false); // 2232 bins
 });
 
-test("passesTokenFilters", () => {
+test("passesTokenFilters re-checks Jupiter mcap, holders, top 10, age and authorities", () => {
   const g = buildAutoEntry({});
-  const ok = { organicScore: 70, audit: { topHoldersPercentage: 20, mintAuthorityDisabled: true, freezeAuthorityDisabled: true } };
-  assert.equal(passesTokenFilters(ok, g).ok, true);
-  assert.equal(passesTokenFilters(null, g).reason, "no_token");
-  assert.equal(passesTokenFilters({ ...ok, organicScore: 59 }, g).reason, "organic");
-  assert.equal(passesTokenFilters({ ...ok, audit: { ...ok.audit, topHoldersPercentage: 31 } }, g).reason, "top_holders");
-  assert.equal(passesTokenFilters({ ...ok, audit: { ...ok.audit, freezeAuthorityDisabled: false } }, g).reason, "authorities");
-  assert.equal(passesTokenFilters({ ...ok, audit: { ...ok.audit, freezeAuthorityDisabled: false } }, { ...g, requireAuthoritiesOff: false }).ok, true);
+  const ok = {
+    mcap: 500000,
+    holderCount: 1000,
+    createdAt: new Date(NOW - 10 * HOUR).toISOString(),
+    audit: { topHoldersPercentage: 20, mintAuthorityDisabled: true, freezeAuthorityDisabled: true },
+  };
+  assert.equal(passesTokenFilters(ok, P, g, NOW).ok, true);
+  assert.equal(passesTokenFilters(null, P, g, NOW).reason, "no_token");
+  assert.equal(passesTokenFilters({ ...ok, mcap: 6_000_000 }, P, g, NOW).reason, "mcap");
+  assert.equal(passesTokenFilters({ ...ok, holderCount: 10 }, P, g, NOW).reason, "holders");
+  assert.equal(passesTokenFilters({ ...ok, audit: { ...ok.audit, topHoldersPercentage: 31 } }, P, g, NOW).reason, "top10");
+  assert.equal(passesTokenFilters({ ...ok, createdAt: new Date(NOW - HOUR).toISOString() }, P, g, NOW).reason, "age");
+  const withAuthority = { ...ok, audit: { ...ok.audit, freezeAuthorityDisabled: false } };
+  assert.equal(passesTokenFilters(withAuthority, P, g, NOW).reason, "authorities");
+  assert.equal(passesTokenFilters(withAuthority, P, { ...g, requireAuthoritiesOff: false }, NOW).ok, true);
+  // Field Jupiter yang hilang (mcap / holders / createdAt) tidak menggagalkan: sudah dicek dari pool-discovery.
+  assert.equal(passesTokenFilters({ audit: ok.audit }, P, g, NOW).ok, true);
 });
 
-test("closedBars drops the forming bar; volatility needs 6 bars", () => {
+test("closedBars drops the forming bar", () => {
   const bars = Array.from({ length: 7 }, (_, i) => ({ time: i * 300, open: 1, high: 1.04, low: 1.0, close: 1, volume: 1 }));
   assert.equal(closedBars(bars, 7 * 300 * 1000 - 1).length, 6);
-  assert.ok(Math.abs(volatilityPct(bars.slice(0, 6)) - 4) < 1e-9);
-  assert.equal(volatilityPct(bars.slice(0, 5)), null);
-  assert.equal(passesVolatility(null, { volatilityMinPct: 0, volatilityMaxPct: 100 }), false);
-  assert.equal(passesVolatility(4, { volatilityMinPct: 2, volatilityMaxPct: 4 }), true);
-  assert.equal(passesVolatility(4.1, { volatilityMinPct: 2, volatilityMaxPct: 4 }), false);
 });
 
 test("toSolPerToken inverts SOL-as-X bars (high/low swap), keeps volume, identity for token-as-X", () => {

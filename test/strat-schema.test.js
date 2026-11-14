@@ -90,7 +90,7 @@ test("committed strat.conf: every default validates and restart keys exist", () 
     assert.equal(schema.entries[removed], undefined, removed);
   }
   assert.equal(
-    keys.some((k) => /^(BIDASK|SPOT)_/.test(k)),
+    keys.some((k) => /^(BIDASK_(DOUBLE|SOL|TOKEN)|SPOT|DEGEN|MULTI)_/.test(k)),
     false
   );
   for (const section of schema.sections) assert.ok(section.description, `${section.title} has no description`);
@@ -125,38 +125,47 @@ test("Evil Panda keys live in their own section and reject bad values", () => {
   for (const key of section.keys) assert.equal(RESTART_KEYS.has(key), false, key);
 });
 
-test("auto entry profile keys: enums, ranges, whole numbers, restart key", () => {
+test("bidask flip keys: ranges, whole numbers, restart key", () => {
   const s = parseStratText(
     [
-      "# ===== Auto Entry · Degen profile =====",
-      "DEGEN_ENTRY_TIMING=pullback",
-      "DEGEN_MAX_POSITIONS=2",
-      "DEGEN_FLIP_PCT=60",
-      "DEGEN_RANGE_PCT=50",
-      "DEGEN_MIN_HOLDERS=800",
-      "AUTO_SCAN_INTERVAL_SEC=60",
+      "# ===== Auto Entry · Bidask flip =====",
+      "BIDASK_MAX_POSITIONS=2",
+      "BIDASK_FLIP_PCT=65",
+      "BIDASK_FLIP_STEP=10",
+      "BIDASK_RANGE_MIN_PCT=30",
+      "BIDASK_MIN_HOLDERS=500",
+      "BIDASK_MAX_TOP10_PCT=30",
+      "BIDASK_FIB_ENTRY_LEVEL=0.382",
+      "BIDASK_VOLATILITY_CAP=10",
+      "BIDASK_MAX_TOKEN_AGE_H=0",
+      "AUTO_SCAN_INTERVAL_SEC=300",
     ].join("\n")
   );
-  assert.deepEqual(typeOf("DEGEN_ENTRY_TIMING", "pullback"), { type: "enum", options: ["pullback", "immediate"] });
-  assert.deepEqual(typeOf("MULTI_RANGE_MODE", "support"), { type: "enum", options: ["fixed", "support"] });
-  assert.equal(validateValue("DEGEN_MAX_POSITIONS", "11", s).ok, false);
-  assert.equal(validateValue("DEGEN_MAX_POSITIONS", "10", s).ok, true);
-  assert.equal(validateValue("DEGEN_FLIP_PCT", "0", s).ok, false);
-  assert.equal(validateValue("DEGEN_RANGE_PCT", "99.5", s).ok, false);
-  assert.equal(validateValue("DEGEN_MIN_HOLDERS", "1.5", s).ok, false);
+  assert.equal(validateValue("BIDASK_MAX_POSITIONS", "11", s).ok, false);
+  assert.equal(validateValue("BIDASK_MAX_POSITIONS", "10", s).ok, true);
+  assert.equal(validateValue("BIDASK_FLIP_PCT", "0", s).ok, true); // 0 = auto flip off
+  assert.equal(validateValue("BIDASK_FLIP_PCT", "101", s).ok, false);
+  assert.equal(validateValue("BIDASK_FLIP_STEP", "-1", s).ok, false);
+  assert.equal(validateValue("BIDASK_RANGE_MIN_PCT", "99.5", s).ok, false);
+  assert.equal(validateValue("BIDASK_RANGE_MIN_PCT", "0", s).ok, false);
+  assert.equal(validateValue("BIDASK_MIN_HOLDERS", "1.5", s).ok, false);
+  assert.equal(validateValue("BIDASK_MAX_TOP10_PCT", "100.1", s).ok, false);
+  assert.equal(validateValue("BIDASK_FIB_ENTRY_LEVEL", "1.2", s).ok, false);
+  assert.equal(validateValue("BIDASK_FIB_ENTRY_LEVEL", "0.5", s).ok, true);
+  assert.equal(validateValue("BIDASK_VOLATILITY_CAP", "0", s).ok, false);
+  assert.equal(validateValue("BIDASK_MAX_TOKEN_AGE_H", "-1", s).ok, false);
   assert.equal(validateValue("AUTO_SCAN_INTERVAL_SEC", "10", s).ok, false);
   assert.equal(RESTART_KEYS.has("AUTO_SCAN_INTERVAL_SEC"), true);
 });
 
-test("auto entry sizes, lookbacks, spread bins and candidates per scan must be positive", () => {
-  const keys = ["DEGEN_SIZE_SOL", "MULTI_SIZE_SOL", "DEGEN_PUMP_LOOKBACK_MIN", "MULTI_PUMP_LOOKBACK_MIN", "SIM_POOL_SPREAD_BINS", "AUTO_CANDIDATES_PER_SCAN"];
+test("auto entry size, spread bins and candidates per scan must be positive", () => {
+  const keys = ["BIDASK_SIZE_SOL", "SIM_POOL_SPREAD_BINS", "AUTO_CANDIDATES_PER_SCAN"];
   const s = parseStratText(["# ===== Auto Entry =====", ...keys.map((k) => `${k}=5`)].join("\n"));
   for (const k of keys) {
     assert.equal(validateValue(k, "0", s).ok, false, `${k}=0`);
     assert.equal(validateValue(k, "5", s).ok, true, `${k}=5`);
   }
-  assert.equal(validateValue("DEGEN_SIZE_SOL", "0.1", s).ok, true);
-  assert.equal(validateValue("DEGEN_PUMP_LOOKBACK_MIN", "0.5", s).ok, true);
+  assert.equal(validateValue("BIDASK_SIZE_SOL", "0.1", s).ok, true);
   assert.equal(validateValue("SIM_POOL_SPREAD_BINS", "1.5", s).ok, false);
   assert.equal(validateValue("AUTO_CANDIDATES_PER_SCAN", "1.5", s).ok, false);
   assert.equal(validateValue("AUTO_CANDIDATES_PER_SCAN", "1", s).ok, true);

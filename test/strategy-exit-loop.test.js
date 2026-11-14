@@ -11,7 +11,6 @@ process.env.SETTINGS_FILE = path.join(TMP, "settings.json");
 process.env.STRAT_FILE = path.join(TMP, "strat.conf");
 process.env.PAPER_FILE = path.join(TMP, "paper-trades.json");
 process.env.STRATEGY_LOG_FILE = path.join(TMP, "strategy-log.jsonl");
-process.env.BACKTEST_DIR = path.join(TMP, "backtest");
 process.env.DECISION_LOG_FILE = path.join(TMP, "decision-log.json");
 process.env.PNL_HISTORY_FILE = path.join(TMP, "pnl-history.json");
 

@@ -1,71 +1,62 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildProfile } from "../src/strategy/params.js";
-import { entrySignal, binsForPct, pickRangePct, explainRangePct, barsNeeded } from "../src/strategy/signal.js";
+import { athAtl, fibPrice, fibSignal, explainRangePct, maxPctForBins, binsForPct } from "../src/strategy/signal.js";
 
-const bar = (o, h, l, c, t = 0) => ({ time: t, open: o, high: h, low: l, close: c, volume: 100 });
-const p = { ...buildProfile({}, "degen"), pumpLookbackMin: 15 }; // W = 3 bars
+const P = buildProfile({}, "bidask_flip"); // fib 0.382 / 0.786, min 30, cap 10, 2 positions
+const bar = (high, low) => ({ time: 0, open: low, high, low, close: low, volume: 1 });
+const near = (a, b) => Math.abs(a - b) < 1e-9;
 
-test("signal fires on pump, pullback in band, red last bar", () => {
-  const r = entrySignal([bar(1, 1.1, 1, 1.1), bar(1.1, 1.3, 1.1, 1.25), bar(1.25, 1.25, 1.1, 1.15)], p);
-  assert.equal(r.enter, true);
+test("athAtl takes the highest high and lowest low across series", () => {
+  assert.deepEqual(athAtl([bar(2, 1), bar(5, 0.5)], [bar(3, 0.8)]), { ath: 5, atl: 0.5 });
+  assert.equal(athAtl([], []), null);
+  assert.equal(athAtl([bar(1, 1)]), null); // ath == atl
+  assert.deepEqual(athAtl([bar(NaN, -1), bar(2, 1)]), { ath: 2, atl: 1 });
+});
+
+test("fibPrice: 0 = ATH, 1 = ATL", () => {
+  assert.equal(fibPrice(10, 2, 0), 10);
+  assert.equal(fibPrice(10, 2, 1), 2);
+  assert.ok(near(fibPrice(10, 2, 0.382), 10 - 0.382 * 8));
+});
+
+test("fibSignal skips a price above fib 0.382 and enters at or below it", () => {
+  // ATL 1, ATH 11: fib 0.382 = 7.18, fib 0.786 = 3.14
+  const above = fibSignal({ ath: 11, atl: 1, price: 8 }, P);
+  assert.equal(above.enter, false);
+  assert.equal(above.reason, "above_fib");
+  const at = fibSignal({ ath: 11, atl: 1, price: 7.18 }, P);
+  assert.equal(at.enter, true);
+  const r = fibSignal({ ath: 11, atl: 1, price: 5 }, P);
   assert.equal(r.reason, "signal");
-  assert.ok(Math.abs(r.metrics.pumpPct - 30) < 1e-9);
-  assert.ok(Math.abs(r.metrics.pullbackPct - (1 - 1.15 / 1.3) * 100) < 1e-9);
+  assert.ok(near(r.metrics.fibEntry, 7.18));
+  assert.ok(near(r.metrics.fibDeep, 3.14));
+  assert.ok(near(r.metrics.maxPct, ((7.18 - 3.14) / 7.18) * 100)); // ≈ 56.27%
 });
 
-test("signal reasons", () => {
-  assert.equal(entrySignal([bar(1, 1, 1, 1)], p).reason, "not_enough_bars");
-  assert.equal(entrySignal([bar(1, 1.1, 1, 1.1), bar(1.1, 1.15, 1.1, 1.12), bar(1.12, 1.12, 1.05, 1.06)], p).reason, "no_pump");
-  assert.equal(entrySignal([bar(1, 1.3, 1, 1.3), bar(1.3, 1.3, 1.28, 1.3), bar(1.3, 1.3, 1.27, 1.28)], p).reason, "pullback_small");
-  assert.equal(entrySignal([bar(1, 1.5, 1, 1.5), bar(1.5, 1.5, 1.0, 1.0), bar(1.0, 1.0, 0.9, 0.95)], p).reason, "pullback_large");
-  assert.equal(entrySignal([bar(1, 1.3, 1, 1.3), bar(1.3, 1.3, 1.1, 1.15), bar(1.15, 1.2, 1.15, 1.18)], p).reason, "not_red");
+test("fibSignal without history", () => {
+  assert.equal(fibSignal({ price: 1 }, P).reason, "no_history");
+  assert.equal(fibSignal({ ath: 1, atl: 2, price: 1 }, P).reason, "no_history");
+  assert.equal(fibSignal({ ath: 2, atl: 1, price: 0 }, P).reason, "no_history");
 });
 
-test("immediate skips the signal but still needs one bar", () => {
-  assert.equal(entrySignal([bar(1, 1, 1, 1)], { ...p, entryTiming: "immediate" }).enter, true);
-  assert.equal(entrySignal([], { ...p, entryTiming: "immediate" }).enter, false);
+test("explainRangePct: target = min + (min(v, cap) / cap) · (max − min)", () => {
+  const p = { ...P, maxPositions: 10 }; // tanpa batas bin
+  assert.ok(near(explainRangePct({ maxPct: 56, volatility: 0 }, p, 100).pct, 30));
+  assert.ok(near(explainRangePct({ maxPct: 56, volatility: 5 }, p, 100).pct, 43));
+  assert.ok(near(explainRangePct({ maxPct: 56, volatility: 10 }, p, 100).pct, 56));
+  assert.ok(near(explainRangePct({ maxPct: 56, volatility: 25 }, p, 100).pct, 56)); // v dipotong di cap
+  // max di bawah min: rumus apa adanya
+  assert.ok(near(explainRangePct({ maxPct: 20, volatility: 5 }, p, 100).pct, 25));
+  assert.match(explainRangePct({ maxPct: 56, volatility: 5 }, p, 100).why, /vol 5\.00\/10 · min 30\.0% · max 56\.0% → 43\.0%/);
 });
 
-test("pickRangePct fixed clamps to [min,max]", () => {
-  const q = { ...p, rangeMode: "fixed", rangePct: 80, rangeMinPct: 20, rangeMaxPct: 65, maxPositions: 2 };
-  assert.equal(pickRangePct([], q, 100), 65);
-});
-
-test("pickRangePct support = distance to lowest low + buffer", () => {
-  const q = { ...p, rangeMode: "support", supportLookbackMin: 15, supportBufferPct: 5, rangeMinPct: 10, rangeMaxPct: 65, maxPositions: 2 };
-  const bars = [bar(1, 1, 0.7, 0.9), bar(0.9, 1, 0.9, 1), bar(1, 1, 1, 1)];
-  assert.ok(Math.abs(pickRangePct(bars, q, 100) - 35) < 1e-9); // (1 − 0.7/1)·100 + 5
-  assert.equal(pickRangePct([bar(1, 1, 1, 1)], q, 100), 10); // support at price → min
-});
-
-test("pickRangePct shrinks to the bin cap and returns null when min does not fit", () => {
-  const q = { ...p, rangeMode: "fixed", rangePct: 65, rangeMinPct: 20, rangeMaxPct: 65, maxPositions: 1 };
-  const r = pickRangePct([], q, 80); // 65% needs 132 bins on bin step 80
-  assert.ok(binsForPct(r, 80) + 1 <= 70);
-  assert.equal(pickRangePct([], { ...q, rangeMinPct: 60 }, 20), null);
-});
-
-test("barsNeeded", () => {
-  assert.equal(barsNeeded(buildProfile({}, "degen")), 13);
-  assert.equal(barsNeeded(buildProfile({}, "multihour")), 289);
-});
-
-test("explainRangePct explains each step and matches pickRangePct", () => {
-  const fixed = { ...p, rangeMode: "fixed", rangePct: 80, rangeMinPct: 20, rangeMaxPct: 65, maxPositions: 2 };
-  const a = explainRangePct([], fixed, 100);
-  assert.equal(a.pct, pickRangePct([], fixed, 100));
-  assert.match(a.why, /^fixed 80\.0% · cut to max 65\.0%$/);
-
-  const support = { ...p, rangeMode: "support", supportLookbackMin: 15, supportBufferPct: 5, rangeMinPct: 10, rangeMaxPct: 65, maxPositions: 2 };
-  const b = explainRangePct([bar(1, 1, 0.7, 0.9), bar(0.9, 1, 0.9, 1), bar(1, 1, 1, 1)], support, 100);
-  assert.ok(Math.abs(b.pct - 35) < 1e-9);
-  assert.match(b.why, /support mode: lowest low 15m 0\.7000 vs close 1\.000 → 30\.0% \+ buffer 5% = 35\.0%/);
-  assert.match(explainRangePct([bar(1, 1, 1, 1)], support, 100).why, /≥ close → min 10\.0%/);
-
-  const tight = { ...p, rangeMode: "fixed", rangePct: 65, rangeMinPct: 20, rangeMaxPct: 65, maxPositions: 1 };
-  assert.match(explainRangePct([], tight, 80).why, /capped by 1 position\(s\) × 70 bins @ bin step 80/);
-  const none = explainRangePct([], { ...tight, rangeMinPct: 60 }, 20);
-  assert.equal(none.pct, null);
-  assert.match(none.why, /does not fit → skip$/);
+test("explainRangePct caps at maxPositions × 70 bins and skips invalid input", () => {
+  const cap = maxPctForBins(2 * 70, 80); // ≈ 67%
+  const r = explainRangePct({ maxPct: 90, volatility: 10 }, P, 80);
+  assert.ok(near(r.pct, cap));
+  assert.match(r.why, /capped by 2 position\(s\)/);
+  assert.equal(binsForPct(r.pct - 1e-9, 80) + 1 <= 140, true);
+  assert.equal(explainRangePct({ maxPct: 56, volatility: null }, P, 80).pct, null);
+  assert.equal(explainRangePct({ maxPct: NaN, volatility: 3 }, P, 80).pct, null);
 });

@@ -9,7 +9,7 @@ export const HELP_TEXT = [
   "📊 PnL (/pnl): profit today / this week / this month, with a PnL card hand-off.",
   "👛 Wallet (/wallet): deposit address, withdraw, export or import the key.",
   "🔄 Swap (/swap): pick a wallet token and sell its whole balance for SOL.",
-  "⚙️ Settings (/settings): toggles (Auto Exit, Auto Entry), Auto Exit defaults, exit strategies (Evil Panda) and strategy settings.",
+  "⚙️ Settings (/settings): toggles (Auto Exit, Auto Entry), Auto Exit defaults, Auto Entry strategies (bidask flip), exit strategies (Evil Panda) and advanced settings.",
   "",
   "Tip: paste a token CA or pool address in the chat to start opening a position.",
   "",

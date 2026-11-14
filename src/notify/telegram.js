@@ -230,6 +230,7 @@ export function notifyAutoEntry({
   binStep,
   baseFeePct,
   feeTvl30mPct,
+  feeActiveTvl30mPct = null,
   volatilityPct,
   mcapUsd,
   signalDetail = null,
@@ -239,7 +240,7 @@ export function notifyAutoEntry({
   const lines = [
     `${paper ? "📝 PAPER " : ""}🤖 Auto entry · ${profile} · ${pair}`,
     `Size ${sizeSol} SOL · range −${rangePct.toFixed(0)}% · bin ${binStep} · fee ${baseFeePct}%`,
-    `Fee/TVL 30m ${feeTvl30mPct.toFixed(2)}% · volatility ${volatilityPct.toFixed(1)}% · MC ${fmtUsd(mcapUsd)}`,
+    `${Number.isFinite(feeActiveTvl30mPct) ? `Fee/active TVL 30m ${feeActiveTvl30mPct.toFixed(2)}%` : `Fee/TVL 30m ${Number(feeTvl30mPct).toFixed(2)}%`} · volatility ${Number(volatilityPct).toFixed(1)} · MC ${fmtUsd(mcapUsd)}`,
   ];
   if (signalDetail) lines.push(`Why entry: ${signalDetail}`);
   if (rangeWhy) lines.push(`Why range: ${rangeWhy}`);
@@ -263,7 +264,7 @@ export function notifyRunnerStarted({ mode, scanSec, profiles, autoEntryOn, dige
   send(
     [
       `🤖 Auto Entry runner started · ${mode}`,
-      `Scan every ${scanSec}s · profiles: ${profiles.join(", ") || "none"}`,
+      `Scan every ${scanSec}s · strategies: ${profiles.join(", ") || "none"}`,
       `Auto Entry toggle: ${autoEntryOn ? "ON" : "OFF"}${autoEntryOn ? "" : " — turn it on in /settings to start scanning"}`,
       `Digest: after the first scan, then every ${digestMin}m`,
     ].join("\n")

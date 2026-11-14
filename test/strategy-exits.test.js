@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { buildProfile } from "../src/strategy/params.js";
 import { STRATEGY_EXIT_REASONS, tokenPos, evaluateStrategyExit, strategyExitDetail } from "../src/strategy/exits.js";
 
-const P = { ...buildProfile({}, "degen"), oorAboveMin: 10, oorBelowMin: 15, lowVolumeBars: 3, minVolume5mUsd: 1000, maxHoldMin: 120 };
+const P = { ...buildProfile({}, "bidask_flip"), oorAboveMin: 10, oorBelowMin: 15, lowVolumeBars: 3, minVolume5mUsd: 1000, maxHoldMin: 120 };
 const T = (o = {}) => ({ range: { lowerBin: -50, upperBin: 0 }, openedAt: 0, ...o });
 const V = (o = {}) => ({ activeBin: -10, xIsSol: false, flipLegs: [], volumes: [5000, 5000, 5000], ...o });
 const M = 60_000;

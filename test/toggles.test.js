@@ -13,7 +13,6 @@ process.env.STATE_FILE = STATE;
 process.env.SETTINGS_FILE = SETTINGS;
 process.env.PAPER_FILE = path.join(TMP, "paper-trades.json");
 process.env.STRATEGY_LOG_FILE = path.join(TMP, "strategy-log.jsonl");
-process.env.BACKTEST_DIR = path.join(TMP, "backtest");
 process.env.DECISION_LOG_FILE = path.join(TMP, "decision-log.json");
 process.env.PNL_HISTORY_FILE = path.join(TMP, "pnl-history.json");
 
@@ -33,9 +32,9 @@ async function withFetchSpy(fn) {
   return urls;
 }
 
-// strat.conf sementara = salinan strat.conf asli + profil degen aktif.
+// strat.conf sementara = salinan strat.conf asli + strategi bidask flip aktif.
 const realStrat = fs.readFileSync(new URL("../strat.conf", import.meta.url), "utf8");
-fs.writeFileSync(STRAT, `${realStrat}\nDEGEN_ON=true\n`);
+fs.writeFileSync(STRAT, `${realStrat}\nBIDASK_ON=true\n`);
 process.env.STRAT_FILE = STRAT;
 
 const { setToggle } = await import("../src/state/settings.js");
@@ -54,7 +53,7 @@ test.after(() => {
   fs.rmSync(TMP, { recursive: true, force: true });
 });
 
-test("runScan returns without fetching when autoEntry off; fetches the datapi pool list when on", async () => {
+test("runScan returns without fetching when autoEntry off; fetches the pool-discovery list when on", async () => {
   setToggle("autoEntry", false);
   const offUrls = await withFetchSpy(() => runScan());
   assert.deepEqual(offUrls, [], "no fetch at all when autoEntry off");
@@ -62,7 +61,7 @@ test("runScan returns without fetching when autoEntry off; fetches the datapi po
   setToggle("autoEntry", true);
   const onUrls = await withFetchSpy(() => runScan());
   assert.ok(
-    onUrls.some((u) => u.startsWith("https://dlmm.datapi.meteora.ag/pools?")),
-    "datapi pool list fetched when autoEntry on"
+    onUrls.some((u) => u.startsWith("https://pool-discovery-api.datapi.meteora.ag/pools?")),
+    "pool-discovery list fetched when autoEntry on"
   );
 });

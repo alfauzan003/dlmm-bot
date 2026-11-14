@@ -1,4 +1,4 @@
-// /settings → 🧩 Strategy: lihat & ubah setiap key strat.conf. Perubahan disimpan sebagai override
+// /settings → 🤖 Auto Entry / 🐼 Exit strategy / 🛠 Advanced: lihat & ubah setiap key strat.conf. Perubahan disimpan sebagai override
 // di settings.json (stratOverrides) dan langsung berlaku, kecuali key ⟳ (setelah restart).
 import { InlineKeyboard } from "grammy";
 import { loadEnv } from "../config/env.js";
@@ -21,21 +21,100 @@ function pageOf(schema, key) {
   return Math.floor(schema.sections[section].keys.indexOf(key) / PAGE_SIZE);
 }
 
-export function buildStratHome(schema, overrides) {
-  const keyboard = new InlineKeyboard();
+const AUTO_PREFIX = "Auto Entry";
+const EXIT_PREFIX = "Exit strategy";
+const ICONS = { "Bidask flip": "🔁", Rabbit: "🐇", Safety: "🛡", Limits: "⛔" };
+const SOON = new Set(["Rabbit"]); // strategi yang belum dibangun
+
+const partsOf = (title) => title.split(" · ");
+// auto = "Auto Entry · …", exit = "Exit strategy · …", adv = sisanya.
+export function groupOf(title) {
+  const head = partsOf(title)[0];
+  if (head === AUTO_PREFIX) return "auto";
+  if (head === EXIT_PREFIX) return "exit";
+  return "adv";
+}
+
+function overrideCount(schema, overrides, indexes) {
+  return indexes.reduce((n, i) => n + schema.sections[i].keys.filter((k) => k in overrides).length, 0);
+}
+
+const withCount = (label, n) => (n > 0 ? `${label} (${n} ✏️)` : label);
+
+// Grup Auto Entry: bagian "Auto Entry · X" atau "Auto Entry · X · Y"; X dengan beberapa bagian = satu tombol sub-grup.
+function autoEntries(schema) {
+  const entries = [];
   schema.sections.forEach((s, i) => {
-    const n = s.keys.filter((k) => k in overrides).length;
-    keyboard.text(n > 0 ? `${s.title} (${n} ✏️)` : s.title, `st:s:${i}:0`).row();
+    if (groupOf(s.title) !== "auto") return;
+    const name = partsOf(s.title)[1] ?? s.title;
+    const hit = entries.find((e) => e.name === name);
+    if (hit) hit.sections.push(i);
+    else entries.push({ name, sections: [i] });
+  });
+  return entries;
+}
+
+const iconLabel = (name) => `${ICONS[name] ? `${ICONS[name]} ` : ""}${name}${SOON.has(name) ? " (soon)" : ""}`;
+
+export function buildStratGroup(schema, overrides, group) {
+  const keyboard = new InlineKeyboard();
+  if (group === "auto") {
+    for (const e of autoEntries(schema)) {
+      const n = overrideCount(schema, overrides, e.sections);
+      const data = e.sections.length > 1 ? `st:g:auto:${e.sections[0]}` : `st:s:${e.sections[0]}:0`;
+      keyboard.text(withCount(iconLabel(e.name), n), data).row();
+    }
+    keyboard.text("◀ Back", "set:back");
+    const text = [
+      "🤖 <b>Auto Entry</b>",
+      "",
+      "Strategies, safety checks and limits for auto trades. Turn Auto Entry on or off in /settings.",
+      "Values come from strat.conf. Changes are saved as overrides in settings.json and apply right away.",
+      "✏️ = overridden · ⟳ = applies after restart",
+    ].join("\n");
+    return { text, keyboard };
+  }
+  schema.sections.forEach((s, i) => {
+    if (groupOf(s.title) !== "adv") return;
+    keyboard.text(withCount(s.title, overrideCount(schema, overrides, [i])), `st:s:${i}:0`).row();
   });
   if (Object.keys(overrides).length > 0) keyboard.text("↩ Reset all overrides", "st:resetall").row();
   keyboard.text("◀ Back", "set:back");
   const text = [
-    "🧩 <b>Strategy settings</b>",
+    "🛠 <b>Advanced</b>",
     "",
+    "Transactions, swaps, monitoring, market data, logs and the paper trading simulator.",
     "Values come from strat.conf. Changes are saved as overrides in settings.json and apply right away.",
     "✏️ = overridden · ⟳ = applies after restart",
   ].join("\n");
   return { text, keyboard };
+}
+
+// Sub-grup Auto Entry (mis. Bidask flip): satu tombol per bagian "Auto Entry · X · Y".
+export function buildStratSubgroup(schema, overrides, firstIndex) {
+  const entry = autoEntries(schema).find((e) => e.sections[0] === firstIndex);
+  if (!entry) return buildStratGroup(schema, overrides, "auto");
+  const keyboard = new InlineKeyboard();
+  for (const i of entry.sections) {
+    const title = partsOf(schema.sections[i].title).slice(2).join(" · ") || schema.sections[i].title;
+    keyboard.text(withCount(title, overrideCount(schema, overrides, [i])), `st:s:${i}:0`).row();
+  }
+  keyboard.text("⬅ Auto Entry", "st:g:auto");
+  const description = schema.sections[entry.sections[0]].description;
+  let text = `🤖 <b>${esc(iconLabel(entry.name))}</b>`;
+  if (description) text += `\n\n${esc(description)}`;
+  return { text, keyboard };
+}
+
+// Tombol kembali dari satu bagian ke menu asalnya.
+function sectionBack(schema, sectionIndex) {
+  const { title } = schema.sections[sectionIndex];
+  const group = groupOf(title);
+  if (group === "exit") return ["⬅ Exit strategy", "set:exit"];
+  if (group === "adv") return ["⬅ Advanced", "st:g:adv"];
+  const entry = autoEntries(schema).find((e) => e.sections.includes(sectionIndex));
+  if (entry && entry.sections.length > 1) return [`⬅ ${entry.name}`, `st:g:auto:${entry.sections[0]}`];
+  return ["⬅ Auto Entry", "st:g:auto"];
 }
 
 export function buildStratSection(schema, overrides, sectionIndex, page) {
@@ -51,9 +130,7 @@ export function buildStratSection(schema, overrides, sectionIndex, page) {
   }
   if (p > 0) keyboard.text("◀ Prev", `st:s:${sectionIndex}:${p - 1}`);
   if (p < pages - 1) keyboard.text("Next ▶", `st:s:${sectionIndex}:${p + 1}`);
-  // Bagian exit strategy dibuka dari /settings → 🐼 Exit strategy, jadi kembali ke sana.
-  if (section.title.startsWith("Exit strategy")) keyboard.row().text("⬅ Exit strategy", "set:exit");
-  else keyboard.row().text("⬅ Sections", "st:home");
+  keyboard.row().text(...sectionBack(schema, sectionIndex));
   let text = `🧩 <b>${esc(section.title)}</b>${pages > 1 ? ` — page ${p + 1}/${pages}` : ""}`;
   if (section.description) text += `\n\n${esc(section.description)}`;
   return { text, keyboard };
@@ -109,9 +186,22 @@ async function knownKey(ctx, schema, key) {
 }
 
 export function registerStrat(bot) {
+  // st:home = tombol lama (sebelum menu dipecah) -> Advanced.
   bot.callbackQuery(
-    "st:home",
-    withGuard("Strategy", (ctx) => edit(ctx, buildStratHome(loadStratSchema(), getStratOverrides())))
+    /^st:(home|g:adv)$/,
+    withGuard("Advanced", (ctx) => edit(ctx, buildStratGroup(loadStratSchema(), getStratOverrides(), "adv")))
+  );
+
+  bot.callbackQuery(
+    "st:g:auto",
+    withGuard("Auto Entry", (ctx) => edit(ctx, buildStratGroup(loadStratSchema(), getStratOverrides(), "auto")))
+  );
+
+  bot.callbackQuery(
+    /^st:g:auto:(\d+)$/,
+    withGuard("Auto Entry", (ctx) =>
+      edit(ctx, buildStratSubgroup(loadStratSchema(), getStratOverrides(), Number(ctx.match[1])))
+    )
   );
 
   bot.callbackQuery(
@@ -119,7 +209,7 @@ export function registerStrat(bot) {
     withGuard("Strategy section", async (ctx) => {
       const schema = loadStratSchema();
       const i = Number(ctx.match[1]);
-      if (!schema.sections[i]) return edit(ctx, buildStratHome(schema, getStratOverrides()));
+      if (!schema.sections[i]) return edit(ctx, buildStratGroup(schema, getStratOverrides(), "adv"));
       return edit(ctx, buildStratSection(schema, getStratOverrides(), i, Number(ctx.match[2])));
     })
   );
@@ -175,7 +265,7 @@ export function registerStrat(bot) {
     "st:resetall",
     withGuard("Strategy reset all", (ctx) => {
       const n = Object.keys(getStratOverrides()).length;
-      const keyboard = new InlineKeyboard().text("↩ Yes, reset all", "st:resetall:yes").text("✖ Cancel", "st:home");
+      const keyboard = new InlineKeyboard().text("↩ Yes, reset all", "st:resetall:yes").text("✖ Cancel", "st:g:adv");
       return ctx.editMessageText(`Reset all ${n} strategy override(s) back to strat.conf?`, {
         ...HTML,
         reply_markup: keyboard,
@@ -187,7 +277,7 @@ export function registerStrat(bot) {
     "st:resetall:yes",
     withGuard("Strategy reset all", (ctx) => {
       clearStratOverrides();
-      return edit(ctx, buildStratHome(loadStratSchema(), getStratOverrides()));
+      return edit(ctx, buildStratGroup(loadStratSchema(), getStratOverrides(), "adv"));
     })
   );
 

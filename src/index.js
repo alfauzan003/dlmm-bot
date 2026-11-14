@@ -17,10 +17,9 @@ import { legacyAdoptionCount, tradeExitLoop } from "./exit/trade-loop.js";
 log.info("========================================");
 log.info("  Meteora Bot starting...");
 log.info(`  Mode: ${config.dryRun ? "DRY RUN" : "LIVE"} (dari .env) | SOL_MODE: ${config.solMode} (strat.conf/.env)`);
-const { degen, multihour } = config.autoEntry.profiles;
-const profileLabel = (name, p) => `${name} ${p.on ? "on" : "off"} ${p.sizeSol} SOL`;
+const flip = config.autoEntry.profiles.bidask_flip;
 log.info(
-  `  Auto entry: ${profileLabel("degen", degen)} · ${profileLabel("multihour", multihour)} · scan ${config.autoEntry.scanIntervalSec}s`
+  `  Auto entry: bidask_flip ${flip.on ? "on" : "off"} ${flip.sizeSol} SOL · scan ${config.autoEntry.scanIntervalSec}s`
 );
 log.info("========================================");
 
@@ -38,7 +37,7 @@ startBot([start, help, settings, positions, openWizard, pnl, wallet, swap])
   .then((bot) => bot && start.sendHome(bot.api, { prefix: start.onlinePrefix(legacyCount) }))
   .catch((err) => log.error(`Telegram startup gagal: ${err?.message ?? err}`));
 
-// Entry scanner (Meteora screener, bid-ask flip) — own cadence
+// Entry scanner (Meteora pool-discovery, bidask flip) — own cadence
 startEntryScanner();
 
 // TP/SL/Trail per trade — own cadence (TRADE_EXIT_INTERVAL_SEC)

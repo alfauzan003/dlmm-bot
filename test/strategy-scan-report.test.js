@@ -6,7 +6,6 @@ import {
   bump,
   fmtCounts,
   tokenDetail,
-  volatilityDetail,
   signalDetail,
   limitDetail,
   funnelLine,
@@ -16,8 +15,8 @@ import {
   buildDigestText,
 } from "../src/strategy/scan-report.js";
 
-const P = { ...buildProfile({}, "degen"), minPumpPct: 8, minPullbackPct: 5, maxPullbackPct: 35, pumpLookbackMin: 30 };
-const G = { organicScoreMin: 60, topHoldersMaxPct: 30 };
+const P = buildProfile({}, "bidask_flip");
+const HOUR = 3600000;
 
 test("fmtCounts sorts by count, then name", () => {
   assert.equal(fmtCounts({ tvl: 2, fee_tvl: 5, age: 2 }), "fee_tvl 5, age 2, tvl 2");
@@ -48,41 +47,45 @@ test("candidateLine includes verdict, detail and metrics", () => {
     pairName: "FOO-SOL",
     pool: "Pool1111",
     feeTvl30mPct: 1.234,
+    feeActiveTvl30mPct: 2.345,
     volatilityPct: 4.06,
-    signal: "no_pump",
-    detail: "pump 3.2% < min 8% in 30m",
+    signal: "above_fib",
+    detail: "price above fib 0.382",
   };
   assert.equal(
-    candidateLine("degen", c),
-    "Auto entry degen · FOO-SOL → no_pump (pump 3.2% < min 8% in 30m) · fee/TVL 1.23% · vol 4.1%"
+    candidateLine("bidask_flip", c),
+    "Auto entry bidask_flip · FOO-SOL → above_fib (price above fib 0.382) · fee/active TVL 2.35% · vol 4.1"
   );
   assert.equal(
-    candidateLine("degen", { ...c, pairName: "", volatilityPct: null, detail: null }),
-    "Auto entry degen · Pool1111… → no_pump · fee/TVL 1.23%"
+    candidateLine("bidask_flip", { ...c, pairName: "", volatilityPct: null, detail: null }),
+    "Auto entry bidask_flip · Pool1111… → above_fib · fee/active TVL 2.35%"
   );
 });
 
 test("detail helpers name the number and the threshold", () => {
-  assert.equal(tokenDetail("organic", { organicScore: 41 }, G), "organic score 41 < 60");
-  assert.equal(tokenDetail("top_holders", { audit: { topHoldersPercentage: 45 } }, G), "top holders 45% > 30%");
-  assert.equal(tokenDetail("no_token", undefined, G), "no Jupiter token info");
-  assert.match(volatilityDetail(null, P), /n\/a/);
+  const now = 100 * HOUR;
+  assert.equal(tokenDetail("no_token", undefined, P, now), "no Jupiter token info");
+  assert.equal(tokenDetail("mcap", { mcap: 6_000_000 }, P, now), "Jupiter mcap $6000000 outside 200000–5000000");
+  assert.equal(tokenDetail("holders", { holderCount: 10 }, P, now), "Jupiter holders 10 < 500");
+  assert.equal(tokenDetail("top10", { audit: { topHoldersPercentage: 45 } }, P, now), "top 10 holders 45.0% > 30%");
   assert.equal(
-    volatilityDetail(12.34, { volatilityMinPct: 2, volatilityMaxPct: 10 }),
-    "volatility 12.3% outside 2–10%"
+    tokenDetail("age", { createdAt: new Date(now - 1.5 * HOUR).toISOString() }, P, now),
+    "token age 1.5h outside 2–∞h"
   );
-  const m = { pumpPct: 3.21, pullbackPct: 1 };
-  assert.equal(signalDetail({ reason: "no_pump", metrics: m }, P), "pump 3.2% < min 8% in 30m");
+  assert.equal(tokenDetail("authorities", {}, P, now), "mint/freeze authority not disabled");
+
+  const m = { ath: 2, atl: 0.5, price: 1.6, fibEntry: 1.427, fibDeep: 0.821, maxPct: 42.47 };
   assert.equal(
-    signalDetail({ reason: "pullback_large", metrics: { pumpPct: 20, pullbackPct: 40 } }, P),
-    "pump 20.0% · pullback 40.0% > max 35%"
+    signalDetail({ reason: "above_fib", metrics: m }, P, "gmgn"),
+    "price $1.600 · fib 0.382 $1.427 · ATL $0.5000 / ATH $2.000 → price above fib 0.382 · 5m gmgn"
   );
   assert.equal(
-    signalDetail({ reason: "not_red", metrics: { pumpPct: 20, pullbackPct: 10 } }, P),
-    "pump 20.0% · pullback 10.0% · last bar not red"
+    signalDetail({ reason: "signal", metrics: { ...m, price: 1 } }, P, "dexpaprika"),
+    "price $1.000 · fib 0.382 $1.427 · ATL $0.5000 / ATH $2.000 · max range 42.5% (to fib 0.786) · 5m dexpaprika"
   );
-  assert.equal(signalDetail({ reason: "immediate", metrics: null }, P), "immediate timing");
-  assert.equal(limitDetail("max_open", { maxOpen: 2 }), "profile already has 2 open trade(s)");
+  assert.equal(signalDetail({ reason: "no_history", metrics: null }, P), "no ATH/ATL (not enough candles)");
+  assert.equal(limitDetail("max_open", { maxOpen: 2 }), "strategy already has 2 open trade(s)");
+  assert.equal(limitDetail("profile_off", {}), "strategy off");
 });
 
 test("digest sums scans per profile and lists the latest candidates", () => {
@@ -107,6 +110,6 @@ test("digest sums scans per profile and lists the latest candidates", () => {
   assert.match(text, /multihour — no scan yet/);
   assert.match(
     buildDigestText(emptyDigest(), { mode: "LIVE", minutes: null, profilesOn: [] }),
-    /first scan · LIVE[\s\S]*No profile is on/
+    /first scan · LIVE[\s\S]*No strategy is on/
   );
 });

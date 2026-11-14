@@ -1,35 +1,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildProfile, buildAutoEntry, profileExit, profileToConf } from "../src/strategy/params.js";
+import { PROFILES, buildProfile, buildAutoEntry, profileExit, profileAutoFlip } from "../src/strategy/params.js";
 
-test("buildProfile uses defaults when env is empty", () => {
-  const d = buildProfile({}, "degen");
-  assert.equal(d.sizeSol, 0.5);
-  assert.equal(d.maxPoolAgeH, 72);
-  assert.equal(d.entryTiming, "pullback");
-  assert.equal(d.rangeMode, "fixed");
-  assert.equal(d.maxHoldMin, 120);
-  const m = buildProfile({}, "multihour");
-  assert.equal(m.minMcapUsd, 3000000);
-  assert.equal(m.rangeMode, "support");
-  assert.equal(m.maxHoldMin, 1440);
+test("only the bidask flip strategy exists", () => {
+  assert.deepEqual(PROFILES, ["bidask_flip"]);
 });
 
-test("buildProfile reads prefixed keys and parses types", () => {
-  const p = buildProfile(
-    { MULTI_ON: "false", MULTI_MAX_OPEN: "3", MULTI_RANGE_MODE: "fixed", MULTI_FLIP_PCT: "70" },
-    "multihour"
+test("buildProfile uses the spec defaults when env is empty", () => {
+  const p = buildProfile({}, "bidask_flip");
+  assert.deepEqual(
+    [p.minMcapUsd, p.maxMcapUsd, p.minTokenAgeH, p.maxTokenAgeH, p.minHolders, p.maxTop10Pct],
+    [200000, 5000000, 2, 0, 500, 30]
   );
-  assert.deepEqual([p.on, p.maxOpen, p.rangeMode, p.flipPct], [false, 3, "fixed", 70]);
+  assert.deepEqual([p.minFees30mUsd, p.minBaseFeePct, p.minFeeActiveTvl30mPct, p.minBinStep], [1, 1, 0.2, 80]);
+  assert.deepEqual([p.fibEntryLevel, p.fibDeepLevel, p.rangeMinPct, p.volatilityCap], [0.382, 0.786, 30, 10]);
+  assert.deepEqual([p.flipPct, p.flipStep], [65, 10]);
 });
 
-test("buildProfile orders inverted min/max pairs", () => {
-  const p = buildProfile({ DEGEN_VOLATILITY_MIN_PCT: "5", DEGEN_VOLATILITY_MAX_PCT: "2" }, "degen");
-  assert.deepEqual([p.volatilityMinPct, p.volatilityMaxPct], [2, 5]);
+test("buildProfile reads BIDASK_ keys and parses types", () => {
+  const p = buildProfile({ BIDASK_ON: "false", BIDASK_MAX_OPEN: "3.7", BIDASK_FLIP_PCT: "70" }, "bidask_flip");
+  assert.deepEqual([p.on, p.maxOpen, p.flipPct], [false, 3, 70]);
 });
 
-test("invalid enum falls back to default", () => {
-  assert.equal(buildProfile({ DEGEN_ENTRY_TIMING: "maybe" }, "degen").entryTiming, "pullback");
+test("buildProfile orders inverted pairs; 0 max means no max", () => {
+  const p = buildProfile(
+    { BIDASK_MIN_MCAP_USD: "900", BIDASK_MAX_MCAP_USD: "100", BIDASK_FIB_ENTRY_LEVEL: "0.786", BIDASK_FIB_DEEP_LEVEL: "0.382" },
+    "bidask_flip"
+  );
+  assert.deepEqual([p.minMcapUsd, p.maxMcapUsd, p.fibEntryLevel, p.fibDeepLevel], [100, 900, 0.382, 0.786]);
+  const q = buildProfile({ BIDASK_MIN_TOKEN_AGE_H: "5", BIDASK_MAX_TOKEN_AGE_H: "0" }, "bidask_flip");
+  assert.deepEqual([q.minTokenAgeH, q.maxTokenAgeH], [5, 0]);
 });
 
 test("profileExit: 0 means off", () => {
@@ -42,22 +42,18 @@ test("profileExit: 0 means off", () => {
   });
 });
 
-test("profileToConf round-trips through buildProfile", () => {
-  const p = buildProfile({ DEGEN_FLIP_PCT: "45" }, "degen");
-  const env = Object.fromEntries(
-    profileToConf(p)
-      .trim()
-      .split("\n")
-      .map((l) => l.split("="))
-  );
-  assert.deepEqual(buildProfile(env, "degen"), p);
+test("profileAutoFlip: pct + step, step 0 = once, pct 0 = off", () => {
+  assert.deepEqual(profileAutoFlip({ flipPct: 65, flipStep: 10 }), { pct: 65, step: 10 });
+  assert.deepEqual(profileAutoFlip({ flipPct: 65, flipStep: 0 }), { pct: 65 });
+  assert.equal(profileAutoFlip({ flipPct: 0, flipStep: 10 }), null);
 });
 
 test("buildAutoEntry globals and sim defaults", () => {
   const g = buildAutoEntry({});
   assert.deepEqual(
-    [g.scanIntervalSec, g.candidatesPerScan, g.cooldownMin, g.cooldownLossMin, g.dailyLossLimitSol],
-    [60, 5, 120, 720, 0.5]
+    [g.scanIntervalSec, g.candidatesPerScan, g.cooldownMin, g.cooldownLossMin, g.dailyLossLimitSol, g.dexpaprikaHistoryDays],
+    [300, 3, 120, 720, 0.5, 7]
   );
   assert.deepEqual(g.sim, { poolDepthFactor: 1, poolSpreadBins: 69, swapCostPct: 1, txCostSol: 0.0002 });
+  assert.deepEqual(Object.keys(g.profiles), ["bidask_flip"]);
 });

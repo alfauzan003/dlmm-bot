@@ -10,7 +10,6 @@ process.env.STATE_FILE = path.join(TMP, "state.json");
 process.env.SETTINGS_FILE = path.join(TMP, "settings.json");
 process.env.PAPER_FILE = path.join(TMP, "paper-trades.json");
 process.env.STRATEGY_LOG_FILE = path.join(TMP, "strategy-log.jsonl");
-process.env.BACKTEST_DIR = path.join(TMP, "backtest");
 const STRAT = path.join(TMP, "strat.conf");
 fs.writeFileSync(STRAT, fs.readFileSync(new URL("../strat.conf", import.meta.url), "utf8"));
 process.env.STRAT_FILE = STRAT;
@@ -44,6 +43,12 @@ const ROW = {
   mcapUsd: 1_000_000,
   holders: 2000,
   createdAt: NOW - 3_600_000,
+  tokenCreatedAt: NOW - 10 * 3_600_000,
+  top10Pct: 10,
+  fees30mUsd: 100,
+  feeActiveTvl30mPct: 1.5,
+  activeTvlUsd: 40000,
+  basePriceUsd: 1,
 };
 
 const ENTRY = {
@@ -53,12 +58,12 @@ const ENTRY = {
   poolMeta: { binStep: 100, baseFeePct: 2, protocolFeePct: 5, tvlUsd: 50000 },
 };
 
-function degen() {
-  return config.autoEntry.profiles.degen;
+function flipP() {
+  return config.autoEntry.profiles.bidask_flip;
 }
 
 // SL desaktif: dump di tes hanya boleh ditutup oleh exit strategi (range_broken).
-const noSl = () => ({ ...degen(), slPct: 0 });
+const noSl = () => ({ ...flipP(), slPct: 0 });
 
 // Bin dengan likuiditas: base = X (token, 6 desimal), SOL = Y (9 desimal). pricePerToken = SOL per token.
 function fakePool(activeId = 100) {
@@ -107,7 +112,6 @@ test.beforeEach(() => {
   fs.rmSync(process.env.SETTINGS_FILE, { force: true });
   setToggle("autoEntry", true);
   Object.assign(config.autoEntry, buildAutoEntry({}));
-  config.autoEntry.profiles.multihour.on = false;
   _resetRunnerForTest();
   tg.__setSender(async () => null);
 });
@@ -119,7 +123,7 @@ test.after(() => {
 
 test("openPaperTrade stores entryBarTime, pool meta and per-bin liquidity", async () => {
   const { deps, calls } = makeDeps({ now: () => OPENED });
-  const t = await openPaperTrade({ profile: "degen", p: degen(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  const t = await openPaperTrade({ profile: "bidask_flip", p: flipP(), row: ROW, rangePct: 50, entry: ENTRY, deps });
   assert.equal(t.id, "P1");
   assert.equal(t.entryBarTime, ENTRY_BAR);
   assert.equal(t.openedAt, OPENED);
@@ -136,8 +140,8 @@ test("openPaperTrade stores entryBarTime, pool meta and per-bin liquidity", asyn
   assert.equal(calls.entry.length, 1);
   assert.equal(calls.entry[0].paper, true);
   assert.equal(calls.entry[0].pair, "AAA-SOL");
-  assert.equal(calls.entry[0].sizeSol, degen().sizeSol);
-  const second = await openPaperTrade({ profile: "degen", p: degen(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  assert.equal(calls.entry[0].sizeSol, flipP().sizeSol);
+  const second = await openPaperTrade({ profile: "bidask_flip", p: flipP(), row: ROW, rangePct: 50, entry: ENTRY, deps });
   assert.equal(second.id, "P2");
 });
 
@@ -147,8 +151,8 @@ test("openPaperTrade with SOL as X reverses k and prices", async () => {
     getPoolInfo: async () => ({ pool: fakePool(100), baseIsX: false }),
   });
   const t = await openPaperTrade({
-    profile: "degen",
-    p: degen(),
+    profile: "bidask_flip",
+    p: flipP(),
     row: { ...ROW, baseIsX: false },
     rangePct: 50,
     entry: ENTRY,
@@ -166,7 +170,7 @@ test("RPC failure while reading bins → empty poolLiq, trade still opens", asyn
       throw new Error("rpc down");
     },
   });
-  const t = await openPaperTrade({ profile: "degen", p: degen(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  const t = await openPaperTrade({ profile: "bidask_flip", p: flipP(), row: ROW, rangePct: 50, entry: ENTRY, deps });
   assert.deepEqual(t.poolLiq, {});
   assert.equal(listPaperTrades().length, 1);
   assert.equal(calls.entry.length, 1);
@@ -174,7 +178,7 @@ test("RPC failure while reading bins → empty poolLiq, trade still opens", asyn
 
 test("tick with no new bars leaves the trade open", async () => {
   const { deps, calls } = makeDeps({ now: () => OPENED });
-  await openPaperTrade({ profile: "degen", p: degen(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  await openPaperTrade({ profile: "bidask_flip", p: flipP(), row: ROW, rangePct: 50, entry: ENTRY, deps });
   const tick = makeDeps({ now: () => OPENED + 60_000, fetchRecentBars: async () => [] });
   const closed = await tickPaperTrades({ deps: tick.deps });
   assert.deepEqual(closed, []);
@@ -184,7 +188,7 @@ test("tick with no new bars leaves the trade open", async () => {
 
 test("tick skips when SOL price is unavailable", async () => {
   const { deps } = makeDeps({ now: () => OPENED });
-  await openPaperTrade({ profile: "degen", p: degen(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  await openPaperTrade({ profile: "bidask_flip", p: flipP(), row: ROW, rangePct: 50, entry: ENTRY, deps });
   const tick = makeDeps({
     fetchRecentBars: async () => dumpBars(),
     getSolUsd: async () => {
@@ -197,7 +201,7 @@ test("tick skips when SOL price is unavailable", async () => {
 
 test("tick closes on a strategy exit and logs + notifies once", async () => {
   const { deps } = makeDeps({ now: () => OPENED });
-  await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  await openPaperTrade({ profile: "bidask_flip", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
   const tick = makeDeps({
     fetchRecentBars: async (pool, limit) => {
       tick.calls.candles.push({ pool, limit });
@@ -230,7 +234,7 @@ test("tick closes on a strategy exit and logs + notifies once", async () => {
 
 test("a fetch with only the latest bars still simulates from the stored entry bar", async () => {
   const { deps } = makeDeps({ now: () => OPENED });
-  await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  await openPaperTrade({ profile: "bidask_flip", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
   const all = dumpBars();
   // tick 1: belum cukup untuk exit (entry + 1 bar), riwayat tersimpan
   const t1 = makeDeps({ now: () => ENTRY_BAR * 1000 + 2 * 300_000, fetchRecentBars: async () => all.slice(0, 2) });
@@ -255,7 +259,7 @@ const noPricePool = () => {
 
 test("without entryPrice, a missing entry bar waits until it arrives", async () => {
   const { deps } = makeDeps({ now: () => OPENED, getPoolInfo: async () => ({ pool: noPricePool(), baseIsX: true }) });
-  const t = await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  const t = await openPaperTrade({ profile: "bidask_flip", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
   assert.equal(t.entryPrice, null);
   const all = dumpBars();
   const late = makeDeps({ fetchRecentBars: async () => all.slice(3) });
@@ -267,7 +271,7 @@ test("without entryPrice, a missing entry bar waits until it arrives", async () 
 
 test("an entry bar that is never reported is filled at entryPrice and the trade closes", async () => {
   const { deps } = makeDeps({ now: () => OPENED });
-  const t = await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  const t = await openPaperTrade({ profile: "bidask_flip", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
   assert.equal(t.entryPrice, 1);
   const noEntry = dumpBars().slice(1); // bar entry tidak pernah dilaporkan
   const tick = makeDeps({ fetchRecentBars: async () => noEntry });
@@ -290,7 +294,7 @@ test("fillGaps leading fill needs a valid entryPrice and a closed slot", () => {
 
 test("a gap between stored bars is filled with a flat zero-volume bar", async () => {
   const { deps } = makeDeps({ now: () => OPENED });
-  await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  await openPaperTrade({ profile: "bidask_flip", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
   const all = dumpBars();
   const withGap = all.filter((b) => b.time !== ENTRY_BAR + 300); // bar 1 hilang
   const tick = makeDeps({ fetchRecentBars: async () => withGap });
@@ -308,7 +312,7 @@ test("a gap between stored bars is filled with a flat zero-volume bar", async ()
 test("a first bar with open = 0 is dropped and does not close the trade", async () => {
   // tanpa entryPrice: bar entry yang dibuang tidak bisa diisi, trade menunggu
   const { deps } = makeDeps({ now: () => OPENED, getPoolInfo: async () => ({ pool: noPricePool(), baseIsX: true }) });
-  await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  await openPaperTrade({ profile: "bidask_flip", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
   const bad = dumpBars();
   bad[0] = { ...bad[0], open: 0 };
   const tick = makeDeps({ fetchRecentBars: async () => bad });
@@ -322,8 +326,8 @@ const rawSolAsX = (bars) => bars.map((b) => ({ ...b, open: 1 / b.open, high: 1 /
 
 test("openPaperTrade stores baseIsX", async () => {
   const { deps } = makeDeps({ now: () => OPENED });
-  const a = await openPaperTrade({ profile: "degen", p: degen(), row: ROW, rangePct: 50, entry: ENTRY, deps });
-  const b = await openPaperTrade({ profile: "degen", p: degen(), row: { ...ROW, baseIsX: false }, rangePct: 50, entry: ENTRY, deps });
+  const a = await openPaperTrade({ profile: "bidask_flip", p: flipP(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  const b = await openPaperTrade({ profile: "bidask_flip", p: flipP(), row: { ...ROW, baseIsX: false }, rangePct: 50, entry: ENTRY, deps });
   assert.equal(a.baseIsX, true);
   assert.equal(b.baseIsX, false);
 });
@@ -331,13 +335,13 @@ test("openPaperTrade stores baseIsX", async () => {
 test("stored baseIsX falls back to the pool info when the row has none", async () => {
   const { deps } = makeDeps({ now: () => OPENED, getPoolInfo: async () => ({ pool: fakePool(), baseIsX: false }) });
   const { baseIsX: _omit, ...rowNoSide } = ROW;
-  const t = await openPaperTrade({ profile: "degen", p: degen(), row: rowNoSide, rangePct: 50, entry: ENTRY, deps });
+  const t = await openPaperTrade({ profile: "bidask_flip", p: flipP(), row: rowNoSide, rangePct: 50, entry: ENTRY, deps });
   assert.equal(t.baseIsX, false);
 });
 
 test("SOL-as-X trade: raw token-per-SOL bars are inverted before they are stored and simulated", async () => {
   const { deps } = makeDeps({ now: () => OPENED });
-  await openPaperTrade({ profile: "degen", p: noSl(), row: { ...ROW, baseIsX: false }, rangePct: 50, entry: ENTRY, deps });
+  await openPaperTrade({ profile: "bidask_flip", p: noSl(), row: { ...ROW, baseIsX: false }, rangePct: 50, entry: ENTRY, deps });
   const fetched = [];
   const tick = makeDeps({
     fetchRecentBars: async (pool, limit) => {
@@ -360,7 +364,7 @@ test("SOL-as-X trade: raw token-per-SOL bars are inverted before they are stored
 
 test("a trade without baseIsX (old file) is read as token-as-X", async () => {
   const { deps } = makeDeps({ now: () => OPENED });
-  await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  await openPaperTrade({ profile: "bidask_flip", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
   const list = JSON.parse(fs.readFileSync(PAPER_FILE, "utf8"));
   delete list[0].baseIsX;
   fs.writeFileSync(PAPER_FILE, JSON.stringify(list));
@@ -376,18 +380,18 @@ test("token decimals come from the pool object, not getMintDecimals", async () =
     getPoolInfo: async () => ({ pool, baseIsX: true }),
     getMintDecimals: async () => 9, // nilai default salah saat RPC error
   });
-  const t = await openPaperTrade({ profile: "degen", p: degen(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  const t = await openPaperTrade({ profile: "bidask_flip", p: flipP(), row: ROW, rangePct: 50, entry: ENTRY, deps });
   assert.equal(t.poolLiq["0"], 4); // 2e6 / 1e6 token * 0.5 + 3 SOL
 });
 
 test("paperLogRow carries the closed trade fields", async () => {
   const { deps } = makeDeps({ now: () => OPENED });
-  await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
+  await openPaperTrade({ profile: "bidask_flip", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps });
   await tickPaperTrades({ deps: makeDeps({ fetchRecentBars: async () => dumpBars() }).deps });
   const row = paperLogRow(listPaperTrades()[0]);
   assert.equal(row.mode, "paper");
   assert.equal(row.exitReason, "range_broken");
-  assert.equal(row.profile, "degen");
+  assert.equal(row.profile, "bidask_flip");
   assert.equal(row.predicted, null);
 });
 
@@ -395,7 +399,7 @@ test("notifyPaperClose text", () => {
   const sent = [];
   tg.__setSender(async (text) => sent.push(text));
   tg.notifyPaperClose({
-    profile: "degen",
+    profile: "bidask_flip",
     pair: "AAA-SOL",
     closeReason: "range_broken",
     closePnlPct: -12.345,
@@ -404,7 +408,7 @@ test("notifyPaperClose text", () => {
     flipped: true,
   });
   tg.notifyPaperClose({
-    profile: "degen",
+    profile: "bidask_flip",
     pair: "AAA-SOL",
     closeReason: "cycle_done",
     closePnlPct: 3,
@@ -414,32 +418,21 @@ test("notifyPaperClose text", () => {
   });
   assert.equal(
     sent[0],
-    "📝 PAPER close · degen · AAA-SOL\nReason: Range broken\nPnL: -12.35% (-0.0617 SOL) · 42m · flipped"
+    "📝 PAPER close · bidask_flip · AAA-SOL\nReason: Range broken\nPnL: -12.35% (-0.0617 SOL) · 42m · flipped"
   );
-  assert.equal(sent[1], "📝 PAPER close · degen · AAA-SOL\nReason: Cycle done\nPnL: +3.00% (+0.0150 SOL) · 10m");
+  assert.equal(sent[1], "📝 PAPER close · bidask_flip · AAA-SOL\nReason: Cycle done\nPnL: +3.00% (+0.0150 SOL) · 10m");
 });
-
-// 13 bar 5m tertutup: naik 6 bar, turun 6 bar merah => sinyal pullback (sama dengan tes runner).
-function signalBars() {
-  const bars = [];
-  const startSec = NOW / 1000 - 300 * 14;
-  let o = 1;
-  for (let i = 0; i < 13; i++) {
-    const c = i === 0 ? 1 : i <= 6 ? o * 1.05 : o * 0.99;
-    bars.push({ time: startSec + i * 300, open: o, high: Math.max(o, c) * 1.01, low: Math.min(o, c) * 0.99, close: c, volume: 1000 });
-    o = c;
-  }
-  return bars;
-}
 
 const TOKEN_INFO = (mint) => ({
   id: mint,
-  organicScore: 80,
+  mcap: 1_000_000,
+  holderCount: 2000,
+  createdAt: new Date(NOW - 10 * 3_600_000).toISOString(),
   audit: { topHoldersPercentage: 10, mintAuthorityDisabled: true, freezeAuthorityDisabled: true },
 });
 
 test("runner in DRY_RUN opens paper trades and counts them for maxOpen", async () => {
-  degen().maxOpen = 1;
+  flipP().maxOpen = 1;
   const MINT2 = "MintPaper2222222222222222222222222222222222";
   const ROW2 = { ...ROW, address: "PoolPaper2222222222222222222222222222222222", baseMint: MINT2, name: "BBB-SOL" };
   const placed = [];
@@ -448,8 +441,10 @@ test("runner in DRY_RUN opens paper trades and counts them for maxOpen", async (
     dryRun: true,
     fetchPoolRows: async () => [ROW, ROW2],
     fetchTokens: async (mints) => new Map(mints.map((m) => [m, TOKEN_INFO(m)])),
-    fetchRecentBars: async () => signalBars(),
-    countPoolLps: async () => 50,
+    fetchVolatility: async (addresses) => new Map(addresses.map((a) => [a, 5])),
+    // ATL 0.5 / ATH 2 -> fib 0.382 = 1.427; harga 1 di bawahnya -> entry.
+    fetchRecent5mUsd: async () => ({ bars: [{ time: 0, open: 1, high: 1, low: 1, close: 1, volume: 1 }], source: "gmgn" }),
+    fetchHistory1hUsd: async () => [{ time: 0, open: 1, high: 2, low: 0.5, close: 1, volume: 1 }],
     listOpenTrades: () => [],
     listClosedTrades: () => [],
     getSolUsd: async () => 100,
@@ -465,7 +460,7 @@ test("runner in DRY_RUN opens paper trades and counts them for maxOpen", async (
 
 test("runner in DRY_RUN: closed paper loss feeds the daily brake and the cooldown", async () => {
   const { deps: pd } = makeDeps({ now: () => NOW });
-  await openPaperTrade({ profile: "degen", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps: pd });
+  await openPaperTrade({ profile: "bidask_flip", p: noSl(), row: ROW, rangePct: 50, entry: ENTRY, deps: pd });
   // paksa close di hari ini (WIB): tick dengan bar dump, now = NOW + 1 jam
   await tickPaperTrades({ deps: makeDeps({ now: () => NOW + 3_600_000, fetchRecentBars: async () => dumpBars() }).deps });
   const closed = listPaperTrades({ open: false });
