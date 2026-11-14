@@ -21,6 +21,7 @@ export const PROFILE_FIELDS = [
   { suffix: "MIN_BASE_FEE_PCT", field: "minBaseFeePct", type: "num" },
   { suffix: "MIN_FEE_ACTIVE_TVL_30M_PCT", field: "minFeeActiveTvl30mPct", type: "num" },
   { suffix: "MIN_BIN_STEP", field: "minBinStep", type: "int" },
+  { suffix: "JUPSHIELD_SAFEGUARD", field: "jupShieldSafeguard", type: "bool" },
   // Entry & range (Fibonacci ATL -> ATH).
   { suffix: "FIB_ENTRY_LEVEL", field: "fibEntryLevel", type: "num" },
   { suffix: "FIB_DEEP_LEVEL", field: "fibDeepLevel", type: "num" },
@@ -67,6 +68,7 @@ export const PROFILE_DEFAULTS = {
     minBaseFeePct: 1,
     minFeeActiveTvl30mPct: 0.2,
     minBinStep: 80,
+    jupShieldSafeguard: true,
     fibEntryLevel: 0.382,
     fibDeepLevel: 0.786,
     rangeMinPct: 30,

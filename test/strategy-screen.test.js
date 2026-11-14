@@ -71,6 +71,7 @@ test("toPoolRow maps a pool-discovery SOL pair with base = X", () => {
     tokenCreatedAt: NOW - 10 * HOUR,
     basePriceUsd: 0.001,
     authoritiesOff: true,
+    criticalWarnings: [],
     createdAt: NOW - 5 * HOUR,
   });
 });
@@ -113,14 +114,18 @@ test("poolQueryUrl: pool-discovery, timeframe 30m, every filter on the server", 
       "fee_pct>=1",
       "fee_active_tvl_ratio>=0.2",
       "bin_step>=80",
+      "base_token_has_critical_warnings=false",
+      "quote_token_has_critical_warnings=false",
       "base_token_market_cap<=5000000",
       "base_token_top_holders_pct<=30",
       `base_token_created_at<=${NOW - 2 * HOUR}`,
     ].join(" && ")
   );
-  const v = new URL(poolQueryUrl({ ...P, maxMcapUsd: 0, maxTop10Pct: 0, minTokenAgeH: 0, maxTokenAgeH: 48 }, NOW));
+  const v = new URL(
+    poolQueryUrl({ ...P, maxMcapUsd: 0, maxTop10Pct: 0, minTokenAgeH: 0, maxTokenAgeH: 48, jupShieldSafeguard: false }, NOW)
+  );
   const f = v.searchParams.get("filter_by");
-  assert.doesNotMatch(f, /market_cap<=|top_holders_pct|created_at<=/);
+  assert.doesNotMatch(f, /market_cap<=|top_holders_pct|created_at<=|critical_warnings/);
   assert.match(f, new RegExp(`base_token_created_at>=${NOW - 48 * HOUR}`));
 });
 
@@ -139,6 +144,7 @@ test("passesPoolFilters reasons", () => {
     [{ baseFeePct: 0.9 }, "base_fee"],
     [{ feeActiveTvl30mPct: 0.19 }, "fee_active_tvl"],
     [{ binStep: 79 }, "bin_step"],
+    [{ criticalWarnings: ["TRANSFER_FEE_CONFIGURED"] }, "jupshield"],
   ];
   for (const [o, reason] of cases) assert.deepEqual(passesPoolFilters({ ...good, ...o }, P, NOW), { ok: false, reason }, reason);
   assert.equal(passesPoolFilters({ ...good, top10Pct: null }, { ...P, maxTop10Pct: 0 }, NOW).ok, true);
@@ -212,4 +218,16 @@ test("toSolPerToken drops bars with non-positive or non-finite prices", () => {
 test("toSolPerToken fails closed when baseIsX is not a boolean", () => {
   const bars = [{ time: 0, open: 2, high: 4, low: 1, close: 2.5, volume: 7 }];
   for (const v of [undefined, null, 0, "true"]) assert.deepEqual(toSolPerToken(bars, v), [], String(v));
+});
+
+test("toPoolRow keeps only critical JupShield warnings; safeguard off lets them pass", () => {
+  const warnings = [
+    { type: "TRANSFER_FEE_CONFIGURED", severity: "critical" },
+    { type: "NOT_VERIFIED", severity: "info" },
+    { type: "HAS_FREEZE_AUTHORITY", severity: "warning" },
+  ];
+  const r = toPoolRow(raw({ token_x: { ...raw().token_x, warnings } }));
+  assert.deepEqual(r.criticalWarnings, ["TRANSFER_FEE_CONFIGURED"]);
+  assert.equal(passesPoolFilters(r, P, NOW).reason, "jupshield");
+  assert.equal(passesPoolFilters(r, { ...P, jupShieldSafeguard: false }, NOW).ok, true);
 });

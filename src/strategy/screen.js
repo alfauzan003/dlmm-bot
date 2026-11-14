@@ -23,6 +23,8 @@ export function poolQueryUrl(p, now, { pageSize = 200 } = {}) {
     `fee_active_tvl_ratio>=${p.minFeeActiveTvl30mPct}`,
     `bin_step>=${p.minBinStep}`,
   ];
+  // JupShield Safeguard (sama dengan checkbox di UI Meteora): tanpa warning Jupiter berseverity critical.
+  if (p.jupShieldSafeguard) parts.push("base_token_has_critical_warnings=false", "quote_token_has_critical_warnings=false");
   if (p.maxMcapUsd > 0) parts.push(`base_token_market_cap<=${p.maxMcapUsd}`);
   if (p.maxTop10Pct > 0) parts.push(`base_token_top_holders_pct<=${p.maxTop10Pct}`);
   if (p.minTokenAgeH > 0) parts.push(`base_token_created_at<=${Math.floor(now - p.minTokenAgeH * HOUR_MS)}`);
@@ -83,6 +85,10 @@ export function toPoolRow(raw) {
     tokenCreatedAt: n(base.created_at) || 0,
     basePriceUsd: n(base.price) || null,
     authoritiesOff: base.has_mint_authority === false && base.has_freeze_authority === false,
+    // Tipe warning JupShield berseverity critical (mis. TRANSFER_FEE_CONFIGURED, NOT_SELLABLE).
+    criticalWarnings: (Array.isArray(base.warnings) ? base.warnings : [])
+      .filter((w) => w?.severity === "critical")
+      .map((w) => w.type),
     createdAt: n(raw.pool_created_at) || 0,
   };
 }
@@ -99,6 +105,7 @@ export function passesPoolFilters(row, p, now) {
   if (row.baseFeePct < p.minBaseFeePct) return fail("base_fee");
   if (row.feeActiveTvl30mPct < p.minFeeActiveTvl30mPct) return fail("fee_active_tvl");
   if (row.binStep < p.minBinStep) return fail("bin_step");
+  if (p.jupShieldSafeguard && row.criticalWarnings?.length > 0) return fail("jupshield");
   return { ok: true, reason: null };
 }
 

@@ -179,6 +179,7 @@ all `BIDASK_*`:
 | Base fee            | ≥ 1%           | `MIN_BASE_FEE_PCT`                                 |
 | Fee / active TVL    | ≥ 0.2% (30m)   | `MIN_FEE_ACTIVE_TVL_30M_PCT`                       |
 | Bin step            | ≥ 80           | `MIN_BIN_STEP`                                     |
+| JupShield Safeguard | on             | `JUPSHIELD_SAFEGUARD` (no critical Jupiter warning) |
 
 Pools are ranked by fee / active TVL. When a token has several pools, the highest ranked one is kept and the next
 token takes the free slot, so the top `AUTO_CANDIDATES_PER_SCAN` (3) candidates are always different tokens. Each
