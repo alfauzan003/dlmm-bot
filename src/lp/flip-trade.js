@@ -1,5 +1,7 @@
 // Flip trade bid_ask/mixed: tarik bin yang sudah sepenuhnya token (sisi token dari bin aktif),
 // lalu setor ulang token itu sebagai posisi BidAsk satu-sisi (cermin lebar) di atas harga.
+// Ping-pong juga membalik arah (side "sol"): SOL dari token leg flip yang sudah terjual ditarik dan
+// disetor ulang sebagai BidAsk SOL saja di bawah harga (leg `trade.solLegs`).
 import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import config from "../config/index.js";
@@ -33,12 +35,15 @@ export function canFlip(trade) {
 
 // Pilih bin yang ditarik: hanya bin sisi token (bin aktif tidak ikut) yang berisi token,
 // maksimum `maxBins` terdekat ke bin aktif dari semua leg. Satu rentang per leg.
-export function selectFlipBins({ legs, activeBinId, baseIsX, maxBins = FLIP_MAX_BINS }) {
-  const tokenSide = (binId) => (baseIsX ? binId > activeBinId : binId < activeBinId);
+// side "sol": bin sisi SOL (di bawah harga) yang berisi SOL.
+export function selectFlipBins({ legs, activeBinId, baseIsX, maxBins = FLIP_MAX_BINS, side = "token" }) {
+  const sol = side === "sol";
+  const upper = baseIsX !== sol; // token = X: sisi token di atas bin aktif, sisi SOL di bawah
+  const onSide = (binId) => (upper ? binId > activeBinId : binId < activeBinId);
   const picked = [];
   for (const leg of legs || []) {
     for (const b of leg.bins || []) {
-      if (tokenSide(b.binId) && b.tokenAmount > 0) picked.push({ position: leg.position, binId: b.binId });
+      if (onSide(b.binId) && (sol ? b.solAmount : b.tokenAmount) > 0) picked.push({ position: leg.position, binId: b.binId });
     }
   }
   picked.sort((a, b) => Math.abs(a.binId - activeBinId) - Math.abs(b.binId - activeBinId));
@@ -58,9 +63,9 @@ export function selectFlipBins({ legs, activeBinId, baseIsX, maxBins = FLIP_MAX_
   return { binCount: chosen.length, legs: out };
 }
 
-// Rentang posisi baru: n bin di sisi token, tanpa bin aktif.
-export function flipRange(activeBinId, n, baseIsX) {
-  return baseIsX
+// Rentang posisi baru: n bin di sisi token (side "sol": sisi SOL), tanpa bin aktif.
+export function flipRange(activeBinId, n, baseIsX, side = "token") {
+  return baseIsX !== (side === "sol")
     ? { minBinId: activeBinId + 1, maxBinId: activeBinId + n }
     : { minBinId: activeBinId - n, maxBinId: activeBinId - 1 };
 }
@@ -78,6 +83,7 @@ async function readLegs(pool, baseIsX) {
       bins: (p.positionData?.positionBinData || []).map((b) => ({
         binId: b.binId,
         tokenAmount: Number(baseIsX ? b.positionXAmount : b.positionYAmount) || 0,
+        solAmount: Number(baseIsX ? b.positionYAmount : b.positionXAmount) || 0,
       })),
     })),
   };
@@ -133,26 +139,37 @@ function withDeps(deps = {}) {
   };
 }
 
-// Rencana flip (tanpa efek samping: baca pool & posisi saja).
-export async function planFlip(trade, { deps } = {}) {
+// Rencana flip (tanpa efek samping: baca pool & posisi saja). side "sol" = balik arah ping-pong.
+export async function planFlip(trade, { deps, side = "token" } = {}) {
   const d = withDeps(deps);
   if (!canFlip(trade)) return { error: "only bid_ask or mixed trades can be flipped" };
   if ((trade.positions || []).length >= MAX_TRADE_POSITIONS) {
-    return { error: `too many positions (${MAX_TRADE_POSITIONS})` };
+    return { error: `too many positions (${MAX_TRADE_POSITIONS})`, cap: true };
   }
   const { pool, baseIsX } = (await d.loadPool(trade.pool)) || {};
   if (!pool) return { error: "pool not found" };
   const { activeBinId, legs } = await d.readLegs(pool, baseIsX);
-  // Seluruh sisi token ditata ulang jadi satu posisi: bin baru leg asal + leg flip lama (yang sudah
-  // di bawah harga = token lagi). Flip hanya bila leg asal punya bin baru; leg flip saja = buang fee.
   const flipLegs = new Set(trade.flipLegs || []);
+  const solLegs = new Set(trade.solLegs || []);
   const own = new Set((trade.positions || []).filter((addr) => getTrackedPosition(addr)?.closed !== true));
   const candidates = legs.filter((l) => own.has(l.position));
-  const fresh = selectFlipBins({ legs: candidates.filter((l) => !flipLegs.has(l.position)), activeBinId, baseIsX });
-  if (fresh.binCount === 0) return { binCount: 0 };
-  const sel = selectFlipBins({ legs: candidates, activeBinId, baseIsX });
-  // Cap 70 bisa hanya memilih leg flip (sisa leg asal lebih jauh) -> tarik-setor tempat yang sama.
-  if (!sel.legs.some((l) => !flipLegs.has(l.position))) return { binCount: 0 };
+  let sel;
+  if (side === "sol") {
+    // SOL hasil token leg flip yang terjual. Leg asal & leg SOL lama tidak ikut: SOL-nya sudah di bawah harga.
+    const tokenLegs = candidates.filter((l) => flipLegs.has(l.position) && !solLegs.has(l.position));
+    sel = selectFlipBins({ legs: tokenLegs, activeBinId, baseIsX, side });
+    if (sel.binCount === 0) return { binCount: 0 };
+  } else {
+    // Seluruh sisi token ditata ulang jadi satu posisi: bin baru leg sumber (leg asal / leg SOL ping-pong)
+    // + leg flip lama (yang sudah di bawah harga = token lagi). Flip hanya bila leg sumber punya bin baru;
+    // leg flip saja = buang fee.
+    const isSource = (addr) => !flipLegs.has(addr) || solLegs.has(addr);
+    const fresh = selectFlipBins({ legs: candidates.filter((l) => isSource(l.position)), activeBinId, baseIsX });
+    if (fresh.binCount === 0) return { binCount: 0 };
+    sel = selectFlipBins({ legs: candidates, activeBinId, baseIsX });
+    // Cap 70 bisa hanya memilih leg flip (sisa leg sumber lebih jauh) -> tarik-setor tempat yang sama.
+    if (!sel.legs.some((l) => isSource(l.position))) return { binCount: 0 };
+  }
   // Cek biaya & SOL sebelum menarik apa pun: gagal setelah tarik = token terdampar di wallet.
   const fee = d.feeCheck();
   if (!fee.ok) return { error: `fee estimate ${fee.totalSol.toFixed(6)} SOL > cap ${fee.cap} SOL` };
@@ -163,7 +180,7 @@ export async function planFlip(trade, { deps } = {}) {
   return {
     binCount: sel.binCount,
     legs: sel.legs,
-    newRange: flipRange(activeBinId, sel.binCount, baseIsX),
+    newRange: flipRange(activeBinId, sel.binCount, baseIsX, side),
     activeBinId,
     baseIsX,
     pool,
@@ -171,10 +188,14 @@ export async function planFlip(trade, { deps } = {}) {
 }
 
 // Flip on-chain: tarik bin token, ukur token yang keluar, setor ulang sebagai leg `bidask:token`.
-export async function flipTrade(trade, { deps } = {}) {
+// side "sol": tarik bin SOL token leg flip, ukur SOL yang keluar, setor ulang sebagai leg `bidask:sol`.
+export async function flipTrade(trade, { deps, side = "token" } = {}) {
   const d = withDeps(deps);
+  const sol = side === "sol";
+  const unit = sol ? "SOL" : "token";
   if (!tryLockTrade(trade.id, "flip")) return { success: false, busy: true, binCount: 0 };
   const t = getTrade(trade.id) ?? trade;
+  const readBalance = () => (sol ? d.getSolBalance() : d.getTokenBalance(t.baseMint));
   const label = `Flip trade #${t.id} ${t.pair}`;
   // Open/close lain di pool ini mengubah saldo token yang sama -> selisih saldo tidak bisa dipercaya.
   if (isEntryInProgressPool(t.pool) || isPoolClosing(t.pool)) {
@@ -193,23 +214,23 @@ export async function flipTrade(trade, { deps } = {}) {
   try {
     if (t.closed === true) return { success: false, error: "trade already closed", binCount: 0 };
     // Rencana dibuat ulang di dalam lock: bin aktif bisa bergeser sejak layar konfirmasi.
-    const plan = await planFlip(t, { deps });
-    if (plan.error) return { success: false, error: plan.error, binCount: 0 };
+    const plan = await planFlip(t, { deps, side });
+    if (plan.error) return { success: false, error: plan.error, cap: plan.cap === true, binCount: 0 };
     if (plan.binCount === 0) return { success: false, binCount: 0 };
     const { binCount } = plan;
     if (d.dryRun) {
-      log.info(`[DRY RUN] ${label}: would flip ${binCount} bins → ${JSON.stringify(plan.newRange)}`);
+      log.info(`[DRY RUN] ${label}: would flip ${binCount} ${unit} bins → ${JSON.stringify(plan.newRange)}`);
       return { success: true, dryRun: true, binCount };
     }
 
     let before;
     try {
-      before = await d.getTokenBalance(t.baseMint);
+      before = await readBalance();
     } catch (err) {
-      return { success: false, error: `could not read token balance: ${err?.message ?? err}`, binCount: 0 };
+      return { success: false, error: `could not read ${unit} balance: ${err?.message ?? err}`, binCount: 0 };
     }
     // Saldo "sesudah" yang gagal dibaca dianggap belum bertambah (dicoba ulang).
-    const readAfter = () => d.getTokenBalance(t.baseMint).catch(() => NaN);
+    const readAfter = () => Promise.resolve().then(readBalance).catch(() => NaN);
     let failedLegs = 0;
     for (const leg of plan.legs) {
       try {
@@ -227,14 +248,14 @@ export async function flipTrade(trade, { deps } = {}) {
     const tokenAmount = after - before;
     if (!(tokenAmount > 0)) {
       if (failedLegs === plan.legs.length) return { success: false, error: "withdraw failed", binCount };
-      log.warn(`${label}: saldo token tidak bertambah setelah tarik — token disimpan`);
-      d.addKeepMint(t.baseMint);
+      log.warn(`${label}: saldo ${unit} tidak bertambah setelah tarik — ${unit} disimpan`);
+      if (!sol) d.addKeepMint(t.baseMint);
       return { success: false, redepositFailed: true, binCount, tokenAmount: 0 };
     }
 
     // Rentang dihitung dari bin aktif terbaru (setelah penarikan).
     const activeBinId = await d.readActiveBinId(plan.pool);
-    const range = flipRange(activeBinId, binCount, plan.baseIsX);
+    const range = flipRange(activeBinId, binCount, plan.baseIsX, side);
     let res;
     try {
       res = await d.openTokenOnlyPosition({
@@ -244,17 +265,18 @@ export async function flipTrade(trade, { deps } = {}) {
         ...range,
         distribution: "bid_ask",
         pairName: t.pair,
+        side,
       });
     } catch (err) {
       res = { success: false, error: err?.message ?? String(err) };
     }
     if (!res?.success) {
-      log.error(`${label}: setor ulang gagal (${res?.error}) — ${tokenAmount} token disimpan di wallet`);
-      d.addKeepMint(t.baseMint);
+      log.error(`${label}: setor ulang gagal (${res?.error}) — ${tokenAmount} ${unit} disimpan di wallet`);
+      if (!sol) d.addKeepMint(t.baseMint);
       return { success: false, redepositFailed: true, binCount, tokenAmount, error: res?.error ?? null };
     }
-    addTradeLeg(t.id, res.position, { flip: true });
-    log.info(`🔁 ${label}: ${binCount} bin → posisi ${res.position.slice(0, 8)} (${tokenAmount} token)`);
+    addTradeLeg(t.id, res.position, { flip: true, sol });
+    log.info(`🔁 ${label}: ${binCount} bin → posisi ${res.position.slice(0, 8)} (${tokenAmount} ${unit})`);
     return { success: true, binCount, tokenAmount, position: res.position };
   } finally {
     removeEntryInProgressPool(t.pool);

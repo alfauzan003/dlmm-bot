@@ -57,3 +57,21 @@ test("buildAutoEntry globals and sim defaults", () => {
   assert.deepEqual(g.sim, { poolDepthFactor: 1, poolSpreadBins: 69, swapCostPct: 1, txCostSol: 0.0002 });
   assert.deepEqual(Object.keys(g.profiles), ["bidask_flip"]);
 });
+
+test("ping-pong defaults, enum parsing and max hold", () => {
+  const p = buildProfile({}, "bidask_flip");
+  assert.equal(p.flipMode, "pingpong");
+  assert.deepEqual(
+    [p.ppStAtrPeriod, p.ppStMultiplier, p.ppSpikeAtrMult, p.ppSpikeLookbackBars, p.ppDipMinPct],
+    [10, 3, 2, 4, 5]
+  );
+  assert.deepEqual([p.ppMinBbWidthPct, p.ppMaxAdx, p.ppMinVolRatio, p.maxHoldMin], [15, 35, 0.5, 1440]);
+  assert.equal(buildProfile({ BIDASK_FLIP_MODE: " PCT " }, "bidask_flip").flipMode, "pct");
+  assert.equal(buildProfile({ BIDASK_FLIP_MODE: "zigzag" }, "bidask_flip").flipMode, "pingpong");
+});
+
+test("profileAutoFlip: ping-pong keeps only the first flip (no step)", () => {
+  assert.deepEqual(profileAutoFlip({ flipMode: "pingpong", flipPct: 65, flipStep: 10 }), { pct: 65 });
+  assert.equal(profileAutoFlip({ flipMode: "pingpong", flipPct: 0, flipStep: 10 }), null);
+  assert.deepEqual(profileAutoFlip({ flipMode: "pct", flipPct: 65, flipStep: 10 }), { pct: 65, step: 10 });
+});

@@ -30,6 +30,7 @@ export function tokenOnlyRange(activeBinId, { binsBelow, binsAbove, minBinId, ma
 
 // Buka posisi token-only satu-sisi memakai saldo token yang sudah dimiliki.
 // Tidak ada pembelian token (tanpa Jupiter). Dipakai fallback OOR kiri spot.
+// side "sol": posisi SOL saja (tokenAmountUi = SOL), dipakai flip balik ping-pong.
 export async function openTokenOnlyPosition({
   poolAddress,
   baseMint,
@@ -40,7 +41,9 @@ export async function openTokenOnlyPosition({
   maxBinId: explicitMax,
   distribution = "bid_ask",
   pairName = null,
+  side = "token",
 } = {}) {
+  const sol = side === "sol";
   if (!poolAddress || !baseMint) {
     return { success: false, error: "pool/baseMint kosong" };
   }
@@ -100,10 +103,11 @@ export async function openTokenOnlyPosition({
     return { success: false, error: `estimasi fee ${feeCap.totalSol.toFixed(6)} SOL > cap`, feeCap: true };
   }
 
-  const decimals = await getMintDecimals(baseMint);
+  const decimals = sol ? 9 : await getMintDecimals(baseMint);
   const tokenRaw = new BN(Math.floor(amountUi * Math.pow(10, decimals)));
-  const totalXAmount = baseIsX ? tokenRaw : new BN(0);
-  const totalYAmount = baseIsX ? new BN(0) : tokenRaw;
+  const amountIsX = baseIsX !== sol; // SOL saja: SOL di sisi X bila token = Y
+  const totalXAmount = amountIsX ? tokenRaw : new BN(0);
+  const totalYAmount = amountIsX ? new BN(0) : tokenRaw;
 
   const newPosition = Keypair.generate();
   let txHash = null;
@@ -142,9 +146,9 @@ export async function openTokenOnlyPosition({
 
   const positionAddress = newPosition.publicKey.toString();
   const pair = pairName || poolPair || `${baseMint.slice(0, 4)}-SOL`;
-  trackPosition(positionAddress, poolAddress, pair, baseMint, collectFeeMode, "bidask:token");
+  trackPosition(positionAddress, poolAddress, pair, baseMint, collectFeeMode, sol ? "bidask:sol" : "bidask:token");
 
-  log.info(`📌 FALLBACK token-only ${pair} — posisi ${positionAddress.slice(0, 8)} (${amountUi} token)`);
+  log.info(`📌 ${sol ? "SOL-only" : "FALLBACK token-only"} ${pair} — posisi ${positionAddress.slice(0, 8)} (${amountUi} ${sol ? "SOL" : "token"})`);
   tg.notifyEntry({ pair, pool: poolAddress, feeMode: feePlan.mode, feeSol: feeCap.totalSol });
 
   return {

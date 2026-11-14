@@ -45,6 +45,14 @@ const OVERRIDES = {
   BIDASK_FIB_DEEP_LEVEL: { min: 0, max: 1 },
   BIDASK_VOLATILITY_CAP: { gt: 0 },
   BIDASK_SIZE_SOL: { gt: 0 },
+  BIDASK_FLIP_MODE: { type: "enum", options: ["pingpong", "pct"] },
+  BIDASK_PP_ST_ATR_PERIOD: { min: 1, int: true },
+  BIDASK_PP_ST_MULTIPLIER: { gt: 0 },
+  BIDASK_PP_SPIKE_ATR_MULT: { gt: 0 },
+  BIDASK_PP_SPIKE_LOOKBACK_BARS: { min: 1, max: 20, int: true },
+  BIDASK_PP_DIP_MIN_PCT: { min: 0, max: 99 },
+  BIDASK_PP_MAX_ADX: { min: 0, max: 100 },
+  BIDASK_PP_MIN_VOL_RATIO: { min: 0 },
   SIM_POOL_SPREAD_BINS: { gt: 0, int: true },
 };
 

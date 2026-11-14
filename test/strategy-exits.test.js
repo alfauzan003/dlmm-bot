@@ -9,7 +9,7 @@ const V = (o = {}) => ({ activeBin: -10, xIsSol: false, flipLegs: [], volumes: [
 const M = 60_000;
 
 test("reasons list and tokenPos", () => {
-  assert.deepEqual(STRATEGY_EXIT_REASONS, ["cycle_done", "pumped_away", "range_broken", "volume_died", "max_hold"]);
+  assert.deepEqual(STRATEGY_EXIT_REASONS, ["cycle_done", "trend_done", "pumped_away", "range_broken", "volume_died", "max_hold"]);
   assert.equal(tokenPos(5, false), 5);
   assert.equal(tokenPos(5, true), -5);
 });
@@ -87,4 +87,46 @@ test("strategyExitDetail explains each strategy exit", () => {
   assert.equal(d("volume_died", { view: V({ volumes: [420.4, 310, 150] }) }), "last 3 5m bars $420 / $310 / $150 < $1000");
   assert.equal(d("max_hold", { now: 121 * M }), "held 121m ≥ 120m");
   assert.equal(d(null), null);
+});
+
+// --- Ping-pong (trade.pingpong ada) ---
+const PP = { ...P, flipMode: "pingpong" };
+const PPT = (phase, o = {}) => T({ flipLegs: ["F"], pingpong: { phase }, ...o });
+
+test("ping-pong: no cycle_done; trend_done only in drain above every leg", () => {
+  const legs = [{ lowerBin: 1, upperBin: 30 }];
+  const above = V({ activeBin: 31, flipLegs: legs });
+  assert.equal(evaluateStrategyExit({ trade: PPT("ask"), view: above, p: PP, now: M }).reason, null);
+  assert.equal(evaluateStrategyExit({ trade: PPT("drain"), view: above, p: PP, now: M }).reason, "trend_done");
+  assert.equal(evaluateStrategyExit({ trade: PPT("drain"), view: V({ activeBin: 30, flipLegs: legs }), p: PP, now: M }).reason, null);
+  assert.match(strategyExitDetail("trend_done", {}), /ping-pong ended/);
+});
+
+test("ping-pong without state (paper / not evaluated yet) keeps the pct exits", () => {
+  const t = T({ flipLegs: ["F"] });
+  const legs = [{ lowerBin: 1, upperBin: 30 }];
+  assert.equal(evaluateStrategyExit({ trade: t, view: V({ activeBin: 31, flipLegs: legs }), p: PP, now: M }).reason, "cycle_done");
+});
+
+test("ping-pong bid: pumped_away once the price is above every leg and the turn point for oorAboveMin", () => {
+  // Leg SOL terakhir 10..19 (titik balik = bin 20), token leg flip lama 1..9.
+  const view = (activeBin) =>
+    V({ activeBin, flipLegs: [{ lowerBin: 1, upperBin: 9 }, { lowerBin: 10, upperBin: 19 }], solLegs: [{ lowerBin: 10, upperBin: 19 }] });
+  const atTurn = evaluateStrategyExit({ trade: PPT("bid"), view: view(20), p: PP, now: M });
+  assert.equal(atTurn.state.aboveSince, null);
+  const first = evaluateStrategyExit({ trade: PPT("bid"), view: view(21), p: PP, now: M });
+  assert.equal(first.state.aboveSince, M);
+  const t = PPT("bid", { strategyState: first.state });
+  const r = evaluateStrategyExit({ trade: t, view: view(21), p: PP, now: 11 * M });
+  assert.equal(r.reason, "pumped_away");
+  assert.match(strategyExitDetail("pumped_away", { trade: t, p: PP, now: 11 * M, state: r.state }), /ping-pong SOL legs/);
+  // Fase ask di atas semua leg: tidak ada timer (keputusan saat bar 15m tutup).
+  assert.equal(evaluateStrategyExit({ trade: PPT("ask"), view: view(25), p: PP, now: M }).state.aboveSince, null);
+});
+
+test("ping-pong: range_broken uses the bottom of every leg", () => {
+  const legs = [{ lowerBin: -80, upperBin: -60 }];
+  const t = PPT("bid", { strategyState: { aboveSince: null, belowSince: 0 } });
+  assert.equal(evaluateStrategyExit({ trade: t, view: V({ activeBin: -55, flipLegs: legs }), p: PP, now: 20 * M }).reason, null);
+  assert.equal(evaluateStrategyExit({ trade: t, view: V({ activeBin: -81, flipLegs: legs }), p: PP, now: 20 * M }).reason, "range_broken");
 });

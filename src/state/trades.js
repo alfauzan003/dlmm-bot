@@ -146,6 +146,16 @@ export function setTradeStrategyState(id, strategyState) {
   return t;
 }
 
+// Status ping-pong trade (strategy/pingpong.js). Tidak ditulis ke trade tertutup.
+export function setTradePingPong(id, pingpong) {
+  const state = readState();
+  const t = state.trades?.[String(id)];
+  if (!t || t.closed === true) return null;
+  t.pingpong = pingpong;
+  writeState(state);
+  return t;
+}
+
 // Tandai trade sudah dicatat ke strategy log (lazy).
 export function markTradeStrategyLogged(id) {
   const state = readState();
@@ -157,7 +167,8 @@ export function markTradeStrategyLogged(id) {
 }
 
 // Tambah leg ke trade terbuka. `flip` = leg hasil flip (deposit-nya tidak dihitung ulang di PnL).
-export function addTradeLeg(id, address, { flip = false } = {}) {
+// `sol` = leg flip SOL saja di bawah harga (ping-pong), dicatat juga di `trade.solLegs`.
+export function addTradeLeg(id, address, { flip = false, sol = false } = {}) {
   const state = readState();
   const t = state.trades?.[String(id)];
   if (!t || t.closed === true || !address) return null;
@@ -165,6 +176,10 @@ export function addTradeLeg(id, address, { flip = false } = {}) {
   if (flip) {
     if (!Array.isArray(t.flipLegs)) t.flipLegs = [];
     if (!t.flipLegs.includes(address)) t.flipLegs.push(address);
+    if (sol) {
+      if (!Array.isArray(t.solLegs)) t.solLegs = [];
+      if (!t.solLegs.includes(address)) t.solLegs.push(address);
+    }
   }
   writeState(state);
   return t;

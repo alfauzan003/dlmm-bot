@@ -17,6 +17,7 @@ import {
 } from "../state/positions.js";
 import { recordPnlSnapshot } from "../state/history.js";
 import { classifyMode, isCompositeMode } from "./classify.js";
+import { kickPingPong } from "./pingpong.js";
 import { takeRecentActions } from "../entry/runtime.js";
 import { getWatchSnapshot } from "../entry/index.js";
 import { buildSummaryBlock } from "../core/report.js";
@@ -210,7 +211,7 @@ export async function mainLoop() {
     } catch (err) {
       log.error(`Auto flip error: ${err.message}`);
     }
-    // Exit strategi Auto Entry (cycle_done / pumped_away / range_broken / volume_died / max_hold).
+    // Exit strategi Auto Entry (cycle_done / trend_done / pumped_away / range_broken / volume_died / max_hold).
     try {
       await runStrategyExits(positions);
     } catch (err) {
@@ -219,6 +220,8 @@ export async function mainLoop() {
     await tickPaper();
     // Evil Panda per trade (bar 15m yang baru tutup), di latar belakang supaya antrean GMGN tidak menahan loop.
     kickEvilPanda(positions);
+    // Ping-pong bidask flip (bar 15m yang baru tutup), juga di latar belakang.
+    kickPingPong(positions);
 
     for (const pos of positions) {
       if (!pos.position) continue;

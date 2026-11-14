@@ -480,3 +480,121 @@ test("flip after the cap was hit does not re-flip the flip leg alone", async () 
   const { deps } = reshapeDeps(bins(101, 170), bins(171, 200));
   assert.deepEqual(await planFlip(getTrade(trade.id), { deps }), { binCount: 0 });
 });
+
+// --- Ping-pong: balik arah (side "sol") ---
+
+const solBins = (from, to, solAmount = 1) =>
+  Array.from({ length: to - from + 1 }, (_, i) => ({ binId: from + i, tokenAmount: 0, solAmount }));
+
+test("selectFlipBins side sol: SOL bins below active (token = X), above when token = Y", () => {
+  const legs = [{ position: "F", bins: [...solBins(95, 99), { binId: 100, solAmount: 5 }, ...bins(101, 103)] }];
+  assert.deepEqual(selectFlipBins({ activeBinId: 100, baseIsX: true, legs, side: "sol" }), {
+    binCount: 5,
+    legs: [{ position: "F", fromBinId: 95, toBinId: 99 }],
+  });
+  const legsY = [{ position: "F", bins: [...bins(97, 99), ...solBins(101, 104)] }];
+  assert.deepEqual(selectFlipBins({ activeBinId: 100, baseIsX: false, legs: legsY, side: "sol" }), {
+    binCount: 4,
+    legs: [{ position: "F", fromBinId: 101, toBinId: 104 }],
+  });
+});
+
+test("flipRange side sol mirrors on the SOL side", () => {
+  assert.deepEqual(flipRange(100, 5, true, "sol"), { minBinId: 95, maxBinId: 99 });
+  assert.deepEqual(flipRange(100, 5, false, "sol"), { minBinId: 101, maxBinId: 105 });
+});
+
+// L1 = leg asal (SOL di bawah), F = leg flip token yang sebagian terjual (SOL 101..105, token 111..115),
+// S = leg SOL ping-pong lama. Aktif 110.
+function pingPongDeps(overrides = {}) {
+  let sol = 2;
+  const { deps, calls } = fakeDeps({
+    readLegs: async () => ({
+      activeBinId: 110,
+      legs: [
+        { position: "L1", bins: solBins(80, 100) },
+        { position: "F", bins: [...solBins(101, 109), ...bins(111, 115)] },
+        { position: "S", bins: solBins(85, 95) },
+      ],
+    }),
+    readActiveBinId: async () => 110,
+    removeBins: async (pool, leg) => {
+      calls.removeBins.push(leg);
+      sol += 0.4;
+    },
+    getSolBalance: async () => sol,
+    ...overrides,
+  });
+  return { deps, calls };
+}
+
+test("reverse flip takes SOL only from token flip legs and opens a SOL-only leg below the price", async () => {
+  const trade = newTrade();
+  addTradeLeg(trade.id, "F", { flip: true });
+  addTradeLeg(trade.id, "S", { flip: true, sol: true });
+  const { deps, calls } = pingPongDeps();
+  const res = await flipTrade(getTrade(trade.id), { deps, side: "sol" });
+  assert.equal(res.success, true);
+  assert.equal(res.binCount, 9);
+  assert.deepEqual(calls.removeBins, [{ position: "F", fromBinId: 101, toBinId: 109 }]);
+  assert.equal(calls.open.length, 1);
+  assert.equal(calls.open[0].side, "sol");
+  assert.ok(Math.abs(calls.open[0].tokenAmountUi - 0.4) < 1e-9);
+  assert.deepEqual([calls.open[0].minBinId, calls.open[0].maxBinId], [101, 109]);
+  const t = getTrade(trade.id);
+  assert.deepEqual(t.flipLegs, ["F", "S", "NewPos"]);
+  assert.deepEqual(t.solLegs, ["S", "NewPos"]);
+});
+
+test("reverse flip with no sold token bins does nothing", async () => {
+  const trade = newTrade();
+  addTradeLeg(trade.id, "F", { flip: true });
+  const { deps, calls } = pingPongDeps({
+    readLegs: async () => ({ activeBinId: 100, legs: [{ position: "F", bins: bins(101, 110) }] }),
+  });
+  const res = await flipTrade(getTrade(trade.id), { deps, side: "sol" });
+  assert.deepEqual(res, { success: false, binCount: 0 });
+  assert.equal(calls.removeBins.length, 0);
+});
+
+test("reverse flip whose re-deposit fails keeps the SOL without a keep-mint", async () => {
+  const trade = newTrade();
+  addTradeLeg(trade.id, "F", { flip: true });
+  const before = listKeepMints().length;
+  const { deps } = pingPongDeps({ openTokenOnlyPosition: async () => ({ success: false, error: "boom" }) });
+  const res = await flipTrade(getTrade(trade.id), { deps, side: "sol" });
+  assert.equal(res.redepositFailed, true);
+  assert.equal(listKeepMints().length, before);
+});
+
+test("forward flip uses ping-pong SOL legs as a source", async () => {
+  const trade = newTrade();
+  addTradeLeg(trade.id, "F", { flip: true });
+  addTradeLeg(trade.id, "S", { flip: true, sol: true });
+  // L1 tanpa bin token baru; S (leg SOL) sudah jadi token di 101..104 -> boleh flip.
+  const { deps } = fakeDeps({
+    readLegs: async () => ({
+      activeBinId: 100,
+      legs: [
+        { position: "L1", bins: bins(90, 100) },
+        { position: "F", bins: bins(110, 115) },
+        { position: "S", bins: bins(101, 104) },
+      ],
+    }),
+  });
+  const plan = await planFlip(getTrade(trade.id), { deps });
+  assert.equal(plan.binCount, 10);
+  assert.deepEqual(plan.legs, [
+    { position: "F", fromBinId: 110, toBinId: 115 },
+    { position: "S", fromBinId: 101, toBinId: 104 },
+  ]);
+});
+
+test("planFlip flags the position cap", async () => {
+  const positions = Array.from({ length: 10 }, (_, i) => `L${i + 1}`);
+  const trade = newTrade({ positions });
+  const { deps } = fakeDeps();
+  const res = await flipTrade(trade, { deps, side: "sol" });
+  assert.equal(res.cap, true);
+  assert.match(res.error, /too many positions/);
+});

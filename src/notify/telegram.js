@@ -98,6 +98,7 @@ export function exitLabel(reason) {
   if (r === "evil_panda_macd") return "Evil Panda (MACD)";
   if (r === "evil_panda_bb") return "Evil Panda (BB)";
   if (r === "cycle_done") return "Cycle done";
+  if (r === "trend_done") return "Trend done";
   if (r === "pumped_away") return "Pumped away";
   if (r === "range_broken") return "Range broken";
   if (r === "volume_died") return "Volume died";
@@ -179,6 +180,10 @@ export function notifyTradeClosed(trade, { swapInfo = null, editMessageId } = {}
 
 // Hasil auto flip (teks dari exit/auto-flip.js).
 export function notifyAutoFlip(text) {
+  send(text);
+}
+
+export function notifyPingPong(text) {
   send(text);
 }
 

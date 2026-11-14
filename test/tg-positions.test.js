@@ -771,3 +771,20 @@ test("auto flip with a step: label and prompt", async () => {
   await bot.handleUpdate(textUpdate("45"));
   assert.deepEqual(getTrade(trade.id).autoFlip, { pct: 45 });
 });
+
+test("trade detail shows the ping-pong round and phase for ping-pong trades only", () => {
+  const { pingPongLine } = positionsModule;
+  const base = { id: 9, pair: "A-SOL", positions: ["P"], exit: {}, strategy: { params: { flipMode: "pingpong" } } };
+  assert.equal(pingPongLine({ ...base, strategy: { params: { flipMode: "pct" } } }), null);
+  assert.equal(pingPongLine({ id: 1 }), null);
+  assert.equal(pingPongLine(base), "🏓 Ping-pong waiting for the first flip");
+  assert.equal(
+    pingPongLine({ ...base, pingpong: { phase: "first", entryTrend: "bullish" } }),
+    "🏓 Ping-pong waiting for the first flip (on a 15m Supertrend break)"
+  );
+  assert.equal(
+    pingPongLine({ ...base, pingpong: { phase: "bid", round: 2 } }),
+    "🏓 Ping-pong round 2 · SOL below the price — waiting for a dip"
+  );
+  assert.ok(buildTradeDetail({ ...base, pingpong: { phase: "drain", round: 3 } }, null).text.includes("round 3 · ended"));
+});

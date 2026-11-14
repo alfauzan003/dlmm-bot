@@ -1,4 +1,4 @@
-// Exit strategi Auto Entry: trade auto ditutup saat cycle_done / pumped_away / range_broken /
+// Exit strategi Auto Entry: trade auto ditutup saat cycle_done / trend_done / pumped_away / range_broken /
 // volume_died / max_hold (evaluator murni di strategy/exits.js). Jalan tiap siklus loop exit utama,
 // terlepas dari toggle Auto Entry. Parameter = snapshot saat entry (trade.strategy.params).
 import log from "../core/logger.js";
@@ -47,6 +47,8 @@ export async function runStrategyExits(positions, { deps = {}, now = Date.now() 
       const legs = (trade.positions || []).filter((addr) => !isLegClosed(addr)).map((addr) => live.get(addr)).filter(Boolean);
       if (legs.length === 0) continue;
       const flipSet = new Set(trade.flipLegs || []);
+      const solSet = new Set(trade.solLegs || []);
+      const hasRange = (l) => Number.isFinite(l.lowerBin) && Number.isFinite(l.upperBin);
       // activeBin null (RPC kosong) dibaca sebagai bin 0 → jangan evaluasi tanpa bin aktif yang valid.
       const known = legs.filter((l) => Number.isFinite(l.activeBin));
       const main = known.find((l) => !flipSet.has(l.position)) ?? known[0];
@@ -56,7 +58,12 @@ export async function runStrategyExits(positions, { deps = {}, now = Date.now() 
         activeBin: main.activeBin,
         xIsSol: main.xIsSol === true,
         flipLegs: legs
-          .filter((l) => flipSet.has(l.position) && Number.isFinite(l.lowerBin) && Number.isFinite(l.upperBin))
+          .filter((l) => flipSet.has(l.position) && hasRange(l))
+          .map((l) => ({ lowerBin: l.lowerBin, upperBin: l.upperBin })),
+        // Leg SOL ping-pong, urut seperti trade.solLegs (terakhir = titik balik terbaru).
+        solLegs: (trade.solLegs || [])
+          .map((addr) => legs.find((l) => l.position === addr))
+          .filter((l) => l && solSet.has(l.position) && hasRange(l))
           .map((l) => ({ lowerBin: l.lowerBin, upperBin: l.upperBin })),
         volumes: await loadVolumes(trade, p, now, fetchRecentBars),
       };

@@ -163,7 +163,7 @@ Panda**. The close alert shows which signal fired, e.g. `Evil Panda (RSI)`.
 
 While **Auto Entry** is ON the bot looks for pools on its own and opens trades without a confirm tap. There is no
 pool list: the screener reads Meteora, and SOL pairs only. Every number below is a key in `strat.conf`, editable in
-`/settings` → `🤖 Auto Entry` → `🔁 Bidask flip` (Screener / Entry & range / Size & exits). A second strategy,
+`/settings` → `🤖 Auto Entry` → `🔁 Bidask flip` (Screener / Entry & range / Ping-pong / Size & exits). A second strategy,
 **Rabbit**, is planned; its switch (`RABBIT_ON`) has no effect yet.
 
 **Screener** (every `AUTO_SCAN_INTERVAL_SEC`, 300 s): reads Meteora pool-discovery (timeframe 30m) with these filters,
@@ -199,19 +199,35 @@ BidAsk, from the price down to `target`%, capped to `MAX_POSITIONS` on-chain pos
 non-refundable position cost is above `AUTO_MAX_NONREFUNDABLE_SOL` are skipped, and the pool-price check from Safety
 still runs before opening.
 
-**Flip**: auto flip at `FLIP_PCT` (65%) of the SOL side, then every `FLIP_STEP` (10%) more: the token bins are moved
-above the price (token only, BidAsk), so the trade keeps earning fees while price bounces.
+**Flip** (`FLIP_MODE`):
+
+- `pct`: auto flip at `FLIP_PCT` (65%) of the SOL side, then every `FLIP_STEP` (10%) more: the token bins are moved
+  above the price (token only, BidAsk), so the trade keeps earning fees while price bounces.
+- `pingpong` (default), on closed 15m GMGN bars, `PP_*` keys:
+  - **First flip**: if the 15m Supertrend (`PP_ST_ATR_PERIOD` 10, `PP_ST_MULTIPLIER` 3) is bullish at entry, the
+    tokens flip above the price when a 15m bar closes below it; if it is already bearish, at `FLIP_PCT` as above.
+  - **Spike** (tokens above the price, Supertrend bearish): a close at least `PP_SPIKE_ATR_MULT` (2) × ATR(14) above
+    the lowest low of the last `PP_SPIKE_LOOKBACK_BARS` (4) bars — or all tokens sold at a bar close. If the chop is
+    still there — Bollinger(20, 2) width ≥ `PP_MIN_BB_WIDTH_PCT` (15%), ADX(14) < `PP_MAX_ADX` (35), last 1h volume ≥
+    `PP_MIN_VOL_RATIO` (0.5) × the 24h hourly average — the SOL of the sold token bins moves back below the price
+    (SOL only, BidAsk). Otherwise ping-pong ends: the tokens sell out and the trade closes (`trend_done`).
+  - **Dip** (SOL below the price): once the price fell at least `PP_DIP_MIN_PCT` (5%) under the spike close and a 15m
+    bar closes above the previous bar's high, the tokens flip above the price again (next round).
+  - The Supertrend turning bullish ends ping-pong too. There is no round limit, but a trade holds at most 10
+    on-chain positions; at that cap ping-pong ends. `/positions` shows the round and phase.
+  - Paper trades (DRY_RUN) still simulate the `pct` flip only.
 
 **Exits**: TP / SL / Trail come from the strategy (`TP_PCT`, `SL_PCT`, `TRAIL_*`; 0 = off), not from the Auto Exit
 defaults, and stay editable per trade in `/positions`. On top of that, strategy exits close the trade with swap to SOL:
 
 | Reason         | Closes when                                                                      |
 | -------------- | -------------------------------------------------------------------------------- |
-| `cycle_done`   | The trade flipped and price is above every flip leg (all token sold back to SOL) |
-| `pumped_away`  | Not flipped and price stays above the SOL range top for `OOR_ABOVE_MIN`          |
-| `range_broken` | Price stays below the whole range for `OOR_BELOW_MIN`                            |
+| `cycle_done`   | `pct` mode: the trade flipped and price is above every flip leg (all token sold back to SOL) |
+| `trend_done`   | Ping-pong ended and price is above every leg (all token sold back to SOL)        |
+| `pumped_away`  | Not flipped (or, in ping-pong, SOL waiting below the price after a spike) and price stays above the SOL range top for `OOR_ABOVE_MIN` |
+| `range_broken` | Price stays below the whole range (ping-pong: below every leg) for `OOR_BELOW_MIN` |
 | `volume_died`  | `LOW_VOLUME_BARS` closed 5m bars in a row below `MIN_VOLUME_5M_USD`              |
-| `max_hold`     | The trade is open for `MAX_HOLD_MIN` minutes                                     |
+| `max_hold`     | The trade is open for `MAX_HOLD_MIN` minutes (1440; a ping-pong round takes ~4 h) |
 
 **Limits**: at most `MAX_OPEN` auto trades, one open auto trade per token, a cooldown per token after a close
 (`AUTO_COOLDOWN_MIN`, longer after a loss: `AUTO_COOLDOWN_LOSS_MIN`), and failed entries use
@@ -266,7 +282,7 @@ these features.
 
 Every key of `strat.conf` can be edited from `/settings`, grouped by its `# ===== … =====` sections:
 
-- **🤖 Auto Entry**: `🔁 Bidask flip` (Screener, Entry & range, Size & exits), `🐇 Rabbit (soon)`, `🛡 Safety`,
+- **🤖 Auto Entry**: `🔁 Bidask flip` (Screener, Entry & range, Ping-pong, Size & exits), `🐇 Rabbit (soon)`, `🛡 Safety`,
   `⛔ Limits` — the `Auto Entry · …` sections.
 - **🐼 Exit strategy**: Evil Panda — the `Exit strategy · …` sections.
 - **🛠 Advanced**: every other section (General, Paper trading simulator, Transactions, Swap & sweep, Monitoring,

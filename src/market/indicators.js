@@ -1,4 +1,4 @@
-// Indikator untuk exit Evil Panda (murni). Setiap fungsi mengembalikan array sejajar dengan input,
+// Indikator untuk exit Evil Panda dan ping-pong (murni). Setiap fungsi mengembalikan array sejajar dengan input,
 // null sebelum warm-up selesai. Rumus mengikuti TradingView (ta.rsi, ta.macd, ta.bb).
 
 const nulls = (n) => Array(n).fill(null);
@@ -67,4 +67,51 @@ export function bollinger(closes, length, stdDev) {
     lower[i] = mean - stdDev * sd;
   }
   return { middle, upper, lower };
+}
+
+// Smoothing Wilder: rata-rata awal = mean `n` nilai pertama, lalu (prev*(n-1)+x)/n.
+function wilder(values, n) {
+  const out = nulls(values.length);
+  if (!(n >= 1) || values.length < n) return out;
+  let s = 0;
+  for (let i = 0; i < n; i++) s += values[i];
+  out[n - 1] = s / n;
+  for (let i = n; i < values.length; i++) out[i] = (out[i - 1] * (n - 1) + values[i]) / n;
+  return out;
+}
+
+// True range per candle (candle pertama: high - low).
+function trueRange(candles) {
+  return candles.map((c, i) =>
+    i === 0
+      ? c.high - c.low
+      : Math.max(c.high - c.low, Math.abs(c.high - candles[i - 1].close), Math.abs(c.low - candles[i - 1].close))
+  );
+}
+
+// ATR Wilder (ta.atr). candles = [{ high, low, close }].
+export function atr(candles, length) {
+  return wilder(trueRange(candles || []), length);
+}
+
+// ADX Wilder (ta.adx / DMI): +DM/-DM dan TR di-smooth Wilder, DX di-smooth Wilder lagi.
+export function adx(candles, length) {
+  const c = candles || [];
+  const tr = trueRange(c);
+  const up = c.map((x, i) => (i === 0 ? 0 : x.high - c[i - 1].high));
+  const down = c.map((x, i) => (i === 0 ? 0 : c[i - 1].low - x.low));
+  const plus = up.map((u, i) => (u > down[i] && u > 0 ? u : 0));
+  const minus = down.map((d, i) => (d > up[i] && d > 0 ? d : 0));
+  const str = wilder(tr, length);
+  const sp = wilder(plus, length);
+  const sm = wilder(minus, length);
+  const dx = [];
+  const start = str.findIndex((v) => v != null);
+  if (start < 0) return nulls(c.length);
+  for (let i = start; i < c.length; i++) {
+    const pdi = str[i] > 0 ? (100 * sp[i]) / str[i] : 0;
+    const mdi = str[i] > 0 ? (100 * sm[i]) / str[i] : 0;
+    dx.push(pdi + mdi > 0 ? (100 * Math.abs(pdi - mdi)) / (pdi + mdi) : 0);
+  }
+  return [...nulls(start), ...wilder(dx, length)];
 }

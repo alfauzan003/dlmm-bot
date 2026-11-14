@@ -165,7 +165,7 @@ test("happy path opens one live trade with auto meta", async () => {
   assert.equal(calls.executeOpen.length, 1);
   const { meta } = calls.executeOpen[0].opts;
   assert.equal(meta.origin, "auto");
-  assert.deepEqual(meta.autoFlip, { pct: 65, step: 10 });
+  assert.deepEqual(meta.autoFlip, { pct: 65 }); // ping-pong: hanya flip pertama
   assert.deepEqual(meta.exit.tp, { on: true, pct: p.tpPct });
   assert.equal(meta.strategy.profile, "bidask_flip");
   assert.deepEqual(meta.strategy.params, { ...p });

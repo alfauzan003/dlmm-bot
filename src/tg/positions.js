@@ -217,6 +217,23 @@ function statusTag(inRange) {
 
 const withSol = (usd, sol) => (finite(sol) ? `${fmtUsd(usd)} (${fmtSol(sol)})` : fmtUsd(usd));
 
+const PP_PHASE_TEXT = {
+  first: "waiting for the first flip",
+  ask: "tokens above the price — waiting for a spike",
+  bid: "SOL below the price — waiting for a dip",
+  drain: "ended — tokens selling out, then close",
+};
+
+// Status ping-pong (trade auto BIDASK_FLIP_MODE=pingpong); null untuk trade lain.
+export function pingPongLine(trade) {
+  if (trade?.strategy?.params?.flipMode !== "pingpong") return null;
+  const pp = trade.pingpong;
+  const phase = pp?.phase ?? "first";
+  const trend = phase === "first" && pp?.entryTrend === "bullish" ? " (on a 15m Supertrend break)" : "";
+  const round = pp?.round > 0 ? `round ${pp.round} · ` : "";
+  return `🏓 Ping-pong ${round}${PP_PHASE_TEXT[phase] ?? esc(phase)}${trend}`;
+}
+
 export function buildTradeDetail(trade, live, now = Date.now()) {
   const legs = (trade.positions || []).length;
   const age = finite(trade.openedAt) ? fmtAge(now - trade.openedAt) : "?";
@@ -232,6 +249,7 @@ export function buildTradeDetail(trade, live, now = Date.now()) {
     "",
     `Peak PnL ${fmtPct(trade.peakPnlPct)}`,
     trade.exit?.panda?.on && trade.panda?.armed ? "🐼 Evil Panda armed — waiting for a spike" : null,
+    pingPongLine(trade),
     `Pool ${shortAddr(trade.pool)} · ${legs} position(s)${deposit}`,
     `Origin ${esc(trade.origin ?? "?")} · opened ${fmtWib(trade.openedAt)}`,
   ]

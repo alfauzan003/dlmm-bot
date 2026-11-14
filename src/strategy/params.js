@@ -2,6 +2,8 @@
 // Semua dibaca dari peta env (strat.conf) dengan prefix per strategi.
 import { bool, num } from "../config/env.js";
 
+export const FLIP_MODES = ["pingpong", "pct"];
+
 export const PROFILES = ["bidask_flip"];
 export const PROFILE_PREFIX = { bidask_flip: "BIDASK" };
 
@@ -26,6 +28,16 @@ export const PROFILE_FIELDS = [
   { suffix: "VOLATILITY_CAP", field: "volatilityCap", type: "num" },
   { suffix: "FLIP_PCT", field: "flipPct", type: "num" },
   { suffix: "FLIP_STEP", field: "flipStep", type: "num" },
+  // Ping-pong (Supertrend / spike 15m, setelah flip pertama).
+  { suffix: "FLIP_MODE", field: "flipMode", type: "enum", options: FLIP_MODES },
+  { suffix: "PP_ST_ATR_PERIOD", field: "ppStAtrPeriod", type: "int" },
+  { suffix: "PP_ST_MULTIPLIER", field: "ppStMultiplier", type: "num" },
+  { suffix: "PP_SPIKE_ATR_MULT", field: "ppSpikeAtrMult", type: "num" },
+  { suffix: "PP_SPIKE_LOOKBACK_BARS", field: "ppSpikeLookbackBars", type: "int" },
+  { suffix: "PP_DIP_MIN_PCT", field: "ppDipMinPct", type: "num" },
+  { suffix: "PP_MIN_BB_WIDTH_PCT", field: "ppMinBbWidthPct", type: "num" },
+  { suffix: "PP_MAX_ADX", field: "ppMaxAdx", type: "num" },
+  { suffix: "PP_MIN_VOL_RATIO", field: "ppMinVolRatio", type: "num" },
   // Size & exits.
   { suffix: "SIZE_SOL", field: "sizeSol", type: "num" },
   { suffix: "MAX_OPEN", field: "maxOpen", type: "int" },
@@ -61,6 +73,15 @@ export const PROFILE_DEFAULTS = {
     volatilityCap: 10,
     flipPct: 65,
     flipStep: 10,
+    flipMode: "pingpong",
+    ppStAtrPeriod: 10,
+    ppStMultiplier: 3,
+    ppSpikeAtrMult: 2,
+    ppSpikeLookbackBars: 4,
+    ppDipMinPct: 5,
+    ppMinBbWidthPct: 15,
+    ppMaxAdx: 35,
+    ppMinVolRatio: 0.5,
     sizeSol: 0.5,
     maxOpen: 2,
     maxPositions: 2,
@@ -72,12 +93,16 @@ export const PROFILE_DEFAULTS = {
     oorBelowMin: 15,
     minVolume5mUsd: 1000,
     lowVolumeBars: 3,
-    maxHoldMin: 120,
+    maxHoldMin: 1440,
   },
 };
 
 function parseField(f, raw, def) {
   if (f.type === "bool") return bool(raw, def);
+  if (f.type === "enum") {
+    const v = String(raw ?? "").trim().toLowerCase();
+    return f.options.includes(v) ? v : def;
+  }
   const n = num(raw, def);
   return f.type === "int" ? Math.floor(n) : n;
 }
@@ -128,8 +153,10 @@ export function profileExit(p) {
   };
 }
 
-// Auto flip per trade; null = mati. step 0 = sekali.
+// Auto flip per trade; null = mati. step 0 = sekali. Ping-pong: hanya flip pertama (tanpa step);
+// flip berikutnya diatur runner ping-pong (exit/pingpong.js).
 export function profileAutoFlip(p) {
   if (!(p.flipPct > 0)) return null;
+  if (p.flipMode === "pingpong") return { pct: p.flipPct };
   return p.flipStep > 0 ? { pct: p.flipPct, step: p.flipStep } : { pct: p.flipPct };
 }

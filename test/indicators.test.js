@@ -34,3 +34,29 @@ test("macd flat series is zero", () => {
   const m = macd(Array(40).fill(5), 12, 26, 9);
   assert.equal(m.hist.at(-1), 0);
 });
+
+import { atr, adx } from "../src/market/indicators.js";
+
+test("atr is Wilder-smoothed true range", () => {
+  const c = [
+    { high: 2, low: 1, close: 1.5 },
+    { high: 3, low: 2, close: 2.5 },
+    { high: 2.6, low: 2.4, close: 2.5 },
+  ];
+  // TR = 1, max(1, 1.5, 0.5) = 1.5, max(0.2, 0.1, 0.1) = 0.2
+  const a = atr(c, 2);
+  assert.equal(a[0], null);
+  assert.equal(a[1], 1.25);
+  assert.ok(Math.abs(a[2] - (1.25 + 0.2) / 2) < 1e-12);
+  assert.deepEqual(atr(c, 5), [null, null, null]);
+});
+
+test("adx: steady uptrend → 100, flat → 0, warm-up null", () => {
+  const up = Array.from({ length: 40 }, (_, i) => ({ high: 10 + i + 1, low: 10 + i, close: 10 + i + 0.5 }));
+  const a = adx(up, 14);
+  assert.equal(a[12], null);
+  assert.ok(a[26] != null);
+  assert.ok(Math.abs(a.at(-1) - 100) < 1e-9);
+  const flat = Array.from({ length: 40 }, () => ({ high: 2, low: 1, close: 1.5 }));
+  assert.equal(adx(flat, 14).at(-1), 0);
+});
