@@ -66,6 +66,8 @@ test("ping-pong defaults, enum parsing and max hold", () => {
     [10, 3, 2, 4, 5]
   );
   assert.deepEqual([p.ppMinBbWidthPct, p.ppMaxAdx, p.ppMinVolRatio, p.maxHoldMin], [15, 35, 0.5, 1440]);
+  assert.equal(p.drainExit, true);
+  assert.equal(buildProfile({ BIDASK_DRAIN_EXIT: "false" }, "bidask_flip").drainExit, false);
   assert.equal(buildProfile({ BIDASK_FLIP_MODE: " PCT " }, "bidask_flip").flipMode, "pct");
   assert.equal(buildProfile({ BIDASK_FLIP_MODE: "zigzag" }, "bidask_flip").flipMode, "pingpong");
 });

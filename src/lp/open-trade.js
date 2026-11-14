@@ -30,7 +30,7 @@ function nonRefundableCost(quote) {
 
 export const SHAPES = ["spot", "curve", "bid_ask", "mixed"];
 export const SOL_BUFFER = 0.08;
-export const MAX_TRADE_POSITIONS = 10;
+export const MAX_TRADE_POSITIONS = 15;
 
 // Auto flip awal trade baru: default /settings, hanya untuk shape yang bisa di-flip.
 // (FLIP_SHAPES tidak di-import: flip-trade.js sudah meng-import modul ini.)
@@ -436,8 +436,7 @@ async function openLive(plan, progress, d, meta = {}) {
     strategy: meta.strategy ?? null,
   });
   if (trade.origin !== origin) {
-    trade =
-      updateTradeMeta(trade.id, { origin, exit, depositSol: plan.depositSol, strategy: meta.strategy }) ?? trade;
+    trade = updateTradeMeta(trade.id, { origin, exit, depositSol: plan.depositSol, strategy: meta.strategy }) ?? trade;
   }
   log.info(
     `📌 OPEN ${plan.pair} — ${plan.depositSol} SOL ${plan.shape} (${positions.length} posisi) → trade #${trade.id}`

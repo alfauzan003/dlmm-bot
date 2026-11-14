@@ -1,5 +1,14 @@
 // Evaluator exit Auto Entry (murni, tanpa I/O). Waktu = epoch ms, menit dari profil p.
-export const STRATEGY_EXIT_REASONS = ["cycle_done", "trend_done", "pumped_away", "range_broken", "volume_died", "max_hold"];
+export const STRATEGY_EXIT_REASONS = [
+  "cycle_done",
+  "trend_done",
+  "drain_weak",
+  "trend_failed",
+  "pumped_away",
+  "range_broken",
+  "volume_died",
+  "max_hold",
+];
 
 // Posisi harga token: makin besar = token makin mahal (xIsSol membalik arah bin).
 export function tokenPos(bin, xIsSol) {
@@ -41,6 +50,11 @@ export function evaluateStrategyExit({ trade, view, p, now }) {
   const done = (reason) => ({ reason, state });
 
   if (pp === "drain" && pos > allTop) return done("trend_done");
+  // Exit drain (p.drainExit): drain karena spike lemah -> langsung; drain trend_up -> saat tren gagal.
+  if (pp === "drain" && p.drainExit === true) {
+    if (trade.pingpong.drainReason === "weak") return done("drain_weak");
+    if (trade.pingpong.trendFailed) return done("trend_failed");
+  }
   if (!pp && flipped && view.flipLegs.length > 0) {
     const legsTop = Math.max(...view.flipLegs.flatMap((l) => [tokenPos(l.lowerBin, xIsSol), tokenPos(l.upperBin, xIsSol)]));
     if (pos > legsTop) return done("cycle_done");
@@ -60,6 +74,12 @@ const usd = (v) => `$${Math.round(Number(v) || 0)}`;
 export function strategyExitDetail(reason, { trade, view, p, now, state }) {
   if (reason === "cycle_done") return "price rose above the flip range — tokens sold back to SOL";
   if (reason === "trend_done") return "ping-pong ended and the price rose above every leg — tokens sold back to SOL";
+  if (reason === "drain_weak") return "ping-pong ended on a weak spike (chop gone) — remaining tokens sold to SOL";
+  if (reason === "trend_failed") {
+    const price = trade.pingpong?.trendFailed?.price;
+    const at = Number.isFinite(price) ? ` at ${price.toPrecision(4)}` : "";
+    return `the trend turned up, then a 15m bar closed below the Supertrend again${at} — remaining tokens sold to SOL`;
+  }
   if (reason === "pumped_away") {
     const where = trade.pingpong?.phase === "bid" ? "price above the ping-pong SOL legs" : "price above range";
     return `${where} (no dip, SOL unused) for ${mins(now - state.aboveSince)} ≥ ${p.oorAboveMin}m`;

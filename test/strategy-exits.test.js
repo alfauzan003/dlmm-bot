@@ -9,7 +9,16 @@ const V = (o = {}) => ({ activeBin: -10, xIsSol: false, flipLegs: [], volumes: [
 const M = 60_000;
 
 test("reasons list and tokenPos", () => {
-  assert.deepEqual(STRATEGY_EXIT_REASONS, ["cycle_done", "trend_done", "pumped_away", "range_broken", "volume_died", "max_hold"]);
+  assert.deepEqual(STRATEGY_EXIT_REASONS, [
+    "cycle_done",
+    "trend_done",
+    "drain_weak",
+    "trend_failed",
+    "pumped_away",
+    "range_broken",
+    "volume_died",
+    "max_hold",
+  ]);
   assert.equal(tokenPos(5, false), 5);
   assert.equal(tokenPos(5, true), -5);
 });
@@ -122,6 +131,27 @@ test("ping-pong bid: pumped_away once the price is above every leg and the turn 
   assert.match(strategyExitDetail("pumped_away", { trade: t, p: PP, now: 11 * M, state: r.state }), /ping-pong SOL legs/);
   // Fase ask di atas semua leg: tidak ada timer (keputusan saat bar 15m tutup).
   assert.equal(evaluateStrategyExit({ trade: PPT("ask"), view: view(25), p: PP, now: M }).state.aboveSince, null);
+});
+
+test("ping-pong drain exit: weak drain closes at once, trend_up drain closes once the trend failed", () => {
+  const legs = [{ lowerBin: 1, upperBin: 30 }];
+  const view = V({ activeBin: 10, flipLegs: legs });
+  const ev = (pingpong, p = PP) => evaluateStrategyExit({ trade: T({ flipLegs: ["F"], pingpong }), view, p, now: M }).reason;
+  assert.equal(ev({ phase: "drain", drainReason: "weak" }), "drain_weak");
+  assert.equal(ev({ phase: "drain", drainReason: "trend_up" }), null);
+  assert.equal(ev({ phase: "drain", drainReason: "trend_up", trendFailed: { time: 0, price: 0.9 } }), "trend_failed");
+  assert.equal(ev({ phase: "drain", drainReason: "stuck" }), null);
+  assert.equal(ev({ phase: "drain" }), null, "drained before this exit existed");
+  // Off (atau trade lama tanpa key) = hanya trend_done.
+  assert.equal(ev({ phase: "drain", drainReason: "weak" }, { ...PP, drainExit: false }), null);
+  assert.equal(ev({ phase: "drain", drainReason: "weak" }, { ...PP, drainExit: undefined }), null);
+  // trend_done tetap menang bila semua token sudah terjual.
+  const sold = V({ activeBin: 31, flipLegs: legs });
+  const t = T({ flipLegs: ["F"], pingpong: { phase: "drain", drainReason: "weak" } });
+  assert.equal(evaluateStrategyExit({ trade: t, view: sold, p: PP, now: M }).reason, "trend_done");
+  assert.match(strategyExitDetail("drain_weak", {}), /weak spike/);
+  const failed = T({ pingpong: { phase: "drain", trendFailed: { time: 0, price: 0.00012341 } } });
+  assert.match(strategyExitDetail("trend_failed", { trade: failed }), /below the Supertrend again at 0\.0001234 /);
 });
 
 test("ping-pong: range_broken uses the bottom of every leg", () => {

@@ -99,6 +99,8 @@ export function exitLabel(reason) {
   if (r === "evil_panda_bb") return "Evil Panda (BB)";
   if (r === "cycle_done") return "Cycle done";
   if (r === "trend_done") return "Trend done";
+  if (r === "drain_weak") return "Weak spike";
+  if (r === "trend_failed") return "Trend failed";
   if (r === "pumped_away") return "Pumped away";
   if (r === "range_broken") return "Range broken";
   if (r === "volume_died") return "Volume died";

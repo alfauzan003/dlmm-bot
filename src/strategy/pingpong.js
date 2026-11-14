@@ -8,6 +8,8 @@
 //   bid   — SOL di bawah harga. Harga turun >= dip% dari spike, lalu bar tutup di atas high bar
 //           sebelumnya -> flip token ke atas lagi -> ask (putaran berikutnya).
 //   drain — tidak ada ping-pong lagi: token dibiarkan habis terjual, lalu close (trend_done).
+//           drainReason = trend_up / weak / stuck. p.drainExit: drain weak ditutup langsung (drain_weak);
+//           drain trend_up diawasi terus — bar tutup kembali bearish -> trendFailed (exit trend_failed).
 // Supertrend berbalik bullish di ask / bid -> drain. Hanya bar tutup terbaru yang boleh memicu aksi.
 import { adx, atr, bollinger } from "../market/indicators.js";
 import { supertrendSeries } from "../market/supertrend.js";
@@ -95,7 +97,18 @@ export function chopCheck(row, p) {
 export function stepPingPong(state, rows, p, { flipped = false, allSold = false } = {}) {
   const s = { ...initialPingPong(), ...(state || {}) };
   const out = (fire = null, drained = null) => ({ state: s, fire, drained });
-  if (s.phase === "drain") return out();
+  if (s.phase === "drain") {
+    if (!p.drainExit || s.drainReason !== "trend_up" || s.trendFailed) return out();
+    for (const row of rows || []) {
+      if (s.lastBar != null && row.time <= s.lastBar) continue;
+      s.lastBar = row.time;
+      if (row.direction === "bearish") {
+        s.trendFailed = { time: row.time, price: row.close };
+        break;
+      }
+    }
+    return out();
+  }
   if (s.phase === "first" && flipped) {
     s.phase = "ask";
     s.round = Math.max(1, s.round);
@@ -124,6 +137,7 @@ export function stepPingPong(state, rows, p, { flipped = false, allSold = false 
     if (s.phase === "bid") s.lowSince = Math.min(s.lowSince ?? s.spikePrice ?? row.low, row.low);
     if (row.direction === "bullish") {
       s.phase = "drain";
+      s.drainReason = "trend_up";
       s.lastBar = row.time;
       return out(null, { reason: "trend_up", detail: "15m Supertrend turned bullish" });
     }
@@ -136,6 +150,7 @@ export function stepPingPong(state, rows, p, { flipped = false, allSold = false 
         const chop = chopCheck(row, p);
         if (chop.ok) return out({ action: "reverse", time: row.time, price: row.close, why: `${why}; ${chop.why}` });
         s.phase = "drain";
+        s.drainReason = "weak";
         s.lastBar = row.time;
         return out(null, { reason: "weak", detail: `${why}; chop gone: ${chop.why}` });
       }
@@ -161,7 +176,7 @@ export function stepPingPong(state, rows, p, { flipped = false, allSold = false 
 // berikutnya), "stuck" (dana tertarik tapi setor ulang gagal, atau batas posisi) -> drain.
 export function commitPingPong(state, fire, outcome) {
   const s = { ...initialPingPong(), ...(state || {}), lastBar: fire.time };
-  if (outcome === "stuck") return { ...s, phase: "drain" };
+  if (outcome === "stuck") return { ...s, phase: "drain", drainReason: "stuck" };
   if (outcome !== "done") return s;
   if (fire.action === "reverse") return { ...s, phase: "bid", spikePrice: fire.price, lowSince: fire.price };
   return { ...s, phase: "ask", round: (s.round || 0) + 1, spikePrice: null, lowSince: null };

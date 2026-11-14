@@ -158,7 +158,29 @@ test("drain is final; stuck actions drain", () => {
   const d = { ...ask, phase: "drain" };
   assert.deepEqual(stepPingPong(d, [row(2, { close: 2 })], P), { state: d, fire: null, drained: null });
   const fire = { action: "reverse", time: T(2), price: 1 };
-  assert.equal(commitPingPong(ask, fire, "stuck").phase, "drain");
+  const stuck = commitPingPong(ask, fire, "stuck");
+  assert.deepEqual([stuck.phase, stuck.drainReason], ["drain", "stuck"]);
+});
+
+test("drain remembers why it started", () => {
+  assert.equal(stepPingPong(ask, [row(2, { close: 1.12, adx: 40 })], P).state.drainReason, "weak");
+  assert.equal(stepPingPong(ask, [row(2, { direction: "bullish" })], P).state.drainReason, "trend_up");
+});
+
+test("drain after trend_up: a 15m close back below the Supertrend marks the trend as failed", () => {
+  const d = { ...ask, phase: "drain", drainReason: "trend_up", lastBar: T(2) };
+  const up = stepPingPong(d, [row(2), row(3, { direction: "bullish" })], P);
+  assert.equal(up.state.trendFailed, undefined);
+  assert.equal(up.state.lastBar, T(3));
+  const down = stepPingPong(up.state, [row(3, { direction: "bullish" }), row(4, { close: 0.9 })], P);
+  assert.deepEqual(down.state.trendFailed, { time: T(4), price: 0.9 });
+  assert.deepEqual([down.fire, down.drained], [null, null]);
+  // Sekali gagal tetap gagal; drain exit off / drain lain tidak dievaluasi.
+  assert.deepEqual(stepPingPong(down.state, [row(5)], P).state, down.state);
+  const off = stepPingPong(up.state, [row(4)], { ...P, drainExit: false });
+  assert.equal(off.state.trendFailed, undefined);
+  const weak = { ...d, drainReason: "weak" };
+  assert.deepEqual(stepPingPong(weak, [row(3)], P).state, weak);
 });
 
 test("samePingPong ignores missing defaults", () => {

@@ -1,7 +1,7 @@
 // Runner ping-pong bidask flip (trade auto dengan BIDASK_FLIP_MODE=pingpong): tiap bar 15m tutup (GMGN),
 // jalankan mesin status strategy/pingpong.js lalu flip token ke atas harga atau pindahkan SOL ke bawah
-// harga. Fase drain tidak butuh apa-apa lagi: trade ditutup exit strategi (trend_done) saat semua token
-// terjual. Dipanggil tiap siklus loop exit utama, di latar belakang (antrean GMGN tidak menahan loop).
+// harga. Fase drain: trade ditutup exit strategi (trend_done) saat semua token terjual; dengan
+// BIDASK_DRAIN_EXIT, drain trend_up tetap dipantau sampai tren gagal (trend_failed). Dipanggil tiap siklus loop exit utama, di latar belakang (antrean GMGN tidak menahan loop).
 import log from "../core/logger.js";
 import { fetchCandles } from "../market/candles.js";
 import { canFlip, flipTrade } from "../lp/flip-trade.js";
@@ -18,6 +18,19 @@ const barStart = (sec) => Math.floor(sec / BAR_SEC) * BAR_SEC;
 const isLegClosed = (addr) => getTrackedPosition(addr)?.closed === true;
 
 export const isPingPongTrade = (t) => t?.strategy?.params?.flipMode === "pingpong" && canFlip(t);
+
+// Drain trend_up dengan exit drain aktif tetap butuh bar 15m (deteksi tren gagal); drain lain selesai.
+const watchesDrain = (t) =>
+  t.strategy.params.drainExit === true && t.pingpong?.drainReason === "trend_up" && !t.pingpong?.trendFailed;
+
+// Teks lanjutan notifikasi saat ping-pong berakhir.
+function drainNext(drained, p) {
+  if (p.drainExit === true && drained.reason === "weak") return "The remaining tokens are sold now (drain_weak).";
+  if (p.drainExit === true && drained.reason === "trend_up") {
+    return "The tokens sell out, then the trade closes (trend_done) — or earlier if a 15m bar closes back below the Supertrend (trend_failed).";
+  }
+  return "The tokens sell out, then the trade closes (trend_done).";
+}
 
 // Harga di atas semua leg terbuka (semua token sudah terjual jadi SOL). false bila bin tidak diketahui.
 export function allLegsSold(trade, live) {
@@ -99,7 +112,11 @@ export async function runPingPong(positions, { deps = {}, now = Date.now() } = {
   }
 
   const trades = listOpenTrades().filter(
-    (t) => isPingPongTrade(t) && t.pingpong?.phase !== "drain" && !tradeLock(t.id) && t.positions.some((a) => live.has(a))
+    (t) =>
+      isPingPongTrade(t) &&
+      (t.pingpong?.phase !== "drain" || watchesDrain(t)) &&
+      !tradeLock(t.id) &&
+      t.positions.some((a) => live.has(a))
   );
   for (const trade of trades) {
     const label = `${trade.pair || trade.pool?.slice(0, 8)} #${trade.id}`;
@@ -133,9 +150,10 @@ export async function runPingPong(positions, { deps = {}, now = Date.now() } = {
     if (state.phase === "first" && next.phase === "ask") log.info(`${label}: ping-pong — flip pertama selesai, putaran 1`);
     if (drained) {
       log.info(`${label}: ping-pong selesai (${drained.reason}: ${drained.detail}) — token dibiarkan habis terjual`);
-      notify(
-        `🏓 Ping-pong #${trade.id} ${trade.pair} ends: ${drained.detail}. The tokens sell out, then the trade closes (trend_done).`
-      );
+      notify(`🏓 Ping-pong #${trade.id} ${trade.pair} ends: ${drained.detail}. ${drainNext(drained, p)}`);
+    }
+    if (!state.trendFailed && next.trendFailed) {
+      log.info(`${label}: ping-pong drain — Supertrend 15m kembali bearish, tren gagal → trend_failed`);
     }
     if (!fire) continue;
 

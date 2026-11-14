@@ -1,5 +1,5 @@
-// Exit strategi Auto Entry: trade auto ditutup saat cycle_done / trend_done / pumped_away / range_broken /
-// volume_died / max_hold (evaluator murni di strategy/exits.js). Jalan tiap siklus loop exit utama,
+// Exit strategi Auto Entry: trade auto ditutup saat cycle_done / trend_done / drain_weak / trend_failed /
+// pumped_away / range_broken / volume_died / max_hold (evaluator murni di strategy/exits.js). Jalan tiap siklus loop exit utama,
 // terlepas dari toggle Auto Entry. Parameter = snapshot saat entry (trade.strategy.params).
 import log from "../core/logger.js";
 import { closeTrade as defaultCloseTrade } from "../lp/close-trade.js";

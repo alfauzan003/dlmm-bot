@@ -52,6 +52,7 @@ export const PROFILE_FIELDS = [
   { suffix: "MIN_VOLUME_5M_USD", field: "minVolume5mUsd", type: "num" },
   { suffix: "LOW_VOLUME_BARS", field: "lowVolumeBars", type: "int" },
   { suffix: "MAX_HOLD_MIN", field: "maxHoldMin", type: "num" },
+  { suffix: "DRAIN_EXIT", field: "drainExit", type: "bool" },
 ];
 
 export const PROFILE_DEFAULTS = {
@@ -96,6 +97,7 @@ export const PROFILE_DEFAULTS = {
     minVolume5mUsd: 1000,
     lowVolumeBars: 3,
     maxHoldMin: 1440,
+    drainExit: true,
   },
 };
 

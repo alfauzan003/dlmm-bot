@@ -158,9 +158,9 @@ test("ask: spike without chop drains; a failed re-deposit drains too", async () 
   setTradePingPong(t.id, ASK);
   const weak = deps([row(99, { close: 1.2, bbWidthPct: 5 })]);
   await runPingPong(live(), { deps: weak.deps, now: NOW });
-  assert.equal(getTrade(t.id).pingpong.phase, "drain");
+  assert.deepEqual([getTrade(t.id).pingpong.phase, getTrade(t.id).pingpong.drainReason], ["drain", "weak"]);
   assert.equal(weak.calls.flips.length, 0);
-  assert.match(weak.calls.notes[0], /ends: .*BB width 5.0% < 15%.*trend_done/);
+  assert.match(weak.calls.notes[0], /ends: .*BB width 5.0% < 15%.*sold now \(drain_weak\)/);
 
   setTradePingPong(t.id, ASK);
   const stuck = deps([row(99, { close: 1.2 })], { flipRes: { success: false, redepositFailed: true, binCount: 8 } });
@@ -191,6 +191,44 @@ test("locked trades and drained trades are skipped", async () => {
   setTradePingPong(t.id, { phase: "drain" });
   await runPingPong(live(), { deps: a.deps, now: NOW });
   assert.equal(a.calls.fetch, 0);
+  setTradePingPong(t.id, { phase: "drain", drainReason: "weak" });
+  await runPingPong(live(), { deps: a.deps, now: NOW });
+  assert.equal(a.calls.fetch, 0);
+});
+
+test("weak drain with the drain exit off keeps the old message", async () => {
+  const t = newTrade({ params: { ...P, drainExit: false }, autoFlip: null });
+  addTradeLeg(t.id, "F", { flip: true });
+  setTradePingPong(t.id, ASK);
+  const weak = deps([row(99, { close: 1.2, bbWidthPct: 5 })]);
+  await runPingPong(live(), { deps: weak.deps, now: NOW });
+  assert.match(weak.calls.notes[0], /The tokens sell out, then the trade closes \(trend_done\)\.$/);
+});
+
+test("drain after trend_up keeps watching 15m bars until the trend fails", async () => {
+  const t = newTrade({ autoFlip: null });
+  addTradeLeg(t.id, "F", { flip: true });
+  setTradePingPong(t.id, { ...ASK, phase: "drain", drainReason: "trend_up", lastBar: T(98) });
+  const a = deps([row(98, { direction: "bullish" }), row(99, { close: 0.8 })]);
+  await runPingPong(live(), { deps: a.deps, now: NOW });
+  assert.equal(a.calls.fetch, 1);
+  assert.deepEqual(getTrade(t.id).pingpong.trendFailed, { time: T(99), price: 0.8 });
+  assert.equal(a.calls.flips.length, 0);
+  // Sudah gagal: tidak di-fetch lagi (exit strategi yang menutup).
+  __resetPingPongThrottle();
+  const b = deps([row(99)]);
+  await runPingPong(live(), { deps: b.deps, now: NOW + BAR * 1000 });
+  assert.equal(b.calls.fetch, 0);
+});
+
+test("trend_up drain message mentions trend_failed", async () => {
+  const t = newTrade({ autoFlip: null });
+  addTradeLeg(t.id, "F", { flip: true });
+  setTradePingPong(t.id, ASK);
+  const up = deps([row(99, { direction: "bullish" })]);
+  await runPingPong(live(), { deps: up.deps, now: NOW });
+  assert.equal(getTrade(t.id).pingpong.drainReason, "trend_up");
+  assert.match(up.calls.notes[0], /trend_done.*closes back below the Supertrend \(trend_failed\)/);
 });
 
 test("allLegsSold: price above every open leg", () => {

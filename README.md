@@ -226,6 +226,8 @@ defaults, and stay editable per trade in `/positions`. On top of that, strategy 
 | -------------- | -------------------------------------------------------------------------------- |
 | `cycle_done`   | `pct` mode: the trade flipped and price is above every flip leg (all token sold back to SOL) |
 | `trend_done`   | Ping-pong ended and price is above every leg (all token sold back to SOL)        |
+| `drain_weak`   | `DRAIN_EXIT=true`: ping-pong ended on a spike without chop — close at once        |
+| `trend_failed` | `DRAIN_EXIT=true`: ping-pong ended on the Supertrend turning bullish, then a 15m bar closed below it again |
 | `pumped_away`  | Not flipped (or, in ping-pong, SOL waiting below the price after a spike) and price stays above the SOL range top for `OOR_ABOVE_MIN` |
 | `range_broken` | Price stays below the whole range (ping-pong: below every leg) for `OOR_BELOW_MIN` |
 | `volume_died`  | `LOW_VOLUME_BARS` closed 5m bars in a row below `MIN_VOLUME_5M_USD`              |
