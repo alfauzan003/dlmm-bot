@@ -38,13 +38,21 @@ export function fibSignal({ ath, atl, price }, p) {
 const f1 = (v) => `${v.toFixed(1)}%`;
 
 // target = min + (min(vol, cap) / cap) · (max − min), lalu muat di maxPositions·70 bin. pct null = dilewati.
+// max < min (jarak fib 0.382 → deep lebih pendek dari min) -> range = min.
 export function explainRangePct({ maxPct, volatility }, p, binStep) {
   if (!Number.isFinite(volatility)) return { pct: null, why: "volatility n/a" };
   if (!Number.isFinite(maxPct)) return { pct: null, why: "max range n/a" };
   const cap = p.volatilityCap > 0 ? p.volatilityCap : 10;
   const v = Math.min(Math.max(volatility, 0), cap);
-  let pct = p.rangeMinPct + (v / cap) * (maxPct - p.rangeMinPct);
-  const steps = [`vol ${v.toFixed(2)}/${cap} · min ${f1(p.rangeMinPct)} · max ${f1(maxPct)} → ${f1(pct)}`];
+  const steps = [];
+  let pct;
+  if (maxPct < p.rangeMinPct) {
+    pct = p.rangeMinPct;
+    steps.push(`max ${f1(maxPct)} < min ${f1(p.rangeMinPct)} → min ${f1(pct)}`);
+  } else {
+    pct = p.rangeMinPct + (v / cap) * (maxPct - p.rangeMinPct);
+    steps.push(`vol ${v.toFixed(2)}/${cap} · min ${f1(p.rangeMinPct)} · max ${f1(maxPct)} → ${f1(pct)}`);
+  }
   const binCap = maxPctForBins(p.maxPositions * BIN_PER_POSITION, binStep);
   if (pct > binCap) {
     pct = binCap;

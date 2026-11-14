@@ -46,8 +46,8 @@ test("explainRangePct: target = min + (min(v, cap) / cap) · (max − min)", () 
   assert.ok(near(explainRangePct({ maxPct: 56, volatility: 5 }, p, 100).pct, 43));
   assert.ok(near(explainRangePct({ maxPct: 56, volatility: 10 }, p, 100).pct, 56));
   assert.ok(near(explainRangePct({ maxPct: 56, volatility: 25 }, p, 100).pct, 56)); // v dipotong di cap
-  // max di bawah min: rumus apa adanya
-  assert.ok(near(explainRangePct({ maxPct: 20, volatility: 5 }, p, 100).pct, 25));
+  // max di bawah min: range = min
+  assert.ok(near(explainRangePct({ maxPct: 20, volatility: 5 }, p, 100).pct, 30));
   assert.match(explainRangePct({ maxPct: 56, volatility: 5 }, p, 100).why, /vol 5\.00\/10 · min 30\.0% · max 56\.0% → 43\.0%/);
 });
 
@@ -59,4 +59,13 @@ test("explainRangePct caps at maxPositions × 70 bins and skips invalid input", 
   assert.equal(binsForPct(r.pct - 1e-9, 80) + 1 <= 140, true);
   assert.equal(explainRangePct({ maxPct: 56, volatility: null }, P, 80).pct, null);
   assert.equal(explainRangePct({ maxPct: NaN, volatility: 3 }, P, 80).pct, null);
+});
+
+test("explainRangePct: max below min uses min (never under RANGE_MIN_PCT)", () => {
+  const p = { rangeMinPct: 30, volatilityCap: 10, maxPositions: 2 };
+  // Leonida-SOL: max 25.4%, vol 2.29 dulu memberi 29.0%.
+  const r = explainRangePct({ maxPct: 25.4124, volatility: 2.2885 }, p, 80);
+  assert.equal(r.pct, 30);
+  assert.equal(r.why, "max 25.4% < min 30.0% → min 30.0%");
+  assert.equal(explainRangePct({ maxPct: 10, volatility: 10 }, p, 80).pct, 30);
 });

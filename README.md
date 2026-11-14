@@ -194,7 +194,8 @@ authority off when `AUTO_REQUIRE_AUTHORITIES_OFF=true`).
 - `max_pct` = the drop (%) from the 0.382 level to `FIB_DEEP_LEVEL` (0.786).
 
 **Range**: `v = min(volatility, VOLATILITY_CAP)` and `target = RANGE_MIN_PCT + (v / VOLATILITY_CAP) × (max_pct −
-RANGE_MIN_PCT)`, with volatility from Meteora pool-discovery (24h), `RANGE_MIN_PCT` 30 and the cap 10. The trade opens SOL only,
+RANGE_MIN_PCT)`, with volatility from Meteora pool-discovery (24h), `RANGE_MIN_PCT` 30 and the cap 10. When `max_pct` is
+below `RANGE_MIN_PCT`, the range is `RANGE_MIN_PCT`. The trade opens SOL only,
 BidAsk, from the price down to `target`%, capped to `MAX_POSITIONS` on-chain positions (70 bins each). Pools whose
 non-refundable position cost is above `AUTO_MAX_NONREFUNDABLE_SOL` are skipped, and the pool-price check from Safety
 still runs before opening.
