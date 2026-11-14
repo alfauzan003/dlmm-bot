@@ -19,6 +19,7 @@ export function poolQueryUrl(p, now, { pageSize = 200 } = {}) {
     `base_token_market_cap>=${p.minMcapUsd}`,
     `base_token_holders>=${p.minHolders}`,
     `fee>=${p.minFees30mUsd}`,
+    `volume>=${p.minVolume30mUsd}`,
     `fee_pct>=${p.minBaseFeePct}`,
     `fee_active_tvl_ratio>=${p.minFeeActiveTvl30mPct}`,
     `bin_step>=${p.minBinStep}`,
@@ -102,6 +103,7 @@ export function passesPoolFilters(row, p, now) {
   if (row.holders < p.minHolders) return fail("holders");
   if (p.maxTop10Pct > 0 && !(Number.isFinite(row.top10Pct) && row.top10Pct <= p.maxTop10Pct)) return fail("top10");
   if (row.fees30mUsd < p.minFees30mUsd) return fail("fees");
+  if (row.volume30mUsd < p.minVolume30mUsd) return fail("volume");
   if (row.baseFeePct < p.minBaseFeePct) return fail("base_fee");
   if (row.feeActiveTvl30mPct < p.minFeeActiveTvl30mPct) return fail("fee_active_tvl");
   if (row.binStep < p.minBinStep) return fail("bin_step");

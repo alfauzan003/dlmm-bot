@@ -169,17 +169,18 @@ pool list: the screener reads Meteora, and SOL pairs only. Every number below is
 **Screener** (every `AUTO_SCAN_INTERVAL_SEC`, 300 s): reads Meteora pool-discovery (timeframe 30m) with these filters,
 all `BIDASK_*`:
 
-| Filter              | Default        | Key                                                |
-| ------------------- | -------------- | -------------------------------------------------- |
-| Market cap          | $200k – $5M    | `MIN_MCAP_USD`, `MAX_MCAP_USD` (0 = no max)        |
-| Token age           | 2 h – no max   | `MIN_TOKEN_AGE_H`, `MAX_TOKEN_AGE_H` (0 = no max)  |
-| Holders             | ≥ 500          | `MIN_HOLDERS`                                      |
-| Top 10 holders      | ≤ 30%          | `MAX_TOP10_PCT`                                    |
-| Fees (30m)          | ≥ $1           | `MIN_FEES_30M_USD`                                 |
-| Base fee            | ≥ 1%           | `MIN_BASE_FEE_PCT`                                 |
-| Fee / active TVL    | ≥ 0.2% (30m)   | `MIN_FEE_ACTIVE_TVL_30M_PCT`                       |
-| Bin step            | ≥ 80           | `MIN_BIN_STEP`                                     |
-| JupShield Safeguard | on             | `JUPSHIELD_SAFEGUARD` (no critical Jupiter warning) |
+| Filter              | Default      | Key                                                 |
+| ------------------- | ------------ | --------------------------------------------------- |
+| Market cap          | $200k – $5M  | `MIN_MCAP_USD`, `MAX_MCAP_USD` (0 = no max)         |
+| Token age           | 2 h – no max | `MIN_TOKEN_AGE_H`, `MAX_TOKEN_AGE_H` (0 = no max)   |
+| Holders             | ≥ 500        | `MIN_HOLDERS`                                       |
+| Top 10 holders      | ≤ 30%        | `MAX_TOP10_PCT`                                     |
+| Fees (30m)          | ≥ $1         | `MIN_FEES_30M_USD`                                  |
+| Volume (30m)        | ≥ $2000      | `MIN_VOLUME_30M_USD`                                |
+| Base fee            | ≥ 1%         | `MIN_BASE_FEE_PCT`                                  |
+| Fee / active TVL    | ≥ 0.2% (30m) | `MIN_FEE_ACTIVE_TVL_30M_PCT`                        |
+| Bin step            | ≥ 80         | `MIN_BIN_STEP`                                      |
+| JupShield Safeguard | on           | `JUPSHIELD_SAFEGUARD` (no critical Jupiter warning) |
 
 Pools are ranked by fee / active TVL. When a token has several pools, the highest ranked one is kept and the next
 token takes the free slot, so the top `AUTO_CANDIDATES_PER_SCAN` (3) candidates are always different tokens. Each
@@ -222,16 +223,16 @@ still runs before opening.
 **Exits**: TP / SL / Trail come from the strategy (`TP_PCT`, `SL_PCT`, `TRAIL_*`; 0 = off), not from the Auto Exit
 defaults, and stay editable per trade in `/positions`. On top of that, strategy exits close the trade with swap to SOL:
 
-| Reason         | Closes when                                                                      |
-| -------------- | -------------------------------------------------------------------------------- |
-| `cycle_done`   | `pct` mode: the trade flipped and price is above every flip leg (all token sold back to SOL) |
-| `trend_done`   | Ping-pong ended and price is above every leg (all token sold back to SOL)        |
-| `drain_weak`   | `DRAIN_EXIT=true`: ping-pong ended on a spike without chop — close at once        |
-| `trend_failed` | `DRAIN_EXIT=true`: ping-pong ended on the Supertrend turning bullish, then a 15m bar closed below it again |
+| Reason         | Closes when                                                                                                                           |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `cycle_done`   | `pct` mode: the trade flipped and price is above every flip leg (all token sold back to SOL)                                          |
+| `trend_done`   | Ping-pong ended and price is above every leg (all token sold back to SOL)                                                             |
+| `drain_weak`   | `DRAIN_EXIT=true`: ping-pong ended on a spike without chop — close at once                                                            |
+| `trend_failed` | `DRAIN_EXIT=true`: ping-pong ended on the Supertrend turning bullish, then a 15m bar closed below it again                            |
 | `pumped_away`  | Not flipped (or, in ping-pong, SOL waiting below the price after a spike) and price stays above the SOL range top for `OOR_ABOVE_MIN` |
-| `range_broken` | Price stays below the whole range (ping-pong: below every leg) for `OOR_BELOW_MIN` |
-| `volume_died`  | `LOW_VOLUME_BARS` closed 5m bars in a row below `MIN_VOLUME_5M_USD`              |
-| `max_hold`     | The trade is open for `MAX_HOLD_MIN` minutes (1440; a ping-pong round takes ~4 h) |
+| `range_broken` | Price stays below the whole range (ping-pong: below every leg) for `OOR_BELOW_MIN`                                                    |
+| `volume_died`  | `LOW_VOLUME_BARS` closed 5m bars in a row below `MIN_VOLUME_5M_USD`                                                                   |
+| `max_hold`     | The trade is open for `MAX_HOLD_MIN` minutes (1440; a ping-pong round takes ~4 h)                                                     |
 
 **Limits**: at most `MAX_OPEN` auto trades, one open auto trade per token, a cooldown per token after a close
 (`AUTO_COOLDOWN_MIN`, longer after a loss: `AUTO_COOLDOWN_LOSS_MIN`), and failed entries use
@@ -276,10 +277,10 @@ range % and flip %. `--since` is a WIB date. Once there are live trades with pre
 
 ## Settings and toggles
 
-| Toggle     | First-start value | Effect                                                 |
-| ---------- | ----------------- | ------------------------------------------------------ |
-| Auto Exit  | ON                | Attach TP / SL / Trail defaults to new trades          |
-| Auto Entry | OFF               | Screen Meteora pools and run the bidask flip strategy  |
+| Toggle     | First-start value | Effect                                                |
+| ---------- | ----------------- | ----------------------------------------------------- |
+| Auto Exit  | ON                | Attach TP / SL / Trail defaults to new trades         |
+| Auto Entry | OFF               | Screen Meteora pools and run the bidask flip strategy |
 
 The toggles are saved in `settings.json`. They take effect without a restart and are the only on/off switch for
 these features.
@@ -291,12 +292,12 @@ Every key of `strat.conf` can be edited from `/settings`, grouped by its `# ====
 - **🐼 Exit strategy**: Evil Panda — the `Exit strategy · …` sections.
 - **🛠 Advanced**: every other section (General, Paper trading simulator, Transactions, Swap & sweep, Monitoring,
   Market data & rate limits, Logs) and **Reset all overrides**.
-The comment block right under a section header is shown as that section's description, and the comment above each
-key as its help. Changing a value there saves it as an override in `settings.json`
-(`stratOverrides`); `strat.conf` stays the committed default and **↩ Reset to default** / **Reset all overrides**
-go back to it. Overrides apply right away, except keys marked ⟳ (loop intervals, log level/retention, rate
-limits), which apply after a restart. Precedence: `.env` < `strat.conf` < overrides. Secrets and `DRY_RUN` live
-only in `.env` and are never shown.
+  The comment block right under a section header is shown as that section's description, and the comment above each
+  key as its help. Changing a value there saves it as an override in `settings.json`
+  (`stratOverrides`); `strat.conf` stays the committed default and **↩ Reset to default** / **Reset all overrides**
+  go back to it. Overrides apply right away, except keys marked ⟳ (loop intervals, log level/retention, rate
+  limits), which apply after a restart. Precedence: `.env` < `strat.conf` < overrides. Secrets and `DRY_RUN` live
+  only in `.env` and are never shown.
 
 ## Upgrading from the old bot
 
