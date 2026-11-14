@@ -305,6 +305,12 @@ test("buildTradeDetail shows status, value, PnL, fees, range bar and exits", () 
   assert.ok(text.includes("Peak PnL +6.50%"), text);
   assert.ok(text.includes("deposit 1 SOL"), text);
   assert.ok(text.includes("Origin manual"), text);
+  const POOL = "FGYeYHkSoyB17pEsC94wEQusuM7RzrtzMiC2wRxPVgnk";
+  const linked = buildTradeDetail({ ...trade, pool: POOL }, live).text;
+  assert.ok(
+    linked.includes(`Pool <a href="https://www.meteora.ag/dlmm/${POOL}?referrer=portfolio">FGYe…Vgnk</a> · `),
+    linked
+  );
 
   const adopted = { ...trade, baseMint: "not a mint", origin: "external", range: null, peakPnlPct: null };
   const plain = buildTradeDetail(adopted, null).text;

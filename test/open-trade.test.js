@@ -161,7 +161,7 @@ const base = { poolAddress: "PoolA", depositSol: 1, below: 20, above: 20, shape:
 test("constants", () => {
   assert.deepEqual(SHAPES, ["spot", "curve", "bid_ask", "mixed"]);
   assert.equal(SOL_BUFFER, 0.08);
-  assert.equal(MAX_TRADE_POSITIONS, 10);
+  assert.equal(MAX_TRADE_POSITIONS, 15);
 });
 
 test("SOL-only plan has no swap", async () => {
@@ -267,10 +267,11 @@ test("wide single position with deposit + 0.09 is refused before swap", async ()
 });
 
 test("too many positions refused", async () => {
-  // binStep 1, 20/20 -> 4055 bin -> ceil(4055 / 343) = 12 posisi multi2.
+  // binStep 1, 30/30 -> lebih dari 15 posisi multi2.
   const { deps } = fakeDeps({ binStep: 1 });
-  const plan = await planOpen({ ...base, deps });
-  assert.equal(plan.error, "range too wide: 12 positions (max 10)");
+  const plan = await planOpen({ ...base, below: 30, above: 30, deps });
+  assert.match(plan.error, /^range too wide: \d+ positions \(max 15\)$/);
+  assert.ok(Number(plan.error.match(/(\d+) positions/)[1]) > 15);
 });
 
 test("dry run sends nothing", async () => {

@@ -209,6 +209,12 @@ function pairLink(trade) {
   return BASE58.test(trade.baseMint ?? "") ? `<a href="https://gmgn.ai/sol/token/${trade.baseMint}">${name}</a>` : name;
 }
 
+// Alamat pool (disingkat) sebagai link halaman pool Meteora.
+function poolLink(pool) {
+  const short = shortAddr(pool);
+  return BASE58.test(pool ?? "") ? `<a href="https://www.meteora.ag/dlmm/${pool}?referrer=portfolio">${short}</a>` : short;
+}
+
 function statusTag(inRange) {
   if (inRange === true) return "🟢 IN";
   if (inRange === false) return "🔴 OUT";
@@ -250,7 +256,7 @@ export function buildTradeDetail(trade, live, now = Date.now()) {
     `Peak PnL ${fmtPct(trade.peakPnlPct)}`,
     trade.exit?.panda?.on && trade.panda?.armed ? "🐼 Evil Panda armed — waiting for a spike" : null,
     pingPongLine(trade),
-    `Pool ${shortAddr(trade.pool)} · ${legs} position(s)${deposit}`,
+    `Pool ${poolLink(trade.pool)} · ${legs} position(s)${deposit}`,
     `Origin ${esc(trade.origin ?? "?")} · opened ${fmtWib(trade.openedAt)}`,
   ]
     .filter((line) => line != null)

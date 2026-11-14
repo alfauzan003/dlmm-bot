@@ -330,7 +330,7 @@ test("tokenOnlyRange uses explicit bins when given, else the fallback range", ()
 test("planFlip refuses ineligible shape and full trades", async () => {
   const { deps } = fakeDeps();
   assert.ok((await planFlip(newTrade({ shape: "spot" }), { deps })).error);
-  const full = newTrade({ positions: Array.from({ length: 10 }, (_, i) => `L${i + 1}`) });
+  const full = newTrade({ positions: Array.from({ length: 15 }, (_, i) => `L${i + 1}`) });
   assert.match((await planFlip(full, { deps })).error, /too many positions/);
 });
 
@@ -591,7 +591,7 @@ test("forward flip uses ping-pong SOL legs as a source", async () => {
 });
 
 test("planFlip flags the position cap", async () => {
-  const positions = Array.from({ length: 10 }, (_, i) => `L${i + 1}`);
+  const positions = Array.from({ length: 15 }, (_, i) => `L${i + 1}`);
   const trade = newTrade({ positions });
   const { deps } = fakeDeps();
   const res = await flipTrade(trade, { deps, side: "sol" });
